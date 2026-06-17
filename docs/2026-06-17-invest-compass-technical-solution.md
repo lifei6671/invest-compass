@@ -182,28 +182,27 @@ invest-compass/
 │           ├── api.schema.json
 │           ├── openapi.yaml
 │           └── types/
-│
-├── core/
-│   ├── cmd/
-│   │   └── invest-compass-core/
-│   │       └── main.go
-│   ├── internal/
-│   │   ├── server/
-│   │   ├── market/
-│   │   ├── stock/
-│   │   ├── news/
-│   │   ├── report/
-│   │   ├── indicator/
-│   │   ├── ai/
-│   │   ├── prompt/
-│   │   ├── task/
-│   │   ├── storage/
-│   │   ├── config/
-│   │   ├── cache/
-│   │   └── logger/
-│   ├── migrations/
-│   ├── go.mod
-│   └── go.sum
+│   └── sidecar-core/
+│       ├── cmd/
+│       │   └── invest-compass-core/
+│       │       └── main.go
+│       ├── internal/
+│       │   ├── server/
+│       │   ├── market/
+│       │   ├── stock/
+│       │   ├── news/
+│       │   ├── report/
+│       │   ├── indicator/
+│       │   ├── ai/
+│       │   ├── prompt/
+│       │   ├── task/
+│       │   ├── storage/
+│       │   ├── config/
+│       │   ├── cache/
+│       │   └── logger/
+│       ├── migrations/
+│       ├── go.mod
+│       └── go.sum
 │
 ├── docs/
 │   ├── architecture.md
@@ -1660,14 +1659,14 @@ cd apps/desktop && pnpm tauri dev
 cd apps/desktop && pnpm tauri build
 ```
 
-Go core 单独运行：
+Go sidecar 单独运行：
 
 ```bash
-cd core
+cd apps/sidecar-core
 go run ./cmd/invest-compass-core \
   --host=127.0.0.1 \
   --port=18888 \
-  --workspace=../.data \
+  --workspace=../../.data \
   --auth-stdin
 ```
 

@@ -38,8 +38,8 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: core/go.mod
-          cache-dependency-path: core/go.mod
+          go-version-file: apps/sidecar-core/go.mod
+          cache-dependency-path: apps/sidecar-core/go.mod
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

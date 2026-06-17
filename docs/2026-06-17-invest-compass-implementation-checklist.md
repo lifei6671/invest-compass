@@ -102,7 +102,7 @@ P7 跨平台桌面能力、打包、发布验收
   - `apps/pnpm-workspace.yaml`
   - `apps/desktop/`
   - `apps/frontend/`
-  - `core/`
+  - `apps/sidecar-core/`
   - `apps/packages/shared/`
   - `scripts/`
 - 执行动作：
@@ -143,8 +143,8 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[x]`
 - 依赖：T01
 - 交付物：
-  - `core/cmd/invest-compass-core/main.go`
-  - `core/internal/server`
+  - `apps/sidecar-core/cmd/invest-compass-core/main.go`
+  - `apps/sidecar-core/internal/server`
   - `/internal/health`
 - 执行动作：
   - 只监听 `127.0.0.1`。
@@ -198,7 +198,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 当前进展：
   - 已实现 Rust sidecar token、stdin 握手、ready JSON 解析、health/shutdown client 和 `core_health` 白名单 command。
   - 已补 Go `/internal/shutdown`，合法 token 才能触发关闭回调。
-  - 已补 `pnpm core:build-sidecar`，默认产物为 `apps/desktop/src-tauri/binaries/invest-compass-core`。
+  - 已补 `pnpm sidecar:build`，默认产物为 `apps/desktop/src-tauri/binaries/invest-compass-core`。
   - 已验证项目内 sidecar 二进制 stdin 握手、health、非 POST 拒绝和 shutdown 后进程退出。
 
 ### T06 Rust command 白名单代理基线
@@ -252,8 +252,8 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[ ]`
 - 依赖：T03
 - 交付物：
-  - `core/migrations/`
-  - `core/internal/storage`
+  - `apps/sidecar-core/migrations/`
+  - `apps/sidecar-core/internal/storage`
   - 初始 schema migration。
 - 执行动作：
   - 建立 `stocks`、`watchlists`、`quotes`、`klines`、`news_items`。
@@ -290,7 +290,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[ ]`
 - 依赖：T03
 - 交付物：
-  - `core/internal/logger`
+  - `apps/sidecar-core/internal/logger`
   - 统一错误响应。
   - secret redaction。
 - 执行动作：
@@ -334,7 +334,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[ ]`
 - 依赖：T09
 - 交付物：
-  - `core/internal/stock`
+  - `apps/sidecar-core/internal/stock`
   - Symbol parser / validator。
 - 执行动作：
   - 支持 `CN:SH:600519`、`CN:SZ:300750`、`HK:00700`、`US:AAPL` 等格式。
@@ -427,7 +427,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[ ]`
 - 依赖：T16
 - 交付物：
-  - `core/internal/indicator`
+  - `apps/sidecar-core/internal/indicator`
   - `/api/market/indicators`
   - `market_indicators`
 - 执行动作：
@@ -445,7 +445,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[ ]`
 - 依赖：T12、T10
 - 交付物：
-  - `core/internal/news`
+  - `apps/sidecar-core/internal/news`
   - `/api/news/list`
   - `/api/news/market`
   - 对应 Rust command。
@@ -528,7 +528,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[ ]`
 - 依赖：T21
 - 交付物：
-  - `core/internal/ai`
+  - `apps/sidecar-core/internal/ai`
   - OpenAI-compatible chat / stream chat。
 - 执行动作：
   - 支持 base URL、model、temperature、max_tokens、timeout。
@@ -567,7 +567,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[ ]`
 - 依赖：T17、T18、T23
 - 交付物：
-  - `core/internal/prompt`
+  - `apps/sidecar-core/internal/prompt`
   - 个股综合分析 Prompt builder。
   - 技术面分析 Prompt builder。
 - 执行动作：
@@ -589,7 +589,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[ ]`
 - 依赖：T09、T10
 - 交付物：
-  - `core/internal/task`
+  - `apps/sidecar-core/internal/task`
   - tasks / task_events 写入逻辑。
 - 执行动作：
   - 支持 `PENDING`、`RUNNING`、`SUCCESS`、`FAILED`、`CANCELLED`。
@@ -1101,7 +1101,7 @@ git diff --check
 cd apps && pnpm install
 cd apps && pnpm build
 cd apps && pnpm test
-go test ./...
+cd apps/sidecar-core && go test ./...
 cargo check
 cd apps/desktop && pnpm tauri build
 ```

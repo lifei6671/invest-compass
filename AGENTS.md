@@ -458,7 +458,7 @@ git diff --check
 cd apps && pnpm install
 cd apps && pnpm build
 cd apps && pnpm test
-go test ./...
+cd apps/sidecar-core && go test ./...
 cargo check
 cd apps/desktop && pnpm tauri build
 ```
@@ -531,8 +531,8 @@ cd apps/desktop && pnpm tauri build
 - README
 - 技术方案
 - 实施任务清单
-- Go core：`core/`
+- Go sidecar：`apps/sidecar-core/`
 - JS / pnpm workspace：`apps/`
 - Rust / Tauri crate：`apps/desktop/src-tauri/`
 
-不要把 Rust 或 JS workspace 配置重新放回仓库根目录。根目录只保留项目级文档、规则、CI、Go core 和脚本入口。
+不要把 Go、Rust 或 JS workspace 配置重新放回仓库根目录。根目录只保留项目级文档、规则、CI 和脚本入口。

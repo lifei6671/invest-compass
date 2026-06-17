@@ -12,8 +12,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/lifei6671/invest-compass/core/internal/server"
-	"github.com/lifei6671/invest-compass/core/internal/sidecar"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/server"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/sidecar"
 )
 
 const version = "0.1.0"

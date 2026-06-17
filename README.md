@@ -44,7 +44,7 @@
 - pnpm workspace：`apps/package.json`、`apps/pnpm-workspace.yaml`
 - 前端应用：`apps/frontend/`
 - 桌面壳：`apps/desktop/`
-- Go core：`core/`
+- Go sidecar：`apps/sidecar-core/`
 - 共享契约目录：`apps/packages/shared/`
 - 自动化脚本目录：`scripts/`
 
@@ -65,7 +65,7 @@ cd apps && pnpm install
 cd apps && pnpm build
 cd apps && pnpm test
 cd apps && pnpm check
-cd core && go test ./...
+cd apps/sidecar-core && go test ./...
 cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
 git diff --check
 ```
