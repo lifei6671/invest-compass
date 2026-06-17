@@ -6,6 +6,8 @@ import "regexp"
 const RedactedValue = "[REDACTED]"
 
 var sensitivePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)("?(authorization|proxy-authorization)"?\s*:\s*)"?[^"\r\n,}]+`),
+	regexp.MustCompile(`(?i)("?(api[_-]?key|apikey|license[_-]?key|licensekey|proxy[_-]?password|proxypassword)"?\s*:\s*)"?[^"\r\n,}]+`),
 	regexp.MustCompile(`(?i)(authorization|proxy-authorization)\s*:\s*[^\r\n]+`),
 	regexp.MustCompile(`(?i)(api[_-]?key|apikey|license[_-]?key|licensekey|proxy[_-]?password|proxypassword)\s*[:=]\s*[^\r\n,;]+`),
 	regexp.MustCompile(`(?i)(position[_-]?snapshot|position[_-]?input|holding[_-]?input|portfolio)\s*[:=]\s*[^\r\n]+`),

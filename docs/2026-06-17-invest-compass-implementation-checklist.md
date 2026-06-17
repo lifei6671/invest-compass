@@ -634,7 +634,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T25 任务状态机和事件持久化
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T09、T10
 - 交付物：
   - `apps/sidecar-core/internal/task`
@@ -649,6 +649,13 @@ P7 跨平台桌面能力、打包、发布验收
   - 敏感字段不会进入事件 payload。
 - 退出条件：
   - 长任务有可恢复、可查询的状态和事件基础。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/task` 纯状态机和事件模型。
+  - 已实现 `PENDING`、`RUNNING`、`SUCCESS`、`FAILED`、`CANCELLED` 状态定义和合法流转校验。
+  - 已实现 `TASK_CREATED`、`TASK_STARTED`、`TASK_PROGRESS`、`TASK_LOG`、`TASK_CHUNK`、`TASK_SUCCESS`、`TASK_FAILED`、`TASK_CANCELLED` 事件类型。
+  - 已实现事件 payload 入库前统一脱敏、按 id 递增回放、RUNNING 任务恢复为终态的基础决策。
+  - 单测覆盖非法状态迁移、事件状态映射、事件回放排序、RUNNING 恢复和敏感 payload 脱敏。
+  - 受 T09 依赖约束，tasks / task_events 数据库写入逻辑完成后再标记为 `[x]`。
 
 ### T26 分析任务创建和取消
 
