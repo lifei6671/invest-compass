@@ -559,7 +559,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T22 OpenAI-compatible Provider
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T21
 - 交付物：
   - `apps/sidecar-core/internal/ai`
@@ -573,6 +573,14 @@ P7 跨平台桌面能力、打包、发布验收
   - 请求日志不包含 Authorization。
 - 退出条件：
   - AI Provider 可被模型测试和分析任务复用。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/ai`，实现 OpenAI-compatible `/v1/chat/completions` 标准库 HTTP 客户端。
+  - 已支持 base URL、model、temperature、max_tokens、timeout、普通 chat 和 stream chat。
+  - 已支持 context cancellation，并将 401、429、5xx、取消/超时映射为稳定错误码。
+  - 流式响应支持 `data: ...` chunk 和 `[DONE]` 结束语义。
+  - Provider 错误会统一脱敏，错误文本不泄露 Authorization 或 API Key。
+  - mock server 单测覆盖成功、401、429、5xx、context cancellation 和流式 chunk。
+  - 受 T21 依赖约束，模型配置读取、系统凭据注入、真实连通性测试和分析任务复用接入后再标记为 `[x]`。
 
 ### T23 Prompt 模板 CRUD 和变量白名单
 
