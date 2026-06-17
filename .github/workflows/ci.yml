@@ -33,6 +33,7 @@ jobs:
         with:
           node-version: 25
           cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -50,6 +51,7 @@ jobs:
             apps/desktop/src-tauri -> target
 
       - name: Install frontend dependencies
+        working-directory: apps
         run: pnpm install --frozen-lockfile
 
       - name: Check whitespace
@@ -65,16 +67,20 @@ jobs:
 
       - name: Check formatting
         timeout-minutes: 5
+        working-directory: apps
         run: pnpm format:check
 
       - name: Typecheck and Rust check
         timeout-minutes: 10
+        working-directory: apps
         run: pnpm check
 
       - name: Run tests
         timeout-minutes: 10
+        working-directory: apps
         run: pnpm test
 
       - name: Build workspace
         timeout-minutes: 15
+        working-directory: apps
         run: pnpm build

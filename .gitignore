@@ -29,7 +29,7 @@ pnpm-debug.log*
 
 # Frontend build outputs
 dist/
-frontend/dist/
+apps/frontend/dist/
 apps/desktop/dist/
 
 # Tauri generated output

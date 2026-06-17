@@ -8,7 +8,7 @@ importers:
 
   .: {}
 
-  apps/desktop:
+  desktop:
     devDependencies:
       '@tauri-apps/cli':
         specifier: ^2.0.0

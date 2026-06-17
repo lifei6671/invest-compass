@@ -41,11 +41,11 @@
 - 技术方案：`docs/2026-06-17-invest-compass-technical-solution.md`
 - 实施清单：`docs/2026-06-17-invest-compass-implementation-checklist.md`
 - Agent 开发规则：`AGENTS.md`
-- pnpm workspace：`package.json`、`pnpm-workspace.yaml`
-- 前端应用：`frontend/`
+- pnpm workspace：`apps/package.json`、`apps/pnpm-workspace.yaml`
+- 前端应用：`apps/frontend/`
 - 桌面壳：`apps/desktop/`
 - Go core：`core/`
-- 共享契约目录：`packages/shared/`
+- 共享契约目录：`apps/packages/shared/`
 - 自动化脚本目录：`scripts/`
 
 ---
@@ -61,10 +61,10 @@ git diff --check
 工程骨架相关修改优先运行：
 
 ```bash
-pnpm install
-pnpm build
-pnpm test
-pnpm check
+cd apps && pnpm install
+cd apps && pnpm build
+cd apps && pnpm test
+cd apps && pnpm check
 cd core && go test ./...
 cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
 git diff --check

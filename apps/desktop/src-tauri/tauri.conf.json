@@ -7,7 +7,7 @@
     "beforeDevCommand": "pnpm --filter @invest-compass/frontend dev",
     "beforeBuildCommand": "pnpm --filter @invest-compass/frontend build",
     "devUrl": "http://127.0.0.1:1420",
-    "frontendDist": "../../../frontend/dist"
+    "frontendDist": "../../frontend/dist"
   },
   "app": {
     "windows": [

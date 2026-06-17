@@ -149,32 +149,39 @@ Tauri 负责桌面能力和安全边界，Go 负责业务能力。这样可以�
 ```text
 invest-compass/
 ├── apps/
-│   └── desktop/
-│       ├── src-tauri/
-│       │   ├── src/
-│       │   │   ├── main.rs
-│       │   │   ├── commands/
-│       │   │   ├── sidecar/
-│       │   │   ├── security/
-│       │   │   └── updater/
-│       │   ├── binaries/
-│       │   ├── capabilities/
-│       │   ├── tauri.conf.json
-│       │   └── Cargo.toml
-│       └── package.json
-│
-├── frontend/
-│   ├── src/
-│   │   ├── app/
-│   │   ├── pages/
-│   │   ├── components/
-│   │   ├── features/
-│   │   ├── services/
-│   │   ├── stores/
-│   │   ├── types/
-│   │   └── styles/
-│   ├── vite.config.ts
-│   └── package.json
+│   ├── package.json
+│   ├── pnpm-workspace.yaml
+│   ├── desktop/
+│   │   ├── src-tauri/
+│   │   │   ├── src/
+│   │   │   │   ├── main.rs
+│   │   │   │   ├── commands/
+│   │   │   │   ├── sidecar/
+│   │   │   │   ├── security/
+│   │   │   │   └── updater/
+│   │   │   ├── binaries/
+│   │   │   ├── capabilities/
+│   │   │   ├── tauri.conf.json
+│   │   │   ├── Cargo.toml
+│   │   │   └── Cargo.lock
+│   │   └── package.json
+│   ├── frontend/
+│   │   ├── src/
+│   │   │   ├── app/
+│   │   │   ├── pages/
+│   │   │   ├── components/
+│   │   │   ├── features/
+│   │   │   ├── services/
+│   │   │   ├── stores/
+│   │   │   ├── types/
+│   │   │   └── styles/
+│   │   ├── vite.config.ts
+│   │   └── package.json
+│   └── packages/
+│       └── shared/
+│           ├── api.schema.json
+│           ├── openapi.yaml
+│           └── types/
 │
 ├── core/
 │   ├── cmd/
@@ -198,12 +205,6 @@ invest-compass/
 │   ├── go.mod
 │   └── go.sum
 │
-├── packages/
-│   └── shared/
-│       ├── api.schema.json
-│       ├── openapi.yaml
-│       └── types/
-│
 ├── docs/
 │   ├── architecture.md
 │   ├── api.md
@@ -217,8 +218,6 @@ invest-compass/
 │   ├── dev.ts
 │   └── release.ts
 │
-├── package.json
-├── pnpm-workspace.yaml
 └── README.md
 ```
 
@@ -1654,11 +1653,11 @@ Git
 ### 14.2 本地开发命令
 
 ```bash
-pnpm install
-pnpm dev
-pnpm build
-pnpm tauri dev
-pnpm tauri build
+cd apps && pnpm install
+cd apps && pnpm dev
+cd apps && pnpm build
+cd apps/desktop && pnpm tauri dev
+cd apps/desktop && pnpm tauri build
 ```
 
 Go core 单独运行：

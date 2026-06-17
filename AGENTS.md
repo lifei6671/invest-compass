@@ -455,12 +455,12 @@ git diff --check
 初始建议命令，实际以仓库文件为准：
 
 ```bash
-pnpm install
-pnpm build
-pnpm test
+cd apps && pnpm install
+cd apps && pnpm build
+cd apps && pnpm test
 go test ./...
 cargo check
-pnpm tauri build
+cd apps/desktop && pnpm tauri build
 ```
 
 长时间测试和构建需要设置合理超时。
@@ -524,18 +524,15 @@ pnpm tauri build
 
 ## 17. 当前仓库状态提示
 
-当前仓库处于项目早期规划阶段。
+当前仓库已落地首版工程骨架和 sidecar 安全启动主链路。
 
 已存在：
 
 - README
 - 技术方案
 - 实施任务清单
+- Go core：`core/`
+- JS / pnpm workspace：`apps/`
+- Rust / Tauri crate：`apps/desktop/src-tauri/`
 
-尚未落地完整代码骨架时：
-
-- 不要假设 `package.json`、`go.mod`、`Cargo.toml` 已存在。
-- 不要直接运行不存在的构建命令。
-- docs-only 变更使用 `git diff --check` 做最小验证。
-
-后续一旦完成 T01，需要回到本文件更新实际命令和目录结构。
+不要把 Rust 或 JS workspace 配置重新放回仓库根目录。根目录只保留项目级文档、规则、CI、Go core 和脚本入口。

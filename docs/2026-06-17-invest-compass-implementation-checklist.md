@@ -98,12 +98,12 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[x]`
 - 依赖：T00
 - 交付物：
-  - `package.json`
-  - `pnpm-workspace.yaml`
+  - `apps/package.json`
+  - `apps/pnpm-workspace.yaml`
   - `apps/desktop/`
-  - `frontend/`
+  - `apps/frontend/`
   - `core/`
-  - `packages/shared/`
+  - `apps/packages/shared/`
   - `scripts/`
 - 执行动作：
   - 建立 pnpm workspace。
@@ -111,7 +111,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 建立 Tauri v2 桌面应用目录。
   - 建立 shared API schema 目录。
 - 验证：
-  - `pnpm install`
+  - `cd apps && pnpm install`
   - `go test ./...`
   - `cargo check` 或项目定义的 Tauri Rust 检查命令。
 - 退出条件：
@@ -1098,12 +1098,12 @@ git diff --check
 项目骨架落地后，优先使用仓库实际定义的命令。初始建议如下，落地后以 `package.json`、`Makefile`、`Cargo.toml`、`go.mod` 为准：
 
 ```bash
-pnpm install
-pnpm build
-pnpm test
+cd apps && pnpm install
+cd apps && pnpm build
+cd apps && pnpm test
 go test ./...
 cargo check
-pnpm tauri build
+cd apps/desktop && pnpm tauri build
 ```
 
 跨平台和真实桌面能力必须补充手工验收：
