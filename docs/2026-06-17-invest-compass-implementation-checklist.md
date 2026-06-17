@@ -864,6 +864,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 前端具备真实 command 调用基础。
 - 当前进展：
   - 已新增前端/shared 源码安全扫描，禁止 renderer 使用 `localStorage`、`sessionStorage`、`indexedDB` 保存敏感状态，禁止直连 Go core 和处理 runtime token。
+  - 已新增前端生产源码 mock 数据扫描，禁止 `mock` / `fake` / `dummy` / `fixture` / `demo` / `sample` 业务数据和硬编码投研数据伪装真实能力。
 
 ### T31 Dashboard 页面
 
@@ -1178,6 +1179,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增 `docs/2026-06-18-invest-compass-acceptance-report.md` 作为首版总体验收基线。
   - 验收报告已按技术方案第 19 章逐项映射当前状态，明确区分“部分通过”“未通过”和“未执行”。
   - 验收报告已记录 macOS / Windows 真实验收待办、已知风险、遗留项和复测入口。
+  - 已新增前端生产源码 mock 数据扫描，作为“界面绝对不能 mock 数据”的自动化防线；完整 UI 验收仍需页面完成后逐屏执行。
 - 待完成：
   - 完成真实 macOS / Windows 桌面启动、sidecar、凭据、通知、托盘、打包验收。
   - 完成 T08/T09/T20/T21/T25-T29/T39-T42 等依赖项后，重新执行完整验收。

@@ -99,6 +99,10 @@ test("前端和共享契约禁止暴露 Go core、runtime token 或内部密钥�
   assert.deepEqual(findRendererBoundaryLeaks(rendererBoundarySources), []);
 });
 
+test("前端生产源码禁止 mock 数据伪装真实能力", () => {
+  assert.deepEqual(findRendererMockDataUsage(rendererBoundarySources), []);
+});
+
 test("前端安全扫描能识别直连 Go core 和内部密钥字段", () => {
   const unsafeSource = `
     const resolved_api_key = "secret";
@@ -115,6 +119,20 @@ test("前端安全扫描能识别直连 Go core 和内部密钥字段", () => {
     "renderer source 使用浏览器持久化存储保存敏感状态",
     "renderer source 直连本地 Go core 地址",
     "renderer source 处理 runtime token header",
+  ]);
+});
+
+test("前端 mock 数据扫描能识别伪造投研数据入口", () => {
+  const unsafeSource = `
+    const mockStocks = [{ symbol: "CN:SH:600519", price: 123.45 }];
+    const fakeReport = { title: "AI report", content: "demo" };
+    const demoTasks = [];
+  `;
+
+  assert.deepEqual(findRendererMockDataUsage([unsafeSource]), [
+    "renderer source 包含 mock/fake/dummy/fixture 数据入口",
+    "renderer source 包含 demo/sample 业务数据入口",
+    "renderer source 包含硬编码投研业务数据",
   ]);
 });
 
@@ -218,4 +236,31 @@ function findRendererBoundaryLeaks(sources) {
       .filter((check) => check.pattern.test(source))
       .map((check) => check.message),
   );
+}
+
+function findRendererMockDataUsage(sources) {
+  const checks = [
+    {
+      pattern: /\b(mock|fake|dummy|fixture)[A-Za-z0-9_]*\b/i,
+      message: "renderer source 包含 mock/fake/dummy/fixture 数据入口",
+    },
+    {
+      pattern: /\b(demo|sample)(Stocks?|Quotes?|Klines?|News|Reports?|Tasks?|Watchlists?|Data)\b/i,
+      message: "renderer source 包含 demo/sample 业务数据入口",
+    },
+    {
+      pattern: /\b(CN:(SH|SZ):\d{6}|HK:\d{5}|US:[A-Z]{1,5})\b[\s\S]*\b(price|quote|kline|report|task|news|watchlist|symbol)\b/i,
+      message: "renderer source 包含硬编码投研业务数据",
+    },
+  ];
+
+  return sources.flatMap((source) => {
+    const messages = new Set();
+    for (const check of checks) {
+      if (check.pattern.test(source)) {
+        messages.add(check.message);
+      }
+    }
+    return [...messages];
+  });
 }
