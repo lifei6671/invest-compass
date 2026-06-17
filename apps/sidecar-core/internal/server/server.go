@@ -5,8 +5,12 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/logger"
 )
 
 const tokenHeader = "X-Invest-Compass-Token"
@@ -38,7 +42,27 @@ type appHandler struct {
 
 // NewHandler 创建本地 HTTP handler，并把当前进程的 ready 状态和 token 边界注入进去。
 func NewHandler(config Config) http.Handler {
-	return appHandler{config: config}
+	return recoverHTTP(appHandler{config: config})
+}
+
+// recoverHTTP 将 handler panic 转为统一错误响应，并确保异常文本先脱敏再进入日志。
+func recoverHTTP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				context := requestContextFrom(request)
+				slog.Error(
+					"本地 HTTP handler panic",
+					logger.FieldRequestID, context.requestID,
+					logger.FieldTraceID, context.traceID,
+					"error", logger.RedactText(fmt.Sprint(recovered)),
+				)
+				writeError(response, http.StatusInternalServerError, 50000, "internal_error", context)
+			}
+		}()
+
+		next.ServeHTTP(response, request)
+	})
 }
 
 // ServeHTTP 统一处理本地 core API 的入口约束，确保所有请求先经过 POST 限制。

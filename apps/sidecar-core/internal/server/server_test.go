@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -117,6 +118,38 @@ func TestShutdownCallsConfiguredCallback(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("expected shutdown callback to run")
+	}
+}
+
+// TestRecoverHTTPRedactsPanicError 验证 panic 会转成统一错误响应，且不会泄露异常中的密钥。
+func TestRecoverHTTPRedactsPanicError(t *testing.T) {
+	handler := recoverHTTP(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(errors.New("provider failed with Authorization: Bearer sk-panic-secret"))
+	}))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/internal/health", nil)
+	request.Header.Set("X-Request-Id", "req-panic")
+	request.Header.Set("X-Trace-Id", "trace-panic")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, recorder.Code)
+	}
+	if strings.Contains(recorder.Body.String(), "sk-panic-secret") {
+		t.Fatalf("panic response leaked secret: %s", recorder.Body.String())
+	}
+
+	var response apiResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal panic response: %v", err)
+	}
+	if response.Code != 50000 || response.Message != "internal_error" {
+		t.Fatalf("unexpected panic envelope: %+v", response)
+	}
+	if response.RequestID != "req-panic" || response.TraceID != "trace-panic" {
+		t.Fatalf("expected propagated ids, got requestId=%q traceId=%q", response.RequestID, response.TraceID)
 	}
 }
 

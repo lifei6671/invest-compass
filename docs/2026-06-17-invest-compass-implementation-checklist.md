@@ -293,7 +293,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T10 统一日志、错误和脱敏
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：T03
 - 交付物：
   - `apps/sidecar-core/internal/logger`
@@ -308,6 +308,11 @@ P7 跨平台桌面能力、打包、发布验收
   - Provider 错误不包含完整请求头。
 - 退出条件：
   - 日志、错误、导出前都具备统一脱敏入口。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/logger`，提供稳定日志字段常量和统一脱敏入口。
+  - 脱敏覆盖 API Key、Authorization、Proxy-Authorization、代理密码、license key、用户一次性持仓输入。
+  - HTTP handler 已接入 panic recovery，panic 会返回统一错误 envelope，并在写入日志前脱敏。
+  - 单测覆盖字段契约、错误脱敏、密钥脱敏、nil error 和 panic recovery。
 
 ### T11 settings / workspace / cache API 基线
 
