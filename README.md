@@ -41,6 +41,7 @@
 - 技术方案：`docs/2026-06-17-invest-compass-technical-solution.md`
 - 实施清单：`docs/2026-06-17-invest-compass-implementation-checklist.md`
 - 首版发布与使用指南：`docs/2026-06-18-invest-compass-release-user-guide.md`
+- 首版总体验收报告：`docs/2026-06-18-invest-compass-acceptance-report.md`
 - Agent 开发规则：`AGENTS.md`
 - pnpm workspace：`apps/package.json`、`apps/pnpm-workspace.yaml`
 - 前端应用：`apps/frontend/`
