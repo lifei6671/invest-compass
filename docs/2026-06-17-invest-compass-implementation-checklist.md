@@ -497,7 +497,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T19 Dashboard summary 和 provider status
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T15、T16、T18
 - 交付物：
   - `/api/dashboard/summary`
@@ -511,6 +511,13 @@ P7 跨平台桌面能力、打包、发布验收
   - Provider 异常时 Dashboard 可显示可恢复错误。
 - 退出条件：
   - 总览页和数据源状态页没有假数据入口。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/dashboard` Dashboard 首版聚合规则模块。
+  - 已实现自选股涨跌平分布、最近报告、最近任务、市场新闻、风险提示和 provider status 安全展示模型。
+  - 已复用 `report`、`task`、`logger` 既有规则，报告过滤软删除并按 `task_id` 去重，任务按 `updated_at` 倒序，Provider 最近错误统一脱敏。
+  - 聚合结果不包含策略、公告、研报、资金流等首版不做字段。
+  - 单测覆盖自选涨跌分布、最近报告/任务/新闻排序截断、Provider 错误脱敏和不返回非 MVP 字段。
+  - 受 T15/T16/T18 依赖约束，`/api/dashboard/summary`、`/api/providers/status` 和对应 Rust command 接入真实数据后再标记为 `[x]`。
 
 ---
 
