@@ -1,6 +1,7 @@
 package logexport
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -58,5 +59,44 @@ func TestBuildBundleUsesStableMetadata(t *testing.T) {
 	}
 	if !bundle.CreatedAt.Equal(time.Date(2026, 6, 17, 1, 8, 7, 0, time.UTC)) {
 		t.Fatalf("unexpected created_at: %s", bundle.CreatedAt)
+	}
+}
+
+// TestValidateRequestRequiresTroubleshootingFields 验证日志导出前必须具备核心排障字段。
+func TestValidateRequestRequiresTroubleshootingFields(t *testing.T) {
+	err := ValidateRequest(Request{
+		Lines: []string{
+			`{"request_id":"req-1","task_id":"task-1","message":"missing trace"}`,
+		},
+	})
+
+	assertLogExportErrorCode(t, err, ErrorMissingTroubleshootingField)
+}
+
+// TestValidateRequestAcceptsTroubleshootingFields 验证 request_id、trace_id、task_id 同时存在时允许导出。
+func TestValidateRequestAcceptsTroubleshootingFields(t *testing.T) {
+	err := ValidateRequest(Request{
+		Lines: []string{
+			`{"request_id":"req-1","trace_id":"trace-1","task_id":"task-1","message":"ok"}`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ValidateRequest returned error: %v", err)
+	}
+}
+
+// assertLogExportErrorCode 校验日志导出错误码稳定。
+func assertLogExportErrorCode(t *testing.T, err error, code ErrorCode) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var exportError *Error
+	if !errors.As(err, &exportError) {
+		t.Fatalf("expected logexport Error, got %T", err)
+	}
+	if exportError.Code != code {
+		t.Fatalf("expected error code %q, got %q", code, exportError.Code)
 	}
 }
