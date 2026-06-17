@@ -750,7 +750,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T29 任务查询、事件回放和 RUNNING 恢复
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T25、T28
 - 交付物：
   - `/api/tasks/list`
@@ -766,6 +766,12 @@ P7 跨平台桌面能力、打包、发布验收
   - 事件回放按 afterEventId 返回增量。
 - 退出条件：
   - sidecar 崩溃或重启不会留下永久 RUNNING 任务。
+- 当前进展：
+  - 已在 `apps/sidecar-core/internal/task` 补充任务历史列表排序规则，按 `updated_at` 倒序返回。
+  - 已实现批量 `RUNNING` 任务恢复规则，复用单任务恢复逻辑，将悬挂任务恢复为终态并生成恢复事件。
+  - 已复用现有 `ReplayEvents` 支持 `afterEventId` 增量事件回放。
+  - 单测覆盖任务列表排序、批量 RUNNING 恢复和事件回放增量顺序。
+  - 受 T09/T25/T28 依赖约束，数据库扫描、`/api/tasks/*`、Rust command 和真实任务历史页接入后再标记为 `[x]`。
 
 ---
 

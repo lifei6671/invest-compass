@@ -162,6 +162,15 @@ func ReplayEvents(events []Event, afterEventID int64) []Event {
 	return filtered
 }
 
+// ListTasksByUpdatedAt 按 updated_at 倒序返回任务历史列表。
+func ListTasksByUpdatedAt(tasks []Task) []Task {
+	listed := append([]Task(nil), tasks...)
+	sort.SliceStable(listed, func(left int, right int) bool {
+		return listed[left].UpdatedAt.After(listed[right].UpdatedAt)
+	})
+	return listed
+}
+
 // RecoverRunningTask 将 RUNNING 任务恢复成终态，避免 sidecar 重启后永久悬挂。
 func RecoverRunningTask(task Task) (Task, Event) {
 	if task.Status != StatusRunning {
@@ -180,4 +189,18 @@ func RecoverRunningTask(task Task) (Task, Event) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+}
+
+// RecoverRunningTasks 批量恢复 RUNNING 任务，并返回需要持久化的恢复事件。
+func RecoverRunningTasks(tasks []Task) ([]Task, []Event) {
+	recoveredTasks := make([]Task, 0, len(tasks))
+	events := make([]Event, 0)
+	for _, current := range tasks {
+		recovered, event := RecoverRunningTask(current)
+		recoveredTasks = append(recoveredTasks, recovered)
+		if event.Type != "" {
+			events = append(events, event)
+		}
+	}
+	return recoveredTasks, events
 }

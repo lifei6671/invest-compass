@@ -122,6 +122,48 @@ func TestRecoverRunningTaskReturnsTerminalStatus(t *testing.T) {
 	}
 }
 
+// TestListTasksByUpdatedAtDesc 验证任务历史列表按更新时间倒序返回。
+func TestListTasksByUpdatedAtDesc(t *testing.T) {
+	tasks := []Task{
+		{ID: "task-old", UpdatedAt: time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC)},
+		{ID: "task-new", UpdatedAt: time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)},
+		{ID: "task-mid", UpdatedAt: time.Date(2026, 6, 17, 11, 0, 0, 0, time.UTC)},
+	}
+
+	listed := ListTasksByUpdatedAt(tasks)
+
+	if len(listed) != 3 {
+		t.Fatalf("expected 3 tasks, got %d", len(listed))
+	}
+	if listed[0].ID != "task-new" || listed[1].ID != "task-mid" || listed[2].ID != "task-old" {
+		t.Fatalf("unexpected task order: %+v", listed)
+	}
+}
+
+// TestRecoverRunningTasksOnlyRecoversRunning 验证 core 启动恢复只处理 RUNNING 任务。
+func TestRecoverRunningTasksOnlyRecoversRunning(t *testing.T) {
+	tasks := []Task{
+		{ID: "task-running-1", Type: TypeAnalysis, Status: StatusRunning},
+		{ID: "task-success", Type: TypeAnalysis, Status: StatusSuccess},
+		{ID: "task-running-2", Type: TypeAnalysis, Status: StatusRunning},
+	}
+
+	recovered, events := RecoverRunningTasks(tasks)
+
+	if len(recovered) != 3 {
+		t.Fatalf("expected 3 recovered tasks, got %d", len(recovered))
+	}
+	if recovered[0].Status != StatusFailed || recovered[1].Status != StatusSuccess || recovered[2].Status != StatusFailed {
+		t.Fatalf("unexpected recovered statuses: %+v", recovered)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 recovery events, got %d", len(events))
+	}
+	if events[0].TaskID != "task-running-1" || events[1].TaskID != "task-running-2" {
+		t.Fatalf("unexpected recovery events: %+v", events)
+	}
+}
+
 // TestFormatSSEEventRedactsPayload 验证 SSE 转发前会保留事件元信息并脱敏 payload。
 func TestFormatSSEEventRedactsPayload(t *testing.T) {
 	frame := FormatSSEEvent(Event{
