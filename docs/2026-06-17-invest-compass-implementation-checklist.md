@@ -777,6 +777,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 当前进展：
   - 已在 `apps/sidecar-core/internal/task` 新增任务事件 SSE 帧编码基础能力。
   - 已复用 `ReplayEvents` 支持 afterEventID 之后的事件补拉和按事件 ID 递增排序。
+  - 已支持多行 payload 按标准 SSE `data:` 行逐行编码，避免流式日志或 chunk 破坏事件帧。
   - SSE 帧包含 `id`、`event`、`data`，转发前统一复用事件 payload 脱敏。
   - 单测覆盖 SSE 帧结构、payload 脱敏和 afterEventID 补拉编码顺序。
   - 受 T25/T26 数据库持久化和真实任务链路约束，`/api/tasks/events/stream`、`/api/tasks/events`、Rust 订阅转发和前端真实进度展示接入后再标记为 `[x]`。

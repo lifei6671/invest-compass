@@ -190,6 +190,23 @@ func TestFormatSSEEventRedactsPayload(t *testing.T) {
 	}
 }
 
+// TestFormatSSEEventPrefixesEveryDataLine 验证多行 payload 会被编码为合法 SSE data 行。
+func TestFormatSSEEventPrefixesEveryDataLine(t *testing.T) {
+	frame := FormatSSEEvent(Event{
+		ID:      13,
+		TaskID:  "task-1",
+		Type:    EventLog,
+		Payload: "第一行\n第二行",
+	})
+
+	if !strings.Contains(frame, "data: 第一行\n") || !strings.Contains(frame, "data: 第二行\n") {
+		t.Fatalf("expected every payload line to use data prefix, got %q", frame)
+	}
+	if strings.Contains(frame, "\n第二行\n") {
+		t.Fatalf("SSE frame contains unprefixed payload line: %q", frame)
+	}
+}
+
 // TestFormatSSEReplayFramesUsesAfterEventID 验证 afterEventID 补拉后可直接编码为 SSE 帧。
 func TestFormatSSEReplayFramesUsesAfterEventID(t *testing.T) {
 	events := []Event{

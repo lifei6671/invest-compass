@@ -12,9 +12,12 @@ func FormatSSEEvent(event Event) string {
 	builder.WriteString("event: ")
 	builder.WriteString(string(event.Type))
 	builder.WriteString("\n")
-	builder.WriteString("data: ")
-	builder.WriteString(SanitizeEventPayload(event.Payload))
-	builder.WriteString("\n\n")
+	for _, line := range strings.Split(SanitizeEventPayload(event.Payload), "\n") {
+		builder.WriteString("data: ")
+		builder.WriteString(line)
+		builder.WriteString("\n")
+	}
+	builder.WriteString("\n")
 	return builder.String()
 }
 
