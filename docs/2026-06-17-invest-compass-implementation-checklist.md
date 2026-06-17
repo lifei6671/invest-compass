@@ -605,7 +605,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T24 Prompt 构建和合规输出约束
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T17、T18、T23
 - 交付物：
   - `apps/sidecar-core/internal/prompt`
@@ -620,6 +620,13 @@ P7 跨平台桌面能力、打包、发布验收
   - 生成 Prompt 不包含未支持变量。
 - 退出条件：
   - 分析任务可以稳定构建首版支持的 Prompt。
+- 当前进展：
+  - 已在 `apps/sidecar-core/internal/prompt` 中新增个股综合分析和技术面分析 Prompt builder。
+  - 已实现 System、Context、User 三层 Prompt 分离。
+  - System Prompt 固定包含“不构成投资建议”、风险、数据时效、事实/推断/观点区分、观察指标和用户自行决策提示。
+  - 用户一次性持仓输入只进入 User Prompt，不进入 System 或 Context。
+  - 单测覆盖缺失数据、含 userPosition、无 userPosition、合规文案和未替换变量残留。
+  - 受 T26 分析任务链路约束，任务创建流程接入后再标记为 `[x]`。
 
 ---
 

@@ -17,6 +17,8 @@ const (
 	ErrorUnsupportedTemplateType ErrorCode = "unsupported_prompt_template_type"
 	// ErrorUnsupportedVariable 表示模板使用了首版不支持的变量。
 	ErrorUnsupportedVariable ErrorCode = "unsupported_prompt_variable"
+	// ErrorMissingPromptData 表示 Prompt 构建缺少核心上下文数据。
+	ErrorMissingPromptData ErrorCode = "missing_prompt_data"
 )
 
 // Error 表示 Prompt 模板规则校验失败。
