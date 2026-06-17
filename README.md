@@ -34,12 +34,13 @@
 
 ## 当前仓库状态
 
-当前仓库已完成 `T00` 和 `T01`，处于首版工程骨架之后、sidecar 安全启动主链路实现之前。
+当前仓库处于首版实现推进阶段。任务状态以实施清单为准，不要从 README 推断阶段完成度。
 
 已存在：
 
 - 技术方案：`docs/2026-06-17-invest-compass-technical-solution.md`
 - 实施清单：`docs/2026-06-17-invest-compass-implementation-checklist.md`
+- 首版发布与使用指南：`docs/2026-06-18-invest-compass-release-user-guide.md`
 - Agent 开发规则：`AGENTS.md`
 - pnpm workspace：`apps/package.json`、`apps/pnpm-workspace.yaml`
 - 前端应用：`apps/frontend/`
@@ -77,3 +78,9 @@ git diff --check
 ## 合规边界
 
 Invest Compass 不是自动交易软件，也不是荐股软件。行情、新闻、技术指标和 AI 输出均用于研究辅助，不能替代用户独立判断。任何 UI、Prompt、报告和文档都必须保留风险提示和非投资建议声明。
+
+面向内测用户的安装、配置、使用、风险声明和发布检查见：
+
+```text
+docs/2026-06-18-invest-compass-release-user-guide.md
+```
