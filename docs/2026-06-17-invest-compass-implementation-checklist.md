@@ -1081,7 +1081,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T42 sidecar 二进制命名和打包
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T05、T39
 - 交付物：
   - macOS Apple Silicon sidecar。
@@ -1098,6 +1098,12 @@ P7 跨平台桌面能力、打包、发布验收
   - Windows x64 包可启动 core。
 - 退出条件：
   - 打包产物包含正确平台 sidecar 并可启动。
+- 当前进展：
+  - 已在 Rust sidecar 模块新增 Tauri sidecar target triple 文件名规则。
+  - 已覆盖 `aarch64-apple-darwin`、`x86_64-apple-darwin`、`x86_64-pc-windows-msvc` 的文件名。
+  - 当前平台默认 core 二进制路径复用同一命名规则。
+  - 单测覆盖三类首版目标平台文件名。
+  - `externalBin` 配置、跨平台 sidecar 构建产物和真实包启动验收仍未完成，后续需要配置/打包确认后继续。
 
 ### T43 发布文档、风险声明和用户手册
 

@@ -213,10 +213,26 @@ pub fn generate_runtime_token() -> String {
 
 /// 返回当前平台的 Go core 二进制文件名，Windows 使用 `.exe` 后缀。
 pub fn core_binary_file_name() -> &'static str {
-    if cfg!(windows) {
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        core_binary_file_name_for_target("aarch64-apple-darwin")
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        core_binary_file_name_for_target("x86_64-apple-darwin")
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        core_binary_file_name_for_target("x86_64-pc-windows-msvc")
+    } else if cfg!(windows) {
         "invest-compass-core.exe"
     } else {
         "invest-compass-core"
+    }
+}
+
+/// 按 target triple 返回 Tauri sidecar 二进制文件名。
+pub fn core_binary_file_name_for_target(target: &str) -> &'static str {
+    match target {
+        "aarch64-apple-darwin" => "invest-compass-core-aarch64-apple-darwin",
+        "x86_64-apple-darwin" => "invest-compass-core-x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc" => "invest-compass-core-x86_64-pc-windows-msvc.exe",
+        _ => "invest-compass-core",
     }
 }
 
@@ -431,6 +447,22 @@ mod tests {
             Path::new("/workspace/apps/desktop/src-tauri")
                 .join("binaries")
                 .join(core_binary_file_name())
+        );
+    }
+
+    #[test]
+    fn core_binary_file_name_for_target_uses_tauri_sidecar_triples() {
+        assert_eq!(
+            core_binary_file_name_for_target("aarch64-apple-darwin"),
+            "invest-compass-core-aarch64-apple-darwin"
+        );
+        assert_eq!(
+            core_binary_file_name_for_target("x86_64-apple-darwin"),
+            "invest-compass-core-x86_64-apple-darwin"
+        );
+        assert_eq!(
+            core_binary_file_name_for_target("x86_64-pc-windows-msvc"),
+            "invest-compass-core-x86_64-pc-windows-msvc.exe"
         );
     }
 }
