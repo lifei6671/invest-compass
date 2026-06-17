@@ -116,6 +116,39 @@ func (request ValidatedCreateRequest) InputSnapshotForLog() string {
 	return logger.RedactText(string(encoded))
 }
 
+// CreateTask 将已校验分析请求转换为待执行任务和创建事件。
+func CreateTask(request ValidatedCreateRequest, taskID string, now time.Time) (task.Task, task.Event) {
+	payload := map[string]any{
+		"symbol":             request.Symbol.String(),
+		"analysis_type":      request.AnalysisType,
+		"ai_config_id":       request.AIConfigID,
+		"prompt_template_id": request.PromptTemplateID,
+		"has_user_position":  request.UserPosition != nil,
+	}
+	encodedPayload, err := json.Marshal(payload)
+	if err != nil {
+		panic("failed to build analysis task created event payload")
+	}
+
+	createdTask := task.Task{
+		ID:        taskID,
+		Type:      task.TypeAnalysis,
+		Status:    task.StatusPending,
+		Title:     request.Symbol.String() + " " + string(request.AnalysisType),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	event := task.Event{
+		TaskID:    taskID,
+		Type:      task.EventCreated,
+		Payload:   task.SanitizeEventPayload(string(encodedPayload)),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	return createdTask, event
+}
+
 // CancelTask 将可取消任务切换为 CANCELLED，并生成对应任务事件。
 func CancelTask(existing task.Task) (task.Task, task.Event, error) {
 	if existing.Status.Terminal() {

@@ -1,9 +1,11 @@
 package analysis
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/task"
 )
@@ -75,6 +77,56 @@ func TestInputSnapshotForLogRedactsUserPosition(t *testing.T) {
 	}
 	if !strings.Contains(snapshot, "has_user_position") {
 		t.Fatalf("log snapshot should keep non-sensitive position presence: %s", snapshot)
+	}
+}
+
+// TestCreateTaskBuildsPendingTaskAndSafeCreatedEvent 验证分析创建请求会落成待执行任务和安全创建事件。
+func TestCreateTaskBuildsPendingTaskAndSafeCreatedEvent(t *testing.T) {
+	validated, err := ValidateCreateRequest(CreateRequest{
+		Symbol:           "cn:sh:600519",
+		AnalysisType:     AnalysisStockFull,
+		AIConfigID:       1,
+		PromptTemplateID: 2,
+		UserPosition: &UserPosition{
+			CostPrice: 1680,
+			Shares:    100,
+			RiskLevel: "medium",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ValidateCreateRequest returned error: %v", err)
+	}
+
+	now := time.Date(2026, 6, 17, 10, 30, 0, 0, time.UTC)
+	createdTask, event := CreateTask(validated, "task_abc123", now)
+
+	if createdTask.ID != "task_abc123" || createdTask.Type != task.TypeAnalysis || createdTask.Status != task.StatusPending {
+		t.Fatalf("unexpected created task: %+v", createdTask)
+	}
+	if createdTask.CreatedAt != now || createdTask.UpdatedAt != now {
+		t.Fatalf("created task should use supplied timestamp: %+v", createdTask)
+	}
+	if !strings.Contains(createdTask.Title, "CN:SH:600519") {
+		t.Fatalf("created task title should include normalized symbol: %s", createdTask.Title)
+	}
+	if event.TaskID != "task_abc123" || event.Type != task.EventCreated {
+		t.Fatalf("unexpected created event: %+v", event)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+		t.Fatalf("created event payload should be JSON: %v", err)
+	}
+	if payload["symbol"] != "CN:SH:600519" || payload["analysis_type"] != string(AnalysisStockFull) {
+		t.Fatalf("created event payload missing safe summary: %s", event.Payload)
+	}
+	if payload["has_user_position"] != true {
+		t.Fatalf("created event payload should keep position presence only: %s", event.Payload)
+	}
+	for _, secret := range []string{"1680", "100", "medium"} {
+		if strings.Contains(event.Payload, secret) {
+			t.Fatalf("created event payload leaked user position %q: %s", secret, event.Payload)
+		}
 	}
 }
 
