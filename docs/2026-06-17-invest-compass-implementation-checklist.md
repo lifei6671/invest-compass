@@ -440,7 +440,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T17 技术指标计算
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T16
 - 交付物：
   - `apps/sidecar-core/internal/indicator`
@@ -455,6 +455,11 @@ P7 跨平台桌面能力、打包、发布验收
   - 数据不足时返回明确错误或空结果语义。
 - 退出条件：
   - 前端无需自行计算业务指标。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/indicator` 纯计算模块。
+  - 已实现 MA、EMA、MACD、RSI、KDJ、BOLL、成交量均线、涨跌幅、区间最大回撤、区间波动率。
+  - 固定输入输出单测覆盖全部指标，并覆盖数据不足、非法周期、非法输入的稳定错误码。
+  - 受 T16 依赖约束，`/api/market/indicators` 和 `market_indicators` command 接入完成后再标记为 `[x]`。
 
 ### T18 新闻资讯基础能力
 
