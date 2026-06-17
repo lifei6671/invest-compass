@@ -360,6 +360,7 @@ mod tests {
     use serde_json::Value;
 
     #[test]
+    /// 验证 runtime token 使用随机十六进制密钥，避免固定值进入握手链路。
     fn generate_runtime_token_returns_random_hex_secret() {
         let first = generate_runtime_token();
         let second = generate_runtime_token();
@@ -372,6 +373,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证 stdin 握手只携带 token 和协议版本，不把端口或路径等运行细节暴露给 Go core。
     fn build_handshake_line_only_contains_token_and_protocol_version() {
         let line = build_handshake_line("runtime-token").expect("handshake should serialize");
         let payload: Value =
@@ -384,6 +386,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证 ready JSON 的成功状态可以被 Rust 解析成固定结构。
     fn parse_ready_message_accepts_ready_payload() {
         let ready = parse_ready_message(r#"{"status":"ready","port":58123,"pid":1201}"#)
             .expect("ready payload should parse");
@@ -394,6 +397,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证非 ready 状态会快速失败，避免 Rust 在未就绪 sidecar 上继续发请求。
     fn parse_ready_message_rejects_non_ready_status() {
         let err = parse_ready_message(r#"{"status":"starting","port":58123,"pid":1201}"#)
             .expect_err("non-ready status must fail");
@@ -402,6 +406,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证内部 URL 只能从 CoreClient 的本机端口和固定路径生成。
     fn core_client_builds_internal_urls_from_single_source() {
         let client = CoreClient::new(58123, "runtime-token".to_string());
 
@@ -413,6 +418,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证 Rust 到 Go core 的内部请求始终带 token、request id 和 trace id。
     fn build_internal_headers_includes_token_request_id_and_trace_id() {
         let headers = build_internal_headers("runtime-token");
 
@@ -429,6 +435,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证本地开发覆盖路径优先，便于在不改配置文件的情况下调试 sidecar。
     fn resolve_core_binary_path_uses_env_override_first() {
         let path = resolve_core_binary_path(
             Some("/tmp/custom-core".to_string()),
@@ -439,6 +446,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证默认 sidecar 路径收敛在 src-tauri/binaries 目录。
     fn resolve_core_binary_path_falls_back_to_project_binary_dir() {
         let path = resolve_core_binary_path(None, Path::new("/workspace/apps/desktop/src-tauri"));
 
@@ -451,6 +459,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证 Tauri sidecar 文件名按目标平台 triple 命名，支撑后续打包配置。
     fn core_binary_file_name_for_target_uses_tauri_sidecar_triples() {
         assert_eq!(
             core_binary_file_name_for_target("aarch64-apple-darwin"),
