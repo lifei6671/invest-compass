@@ -98,6 +98,7 @@ func assertComplianceText(t *testing.T, system string) {
 	for _, required := range []string{
 		"不构成投资建议",
 		"不承诺收益",
+		"买入信号",
 		"不直接替用户做买卖决策",
 		"风险",
 		"数据时效",

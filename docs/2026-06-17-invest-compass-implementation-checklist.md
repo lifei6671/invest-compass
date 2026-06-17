@@ -691,6 +691,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 已在 `apps/sidecar-core/internal/prompt` 中新增个股综合分析和技术面分析 Prompt builder。
   - 已实现 System、Context、User 三层 Prompt 分离。
   - System Prompt 固定包含“不构成投资建议”、风险、数据时效、事实/推断/观点区分、观察指标和用户自行决策提示。
+  - System Prompt 明确禁止“稳赚”“必涨”“买入信号”等诱导表达。
   - 用户一次性持仓输入只进入 User Prompt，不进入 System 或 Context。
   - 单测覆盖缺失数据、含 userPosition、无 userPosition、合规文案和未替换变量残留。
   - 受 T26 分析任务链路约束，任务创建流程接入后再标记为 `[x]`。
