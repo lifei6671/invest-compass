@@ -8,19 +8,23 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/logger"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/market"
 )
 
 const tokenHeader = "X-Invest-Compass-Token"
 
+// Config 是 Go core 本地 HTTP handler 的运行期依赖配置。
 type Config struct {
-	Version    string
-	Token      string
-	DBStatus   string
-	Ready      bool
-	OnShutdown func()
+	Version        string
+	Token          string
+	DBStatus       string
+	Ready          bool
+	MarketProvider market.MarketProvider
+	OnShutdown     func()
 }
 
 type apiResponse struct {
@@ -34,6 +38,20 @@ type apiResponse struct {
 type healthData struct {
 	Version  string `json:"version"`
 	DBStatus string `json:"dbStatus"`
+}
+
+// stockSearchRequest 是股票搜索 API 的请求体。
+type stockSearchRequest struct {
+	Keyword string `json:"keyword"`
+}
+
+// stockSearchResult 是股票搜索 API 对前端稳定暴露的基础信息字段。
+type stockSearchResult struct {
+	Symbol   string `json:"symbol"`
+	Name     string `json:"name"`
+	Code     string `json:"code"`
+	Market   string `json:"market"`
+	Exchange string `json:"exchange"`
 }
 
 type appHandler struct {
@@ -80,6 +98,8 @@ func (handler appHandler) ServeHTTP(response http.ResponseWriter, request *http.
 		handler.handleHealth(response, request, context)
 	case "/internal/shutdown":
 		handler.handleShutdown(response, request, context)
+	case "/api/stocks/search":
+		handler.handleStockSearch(response, request, context)
 	default:
 		writeError(response, http.StatusNotFound, 40400, "not_found", context)
 	}
@@ -130,6 +150,78 @@ func (handler appHandler) handleShutdown(response http.ResponseWriter, request *
 	if handler.config.OnShutdown != nil {
 		handler.config.OnShutdown()
 	}
+}
+
+// handleStockSearch 处理股票搜索请求，返回标准化股票基础信息。
+func (handler appHandler) handleStockSearch(response http.ResponseWriter, request *http.Request, context requestContext) {
+	if !handler.requireReadyToken(response, request, context) {
+		return
+	}
+	if handler.config.MarketProvider == nil {
+		writeError(response, http.StatusServiceUnavailable, 50301, "market_provider_unavailable", context)
+		return
+	}
+
+	var payload stockSearchRequest
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		writeError(response, http.StatusBadRequest, 40001, "invalid_json", context)
+		return
+	}
+
+	keyword := strings.TrimSpace(payload.Keyword)
+	if keyword == "" {
+		writeError(response, http.StatusBadRequest, 40002, "invalid_keyword", context)
+		return
+	}
+
+	stocks, err := handler.config.MarketProvider.Search(request.Context(), keyword)
+	if err != nil {
+		slog.Warn(
+			"股票搜索 Provider 调用失败",
+			logger.FieldRequestID, context.requestID,
+			logger.FieldTraceID, context.traceID,
+			logger.FieldProvider, handler.config.MarketProvider.Name(),
+			"error", logger.RedactError(err),
+		)
+		writeError(response, http.StatusBadGateway, 50200, "market_provider_error", context)
+		return
+	}
+
+	writeJSON(response, http.StatusOK, apiResponse{
+		Code:      0,
+		Message:   "ok",
+		Data:      buildStockSearchResults(stocks),
+		RequestID: context.requestID,
+		TraceID:   context.traceID,
+	})
+}
+
+// requireReadyToken 校验业务 API 必须在 sidecar ready 后携带正确 runtime token。
+func (handler appHandler) requireReadyToken(response http.ResponseWriter, request *http.Request, context requestContext) bool {
+	if !handler.config.Ready || handler.config.Token == "" {
+		writeError(response, http.StatusServiceUnavailable, 50300, "core_not_ready", context)
+		return false
+	}
+	if !tokenMatches(request.Header.Get(tokenHeader), handler.config.Token) {
+		writeError(response, http.StatusUnauthorized, 40100, "unauthorized", context)
+		return false
+	}
+	return true
+}
+
+// buildStockSearchResults 转换 Provider 模型为 API 稳定响应字段。
+func buildStockSearchResults(stocks []market.StockBasic) []stockSearchResult {
+	results := make([]stockSearchResult, 0, len(stocks))
+	for _, item := range stocks {
+		results = append(results, stockSearchResult{
+			Symbol:   item.Symbol.String(),
+			Name:     item.Name,
+			Code:     item.Code,
+			Market:   item.Market,
+			Exchange: item.Exchange,
+		})
+	}
+	return results
 }
 
 type requestContext struct {

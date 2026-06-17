@@ -394,7 +394,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T14 股票搜索和基础信息 API
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T12、T13
 - 交付物：
   - `/api/stocks/search`
@@ -409,6 +409,14 @@ P7 跨平台桌面能力、打包、发布验收
   - Rust command 到 Go API 闭环可用。
 - 退出条件：
   - 前端可以基于真实 command 搜索股票。
+- 当前进展：
+  - 已在 Go core `apps/sidecar-core/internal/server` 接入 `POST /api/stocks/search`。
+  - 搜索 API 复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
+  - 已实现 keyword 空值校验，空 keyword 返回 400 和稳定错误消息 `invalid_keyword`。
+  - 已通过 `MarketProvider.Search` 返回标准字段：`symbol`、`name`、`code`、`market`、`exchange`。
+  - Provider 不可用时返回 `market_provider_unavailable`，Provider 调用失败时返回 `market_provider_error` 且日志错误脱敏。
+  - 单测覆盖空 keyword 和有效 keyword 返回标准 symbol。
+  - 受 T09/T13/T20 后续接入约束，真实合规 Provider 注入、`stocks` 缓存写入和 Rust `stock_search(keyword)` 白名单 command 完成后再标记为 `[x]`。
 
 ### T15 自选股 CRUD
 

@@ -1,12 +1,16 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/market"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/stock"
 )
 
 // TestHealthRejectsNonPost 验证本地 core API 默认拒绝非 POST 请求。
@@ -124,7 +128,7 @@ func TestShutdownCallsConfiguredCallback(t *testing.T) {
 // TestRecoverHTTPRedactsPanicError 验证 panic 会转成统一错误响应，且不会泄露异常中的密钥。
 func TestRecoverHTTPRedactsPanicError(t *testing.T) {
 	handler := recoverHTTP(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		panic(errors.New("provider failed with Authorization: Bearer sk-panic-secret"))
+		panic(errors.New("provider failed with Authorization: Bearer demo-sensitive-value"))
 	}))
 
 	recorder := httptest.NewRecorder()
@@ -137,7 +141,7 @@ func TestRecoverHTTPRedactsPanicError(t *testing.T) {
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, recorder.Code)
 	}
-	if strings.Contains(recorder.Body.String(), "sk-panic-secret") {
+	if strings.Contains(recorder.Body.String(), "demo-sensitive-value") {
 		t.Fatalf("panic response leaked secret: %s", recorder.Body.String())
 	}
 
@@ -194,6 +198,91 @@ func TestHealthReturnsVersionAndDBStatusWithValidToken(t *testing.T) {
 	}
 }
 
+// TestStockSearchRejectsEmptyKeyword 验证股票搜索会拒绝空 keyword。
+func TestStockSearchRejectsEmptyKeyword(t *testing.T) {
+	handler := NewHandler(Config{
+		Version:        "0.1.0",
+		Token:          "test-token",
+		DBStatus:       "not_configured",
+		Ready:          true,
+		MarketProvider: fakeMarketProvider{},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/stocks/search", strings.NewReader(`{"keyword":"  "}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+	assertErrorEnvelope(t, recorder.Body.String(), "invalid_keyword")
+}
+
+// TestStockSearchReturnsStandardSymbol 验证股票搜索通过 Provider 返回标准股票基础信息。
+func TestStockSearchReturnsStandardSymbol(t *testing.T) {
+	symbol, err := stock.ParseSymbol("CN:SH:600519")
+	if err != nil {
+		t.Fatalf("parse symbol: %v", err)
+	}
+
+	handler := NewHandler(Config{
+		Version:  "0.1.0",
+		Token:    "test-token",
+		DBStatus: "not_configured",
+		Ready:    true,
+		MarketProvider: fakeMarketProvider{
+			searchResults: []market.StockBasic{{
+				Symbol:   symbol,
+				Name:     "贵州茅台",
+				Code:     "600519",
+				Market:   "CN",
+				Exchange: "SH",
+			}},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/stocks/search", strings.NewReader(`{"keyword":"茅台"}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+	request.Header.Set("X-Request-Id", "req-search")
+	request.Header.Set("X-Trace-Id", "trace-search")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+
+	var response apiResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal stock search response: %v", err)
+	}
+	if response.Code != 0 || response.Message != "ok" {
+		t.Fatalf("unexpected stock search envelope: %+v", response)
+	}
+	if response.RequestID != "req-search" || response.TraceID != "trace-search" {
+		t.Fatalf("expected propagated ids, got requestId=%q traceId=%q", response.RequestID, response.TraceID)
+	}
+
+	results, ok := response.Data.([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("expected one stock result, got %#v", response.Data)
+	}
+	first, ok := results[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %T", results[0])
+	}
+	if first["symbol"] != "CN:SH:600519" ||
+		first["name"] != "贵州茅台" ||
+		first["code"] != "600519" ||
+		first["market"] != "CN" ||
+		first["exchange"] != "SH" {
+		t.Fatalf("unexpected stock search data: %#v", first)
+	}
+}
+
 // assertErrorEnvelope 校验错误响应必须包含统一 envelope 和追踪 ID。
 func assertErrorEnvelope(t *testing.T, body string, message string) {
 	t.Helper()
@@ -211,4 +300,33 @@ func assertErrorEnvelope(t *testing.T, body string, message string) {
 	if response.RequestID == "" || response.TraceID == "" {
 		t.Fatalf("expected requestId and traceId, got response %+v", response)
 	}
+}
+
+type fakeMarketProvider struct {
+	searchResults []market.StockBasic
+}
+
+// Name 返回测试 Provider 名称。
+func (provider fakeMarketProvider) Name() string {
+	return "fake"
+}
+
+// Status 返回测试 Provider 状态。
+func (provider fakeMarketProvider) Status(context.Context) market.ProviderStatus {
+	return market.ProviderStatus{Name: provider.Name(), Available: true}
+}
+
+// Search 返回测试预置的股票搜索结果。
+func (provider fakeMarketProvider) Search(context.Context, string) ([]market.StockBasic, error) {
+	return provider.searchResults, nil
+}
+
+// Quote 在 server 搜索测试中不会被调用。
+func (provider fakeMarketProvider) Quote(context.Context, stock.Symbol) (market.Quote, error) {
+	return market.Quote{}, nil
+}
+
+// Kline 在 server 搜索测试中不会被调用。
+func (provider fakeMarketProvider) Kline(context.Context, market.KlineRequest) ([]market.KlineBar, error) {
+	return nil, nil
 }
