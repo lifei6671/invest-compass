@@ -614,6 +614,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 已实现配置列表安全展示模型，只返回 `api_key_ref`、`masked_api_key` 和 `has_api_key`，不包含真实 API Key。
   - 已实现 Go core 保存配置规则，拒绝保存请求携带 `raw_api_key`。
   - 已实现模型连通性测试请求的安全日志快照，只记录 `has_api_key`，不记录 `resolved_api_key` 字段名或运行期 Key 明文。
+  - 已新增前端/shared 源码安全扫描，禁止 `resolved_api_key`、`raw_api_key` 和 runtime token header 暴露到 renderer 源码。
   - 单测覆盖列表不回显真实 Key、保存拒绝 raw key、保存只保留凭据元数据和测试请求日志脱敏。
   - 受 T09/T20 后续接入约束，数据库持久化、系统凭据写入/删除、`/api/ai/configs/*` 和 Rust command 完成后再标记为 `[x]`。
 
@@ -783,6 +784,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 已复用 `ReplayEvents` 支持 afterEventID 之后的事件补拉和按事件 ID 递增排序。
   - 已支持多行 payload 按标准 SSE `data:` 行逐行编码，避免流式日志或 chunk 破坏事件帧。
   - SSE 帧包含 `id`、`event`、`data`，转发前统一复用事件 payload 脱敏。
+  - 已新增前端/shared 源码安全扫描，禁止 renderer 直接使用浏览器 `EventSource` 或直连 `127.0.0.1` / `localhost` Go core 地址。
   - 单测覆盖 SSE 帧结构、payload 脱敏和 afterEventID 补拉编码顺序。
   - 受 T25/T26 数据库持久化和真实任务链路约束，`/api/tasks/events/stream`、`/api/tasks/events`、Rust 订阅转发和前端真实进度展示接入后再标记为 `[x]`。
 
@@ -860,6 +862,8 @@ P7 跨平台桌面能力、打包、发布验收
   - TypeScript 类型检查通过。
 - 退出条件：
   - 前端具备真实 command 调用基础。
+- 当前进展：
+  - 已新增前端/shared 源码安全扫描，禁止 renderer 使用 `localStorage`、`sessionStorage`、`indexedDB` 保存敏感状态，禁止直连 Go core 和处理 runtime token。
 
 ### T31 Dashboard 页面
 

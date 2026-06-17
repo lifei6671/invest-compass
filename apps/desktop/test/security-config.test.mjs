@@ -15,6 +15,10 @@ const libSource = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.
 const commandSources = await readCommandSources(
   new URL("../src-tauri/src/commands/", import.meta.url),
 );
+const rendererBoundarySources = await readSourceFiles([
+  new URL("../../frontend/src/", import.meta.url),
+  new URL("../../packages/shared/src/", import.meta.url),
+]);
 
 test("Tauri 主窗口显式绑定 main capability", () => {
   assert.deepEqual(
@@ -91,15 +95,54 @@ test("Rust command 安全扫描能识别任意 method/path/body 代理", () => {
   ]);
 });
 
+test("前端和共享契约禁止暴露 Go core、runtime token 或内部密钥字段", () => {
+  assert.deepEqual(findRendererBoundaryLeaks(rendererBoundarySources), []);
+});
+
+test("前端安全扫描能识别直连 Go core 和内部密钥字段", () => {
+  const unsafeSource = `
+    const resolved_api_key = "secret";
+    const stream = new EventSource("http://127.0.0.1:58123/api/tasks/events/stream");
+    localStorage.setItem("token", "secret");
+    fetch("http://localhost:58123/internal/health", {
+      headers: { "X-Invest-Compass-Token": "secret" },
+    });
+  `;
+
+  assert.deepEqual(findRendererBoundaryLeaks([unsafeSource]), [
+    "renderer source 暴露内部密钥字段 resolved_api_key",
+    "renderer source 直接使用 EventSource 连接 Go core",
+    "renderer source 使用浏览器持久化存储保存敏感状态",
+    "renderer source 直连本地 Go core 地址",
+    "renderer source 处理 runtime token header",
+  ]);
+});
+
 async function readCommandSources(directoryUrl) {
+  return readSourceFiles([directoryUrl], (fileName) => fileName.endsWith(".rs"));
+}
+
+async function readSourceFiles(directoryUrls, includeFile = () => true) {
+  const sources = [];
+
+  for (const directoryUrl of directoryUrls) {
+    sources.push(...(await readSourceFilesFromDirectory(directoryUrl, includeFile)));
+  }
+
+  return sources;
+}
+
+async function readSourceFilesFromDirectory(directoryUrl, includeFile) {
   const entries = await readdir(directoryUrl, { withFileTypes: true });
   const sources = [];
 
   for (const entry of entries) {
     const entryUrl = new URL(entry.name, directoryUrl);
     if (entry.isDirectory()) {
-      sources.push(...(await readCommandSources(new URL(`${entry.name}/`, directoryUrl))));
-    } else if (entry.name.endsWith(".rs")) {
+      sources.push(
+        ...(await readSourceFilesFromDirectory(new URL(`${entry.name}/`, directoryUrl), includeFile)),
+      );
+    } else if (includeFile(entry.name)) {
       sources.push(await readFile(entryUrl, "utf8"));
     }
   }
@@ -144,4 +187,35 @@ function findArbitraryProxyCommands(sources) {
 
 function hasArbitraryProxyParams(params) {
   return /\bmethod\s*:/.test(params) && /\bpath\s*:/.test(params) && /\bbody\s*:/.test(params);
+}
+
+function findRendererBoundaryLeaks(sources) {
+  const checks = [
+    {
+      pattern: /\bresolved_api_key\b|\braw_api_key\b/,
+      message: "renderer source 暴露内部密钥字段 resolved_api_key",
+    },
+    {
+      pattern: /\bnew\s+EventSource\b|\bEventSource\s*\(/,
+      message: "renderer source 直接使用 EventSource 连接 Go core",
+    },
+    {
+      pattern: /\blocalStorage\b|\bsessionStorage\b|\bindexedDB\b/,
+      message: "renderer source 使用浏览器持久化存储保存敏感状态",
+    },
+    {
+      pattern: /http:\/\/127\.0\.0\.1:\d+|http:\/\/localhost:\d+/,
+      message: "renderer source 直连本地 Go core 地址",
+    },
+    {
+      pattern: /\bX-Invest-Compass-Token\b/,
+      message: "renderer source 处理 runtime token header",
+    },
+  ];
+
+  return sources.flatMap((source) =>
+    checks
+      .filter((check) => check.pattern.test(source))
+      .map((check) => check.message),
+  );
 }
