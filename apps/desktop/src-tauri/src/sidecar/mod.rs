@@ -1,9 +1,10 @@
 use rand::{rngs::OsRng, RngCore};
+use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     io::{BufRead, BufReader, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{mpsc, Mutex},
     time::Duration,
@@ -12,6 +13,7 @@ use std::{
 const PROTOCOL_VERSION: &str = "1";
 const TOKEN_BYTES: usize = 32;
 const TOKEN_HEADER: &str = "X-Invest-Compass-Token";
+const CORE_BINARY_ENV: &str = "INVEST_COMPASS_CORE_BIN";
 
 #[derive(Debug)]
 pub enum SidecarError {
@@ -119,6 +121,22 @@ impl CoreState {
             .ok_or(SidecarError::CoreNotRunning)
     }
 
+    /// 按固定二进制路径启动 sidecar，已启动时直接复用当前客户端。
+    pub fn start(
+        &self,
+        binary_path: &Path,
+        ready_timeout: Duration,
+    ) -> Result<CoreClient, SidecarError> {
+        if let Ok(client) = self.client() {
+            return Ok(client);
+        }
+
+        let running = start_core_sidecar(binary_path, ready_timeout)?;
+        let client = running.client.clone();
+        self.install(running);
+        Ok(client)
+    }
+
     /// 停止当前 sidecar，优先走内部 shutdown，再兜底 kill 本地子进程。
     pub fn stop(&self) {
         let mut guard = self.running.lock().expect("core state poisoned");
@@ -165,7 +183,7 @@ impl CoreClient {
         let response = self
             .http_client
             .post(self.internal_url(path))
-            .header(TOKEN_HEADER, &self.token)
+            .headers(build_internal_headers(&self.token))
             .json(&serde_json::json!({}))
             .send()?
             .error_for_status()?
@@ -185,6 +203,61 @@ impl Drop for CoreState {
 /// 生成 256-bit runtime token，并用十六进制承载，避免出现在 argv/env/config 中。
 pub fn generate_runtime_token() -> String {
     let mut bytes = [0_u8; TOKEN_BYTES];
+    OsRng.fill_bytes(&mut bytes);
+
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
+}
+
+/// 返回当前平台的 Go core 二进制文件名，Windows 使用 `.exe` 后缀。
+pub fn core_binary_file_name() -> &'static str {
+    if cfg!(windows) {
+        "invest-compass-core.exe"
+    } else {
+        "invest-compass-core"
+    }
+}
+
+/// 解析 Go core 二进制路径，环境变量优先，默认回到项目内 `src-tauri/binaries`。
+pub fn resolve_core_binary_path(env_override: Option<String>, manifest_dir: &Path) -> PathBuf {
+    if let Some(path) = env_override {
+        return PathBuf::from(path);
+    }
+
+    manifest_dir.join("binaries").join(core_binary_file_name())
+}
+
+/// 获取运行期 Go core 二进制路径，作为 setup 和 command 的唯一来源。
+pub fn runtime_core_binary_path() -> PathBuf {
+    resolve_core_binary_path(
+        std::env::var(CORE_BINARY_ENV).ok(),
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    )
+}
+
+/// 构造 Rust 到 Go core 的内部请求头，统一注入 token 和追踪 ID。
+fn build_internal_headers(token: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        TOKEN_HEADER,
+        HeaderValue::from_str(token).expect("runtime token must be valid header text"),
+    );
+    headers.insert(
+        "X-Request-Id",
+        HeaderValue::from_str(&new_trace_id()).expect("request id must be valid header text"),
+    );
+    headers.insert(
+        "X-Trace-Id",
+        HeaderValue::from_str(&new_trace_id()).expect("trace id must be valid header text"),
+    );
+    headers
+}
+
+/// 生成本地请求追踪 ID，用于 Rust 与 Go core 的内部调用关联。
+fn new_trace_id() -> String {
+    let mut bytes = [0_u8; 16];
     OsRng.fill_bytes(&mut bytes);
 
     bytes
@@ -321,5 +394,43 @@ mod tests {
             "http://127.0.0.1:58123/internal/health"
         );
         assert_eq!(client.token(), "runtime-token");
+    }
+
+    #[test]
+    fn build_internal_headers_includes_token_request_id_and_trace_id() {
+        let headers = build_internal_headers("runtime-token");
+
+        assert_eq!(
+            headers
+                .get(TOKEN_HEADER)
+                .expect("token header")
+                .to_str()
+                .expect("token header text"),
+            "runtime-token"
+        );
+        assert!(headers.get("X-Request-Id").is_some());
+        assert!(headers.get("X-Trace-Id").is_some());
+    }
+
+    #[test]
+    fn resolve_core_binary_path_uses_env_override_first() {
+        let path = resolve_core_binary_path(
+            Some("/tmp/custom-core".to_string()),
+            Path::new("/workspace/apps/desktop/src-tauri"),
+        );
+
+        assert_eq!(path, Path::new("/tmp/custom-core"));
+    }
+
+    #[test]
+    fn resolve_core_binary_path_falls_back_to_project_binary_dir() {
+        let path = resolve_core_binary_path(None, Path::new("/workspace/apps/desktop/src-tauri"));
+
+        assert_eq!(
+            path,
+            Path::new("/workspace/apps/desktop/src-tauri")
+                .join("binaries")
+                .join(core_binary_file_name())
+        );
     }
 }

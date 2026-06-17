@@ -4,13 +4,14 @@
   "private": true,
   "packageManager": "pnpm@10.29.3",
   "scripts": {
-    "dev": "pnpm --filter @invest-compass/desktop dev",
-    "build": "pnpm -r --if-present build",
+    "dev": "pnpm core:build-sidecar && pnpm --filter @invest-compass/desktop dev",
+    "build": "pnpm core:build-sidecar && pnpm -r --if-present build",
     "test": "pnpm -r --if-present test && pnpm core:test",
     "check": "pnpm -r --if-present check && pnpm core:test && pnpm desktop:check",
     "format:check": "pnpm format:check:go && pnpm format:check:rust",
     "format:check:go": "test -z \"$(gofmt -l core)\"",
     "format:check:rust": "cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check",
+    "core:build-sidecar": "cd core && go build -o ../apps/desktop/src-tauri/binaries/invest-compass-core ./cmd/invest-compass-core",
     "core:test": "cd core && go test ./...",
     "desktop:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml"
   }

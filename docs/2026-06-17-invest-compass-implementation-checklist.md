@@ -178,7 +178,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T05 Tauri 启动和管理 sidecar
 
-- 状态：`[~]`
+- 状态：`[x]`
 - 依赖：T04
 - 交付物：
   - Tauri sidecar 管理模块。
@@ -198,11 +198,12 @@ P7 跨平台桌面能力、打包、发布验收
 - 当前进展：
   - 已实现 Rust sidecar token、stdin 握手、ready JSON 解析、health/shutdown client 和 `core_health` 白名单 command。
   - 已补 Go `/internal/shutdown`，合法 token 才能触发关闭回调。
-  - 待 Go core 二进制接入 Tauri 后，补齐应用启动/退出真实验收再改为 `[x]`。
+  - 已补 `pnpm core:build-sidecar`，默认产物为 `apps/desktop/src-tauri/binaries/invest-compass-core`。
+  - 已验证项目内 sidecar 二进制 stdin 握手、health、非 POST 拒绝和 shutdown 后进程退出。
 
 ### T06 Rust command 白名单代理基线
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：T05
 - 交付物：
   - `core_start`
@@ -218,6 +219,10 @@ P7 跨平台桌面能力、打包、发布验收
   - 任意 path 代理不存在。
 - 退出条件：
   - 前端只能通过明确 command 访问 Go core。
+- 当前进展：
+  - 已注册 `core_start` 和 `core_health`，没有实现任意 path / method 代理。
+  - Rust 内部请求统一注入 runtime token、`X-Request-Id`、`X-Trace-Id`。
+  - Go core 二进制路径由 Rust 侧单一函数解析，环境变量仅作为本地覆盖入口。
 
 ### T07 Tauri capabilities 和 CSP 基线
 
