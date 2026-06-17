@@ -586,7 +586,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T21 AI 配置 API 和 Rust 内部密钥注入
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T09、T20
 - 交付物：
   - `/api/ai/configs/list`
@@ -605,6 +605,13 @@ P7 跨平台桌面能力、打包、发布验收
   - test 失败错误不包含 Key、请求头、代理认证。
 - 退出条件：
   - 模型配置页可真实保存和测试模型。
+- 当前进展：
+  - 已在 `apps/sidecar-core/internal/ai` 新增 AI 配置安全规则。
+  - 已实现配置列表安全展示模型，只返回 `api_key_ref`、`masked_api_key` 和 `has_api_key`，不包含真实 API Key。
+  - 已实现 Go core 保存配置规则，拒绝保存请求携带 `raw_api_key`。
+  - 已实现模型连通性测试请求的安全日志快照，只记录 `has_api_key`，不记录 `resolved_api_key` 字段名或运行期 Key 明文。
+  - 单测覆盖列表不回显真实 Key、保存拒绝 raw key、保存只保留凭据元数据和测试请求日志脱敏。
+  - 受 T09/T20 后续接入约束，数据库持久化、系统凭据写入/删除、`/api/ai/configs/*` 和 Rust command 完成后再标记为 `[x]`。
 
 ### T22 OpenAI-compatible Provider
 
