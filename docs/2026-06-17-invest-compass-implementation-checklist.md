@@ -452,7 +452,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T16 行情、K线和缓存
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T13、T15
 - 交付物：
   - `/api/market/quote`
@@ -470,6 +470,13 @@ P7 跨平台桌面能力、打包、发布验收
   - 缓存命中不重复请求 Provider。
 - 退出条件：
   - 个股详情页可展示真实行情和 K 线。
+- 当前进展：
+  - 已在 `apps/sidecar-core/internal/market` 新增行情短缓存和 K 线缓存规则。
+  - 已限制 quote 短缓存 TTL 必须处于 10-60 秒范围内。
+  - 已实现 quote 按 symbol 命中和过期 miss 规则。
+  - 已实现 K 线按 `symbol + period + adjust` 隔离缓存，并按 `trade_date` 升序返回。
+  - 单测覆盖 quote TTL 校验、TTL 命中/过期、K 线排序、adjust 隔离和缓存副本隔离。
+  - 受 T09/T13/T15 后续接入约束，真实 Provider 拉取、`quotes`/`klines` 持久化、`/api/market/*` 和 Rust command 完成后再标记为 `[x]`。
 
 ### T17 技术指标计算
 
