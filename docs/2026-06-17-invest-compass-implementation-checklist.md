@@ -525,9 +525,11 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增 `apps/sidecar-core/internal/news` 纯模块，定义新闻条目、个股新闻请求、市场新闻请求和 Provider 契约。
   - 已实现 HTTP(S) URL scheme 白名单校验，禁止 `javascript:`、`file:` 等危险链接进入输出。
   - 已实现 `content_hash` 去重，忽略 URL 和来源以合并多来源转载，并保留首次出现条目。
+  - 已实现新闻缓存 TTL 校验，限制在 30-120 分钟范围内。
+  - 已实现个股新闻和市场新闻缓存规则，列表按发布时间倒序返回，个股新闻按 symbol 过滤。
   - Provider 错误复用统一脱敏入口，避免授权头和 API Key 泄露。
-  - 单测覆盖 URL 校验、标准 symbol 绑定、去重、个股/市场新闻契约和错误脱敏。
-  - 受 T09/T14 后续数据与 API 链路约束，缓存、入库、排序 API 和 Rust command 接入完成后再标记为 `[x]`。
+  - 单测覆盖 URL 校验、标准 symbol 绑定、去重、个股/市场新闻契约、缓存 TTL、缓存排序、缓存过期、缓存副本隔离和错误脱敏。
+  - 受 T09/T14 后续数据与 API 链路约束，入库、`/api/news/*` 和 Rust command 接入完成后再标记为 `[x]`。
 
 ### T19 Dashboard summary 和 provider status
 
