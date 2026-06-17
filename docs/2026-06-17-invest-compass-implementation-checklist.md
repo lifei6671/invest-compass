@@ -362,7 +362,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T13 首版合规 Market Provider
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T12
 - 交付物：
   - `MarketProvider` 接口。
@@ -377,6 +377,12 @@ P7 跨平台桌面能力、打包、发布验收
   - 真实 Provider 在本地开发环境可查询样例股票。
 - 退出条件：
   - 首版不依赖未授权或不稳定的隐式抓取路径。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/market` 契约包，定义 `MarketProvider`、Provider 状态、股票基础信息、行情快照和 K 线模型。
+  - Provider 状态模型强制携带来源、授权边界、频率限制和支持市场描述。
+  - Provider 错误会保留 provider/operation 可观测上下文，并复用统一脱敏入口避免泄露授权头和 API Key。
+  - 单测已覆盖接口契约、标准 symbol 使用、合规状态描述和错误脱敏。
+  - 真实合规数据 Provider 仍需确认数据源授权和访问限制后接入，完成后再标记为 `[x]`。
 
 ### T14 股票搜索和基础信息 API
 
