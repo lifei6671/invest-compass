@@ -56,14 +56,14 @@ type Setting struct {
 
 // CacheUsage 是某类缓存的体积统计。
 type CacheUsage struct {
-	Target CacheTarget
-	Bytes  int64
+	Target CacheTarget `json:"target"`
+	Bytes  int64       `json:"bytes"`
 }
 
 // CacheStats 是设置中心可展示的临时缓存统计。
 type CacheStats struct {
-	Items      []CacheUsage
-	TotalBytes int64
+	Items      []CacheUsage `json:"items"`
+	TotalBytes int64        `json:"total_bytes"`
 }
 
 // LicenseStatus 是关于页首版可展示的授权状态。

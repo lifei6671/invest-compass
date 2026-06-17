@@ -11,6 +11,7 @@ import (
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/dashboard"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/market"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/settings"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/stock"
 )
 
@@ -403,6 +404,82 @@ func TestDashboardSummaryReturnsInjectedData(t *testing.T) {
 	}
 }
 
+// TestCacheStatsOnlyReturnsTemporaryCaches 验证缓存统计 API 不返回报告和配置。
+func TestCacheStatsOnlyReturnsTemporaryCaches(t *testing.T) {
+	handler := NewHandler(Config{
+		Version:  "0.1.0",
+		Token:    "test-token",
+		DBStatus: "not_configured",
+		Ready:    true,
+		CacheUsages: []settings.CacheUsage{
+			{Target: settings.CacheTargetQuote, Bytes: 10},
+			{Target: settings.CacheTargetNews, Bytes: 20},
+			{Target: settings.CacheTargetReport, Bytes: 300},
+			{Target: settings.CacheTargetConfig, Bytes: 400},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/cache/stats", strings.NewReader("{}"))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	payload := recorder.Body.String()
+	if strings.Contains(payload, string(settings.CacheTargetReport)) || strings.Contains(payload, string(settings.CacheTargetConfig)) {
+		t.Fatalf("cache stats exposed protected targets: %s", payload)
+	}
+	if !strings.Contains(payload, "total_bytes") {
+		t.Fatalf("cache stats must use stable snake_case json fields: %s", payload)
+	}
+
+	var response apiResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal cache stats response: %v", err)
+	}
+	data, ok := response.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected cache stats object, got %#v", response.Data)
+	}
+	if data["total_bytes"] != float64(30) {
+		t.Fatalf("unexpected cache total bytes: %#v", data)
+	}
+}
+
+// TestCacheCleanOnlyCleansTemporaryTargets 验证缓存清理 API 只把临时缓存目标交给 cleaner。
+func TestCacheCleanOnlyCleansTemporaryTargets(t *testing.T) {
+	cleaner := &recordingCacheCleaner{}
+	handler := NewHandler(Config{
+		Version:      "0.1.0",
+		Token:        "test-token",
+		DBStatus:     "not_configured",
+		Ready:        true,
+		CacheCleaner: cleaner,
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/cache/clean",
+		strings.NewReader(`{"targets":["quote","report","config","news"]}`),
+	)
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if len(cleaner.cleanedTargets) != 2 ||
+		cleaner.cleanedTargets[0] != settings.CacheTargetQuote ||
+		cleaner.cleanedTargets[1] != settings.CacheTargetNews {
+		t.Fatalf("unexpected cleaned targets: %+v", cleaner.cleanedTargets)
+	}
+}
+
 // assertErrorEnvelope 校验错误响应必须包含统一 envelope 和追踪 ID。
 func assertErrorEnvelope(t *testing.T, body string, message string) {
 	t.Helper()
@@ -453,4 +530,14 @@ func (provider fakeMarketProvider) Quote(context.Context, stock.Symbol) (market.
 // Kline 在 server 搜索测试中不会被调用。
 func (provider fakeMarketProvider) Kline(context.Context, market.KlineRequest) ([]market.KlineBar, error) {
 	return nil, nil
+}
+
+type recordingCacheCleaner struct {
+	cleanedTargets []settings.CacheTarget
+}
+
+// CleanCache 记录被清理的缓存目标，供 server 测试断言。
+func (cleaner *recordingCacheCleaner) CleanCache(_ context.Context, targets []settings.CacheTarget) error {
+	cleaner.cleanedTargets = append([]settings.CacheTarget(nil), targets...)
+	return nil
 }

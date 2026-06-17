@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/dashboard"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/logger"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/market"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/settings"
 )
 
 const tokenHeader = "X-Invest-Compass-Token"
@@ -26,7 +28,14 @@ type Config struct {
 	Ready          bool
 	MarketProvider market.MarketProvider
 	DashboardInput dashboard.Input
+	CacheUsages    []settings.CacheUsage
+	CacheCleaner   CacheCleaner
 	OnShutdown     func()
+}
+
+// CacheCleaner 是缓存清理 API 的单一执行边界，由实际存储层注入。
+type CacheCleaner interface {
+	CleanCache(ctx context.Context, targets []settings.CacheTarget) error
 }
 
 type apiResponse struct {
@@ -54,6 +63,11 @@ type stockSearchResult struct {
 	Code     string `json:"code"`
 	Market   string `json:"market"`
 	Exchange string `json:"exchange"`
+}
+
+// cacheCleanRequest 是缓存清理 API 的请求体。
+type cacheCleanRequest struct {
+	Targets []settings.CacheTarget `json:"targets"`
 }
 
 type appHandler struct {
@@ -106,6 +120,10 @@ func (handler appHandler) ServeHTTP(response http.ResponseWriter, request *http.
 		handler.handleProviderStatus(response, request, context)
 	case "/api/dashboard/summary":
 		handler.handleDashboardSummary(response, request, context)
+	case "/api/cache/stats":
+		handler.handleCacheStats(response, request, context)
+	case "/api/cache/clean":
+		handler.handleCacheClean(response, request, context)
 	default:
 		writeError(response, http.StatusNotFound, 40400, "not_found", context)
 	}
@@ -236,6 +254,58 @@ func (handler appHandler) handleDashboardSummary(response http.ResponseWriter, r
 		Code:      0,
 		Message:   "ok",
 		Data:      dashboard.BuildSummary(handler.config.DashboardInput),
+		RequestID: context.requestID,
+		TraceID:   context.traceID,
+	})
+}
+
+// handleCacheStats 返回可清理临时缓存统计，不包含报告和配置。
+func (handler appHandler) handleCacheStats(response http.ResponseWriter, request *http.Request, context requestContext) {
+	if !handler.requireReadyToken(response, request, context) {
+		return
+	}
+
+	writeJSON(response, http.StatusOK, apiResponse{
+		Code:      0,
+		Message:   "ok",
+		Data:      settings.BuildCacheStats(handler.config.CacheUsages),
+		RequestID: context.requestID,
+		TraceID:   context.traceID,
+	})
+}
+
+// handleCacheClean 只清理 settings 允许的临时缓存目标。
+func (handler appHandler) handleCacheClean(response http.ResponseWriter, request *http.Request, context requestContext) {
+	if !handler.requireReadyToken(response, request, context) {
+		return
+	}
+	if handler.config.CacheCleaner == nil {
+		writeError(response, http.StatusServiceUnavailable, 50302, "cache_cleaner_unavailable", context)
+		return
+	}
+
+	var payload cacheCleanRequest
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		writeError(response, http.StatusBadRequest, 40001, "invalid_json", context)
+		return
+	}
+
+	targets := settings.FilterCacheCleanupTargets(payload.Targets)
+	if err := handler.config.CacheCleaner.CleanCache(request.Context(), targets); err != nil {
+		slog.Warn(
+			"缓存清理失败",
+			logger.FieldRequestID, context.requestID,
+			logger.FieldTraceID, context.traceID,
+			"error", logger.RedactError(err),
+		)
+		writeError(response, http.StatusInternalServerError, 50001, "cache_clean_failed", context)
+		return
+	}
+
+	writeJSON(response, http.StatusOK, apiResponse{
+		Code:      0,
+		Message:   "ok",
+		Data:      map[string][]settings.CacheTarget{"cleaned_targets": targets},
 		RequestID: context.requestID,
 		TraceID:   context.traceID,
 	})

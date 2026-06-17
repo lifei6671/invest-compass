@@ -342,7 +342,11 @@ P7 跨平台桌面能力、打包、发布验收
   - 已实现工作区路径绝对路径校验，非法路径返回稳定错误码。
   - 已实现缓存统计只汇总行情、K 线、新闻、图表图片等临时缓存，明确排除报告和配置。
   - 单测覆盖敏感配置拦截、凭据引用放行、非法工作区路径和临时缓存统计。
-  - 受 T08/T09 依赖约束，`/api/settings/*`、`/api/workspace/*`、`/api/cache/*` 真实存储和 Rust command 接入完成后再标记为 `[x]`。
+  - 已在 Go core `apps/sidecar-core/internal/server` 接入 `POST /api/cache/stats` 和 `POST /api/cache/clean`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
+  - Cache stats 只从 `Config.CacheUsages` 单一注入源统计临时缓存，JSON 字段使用稳定 snake_case，明确排除报告和配置。
+  - Cache clean 只把 `settings.FilterCacheCleanupTargets` 过滤后的临时目标交给 `CacheCleaner`，不会把报告或配置传入清理边界。
+  - 单测覆盖 cache stats 排除受保护目标、cache clean 只清理临时目标。
+  - 受 T08/T09 依赖约束，`/api/settings/*`、`/api/workspace/*` 真实存储、cache cleaner 真实实现和 Rust command 接入完成后再标记为 `[x]`。
 
 ---
 
