@@ -78,11 +78,11 @@ func TestEventTypeMapsToStatus(t *testing.T) {
 
 // TestSanitizeEventPayloadRedactsSensitiveFields 验证事件 payload 入库前必须脱敏。
 func TestSanitizeEventPayloadRedactsSensitiveFields(t *testing.T) {
-	payload := `{"Authorization":"Bearer sk-task-secret","api_key":"raw-secret","message":"ok"}`
+	payload := `{"Authorization":"Bearer placeholder-sensitive-value","api_key":"placeholder-api-value","message":"ok"}`
 
 	sanitized := SanitizeEventPayload(payload)
 
-	if strings.Contains(sanitized, "sk-task-secret") || strings.Contains(sanitized, "raw-secret") {
+	if strings.Contains(sanitized, "placeholder-sensitive-value") || strings.Contains(sanitized, "placeholder-api-value") {
 		t.Fatalf("sanitized payload leaked secret: %s", sanitized)
 	}
 	if !strings.Contains(sanitized, "message") || !strings.Contains(sanitized, "ok") {
@@ -119,6 +119,50 @@ func TestRecoverRunningTaskReturnsTerminalStatus(t *testing.T) {
 	}
 	if event.Type != EventFailed || event.TaskID != "task-1" {
 		t.Fatalf("unexpected recovery event: %+v", event)
+	}
+}
+
+// TestFormatSSEEventRedactsPayload 验证 SSE 转发前会保留事件元信息并脱敏 payload。
+func TestFormatSSEEventRedactsPayload(t *testing.T) {
+	frame := FormatSSEEvent(Event{
+		ID:      12,
+		TaskID:  "task-1",
+		Type:    EventChunk,
+		Payload: `{"content":"ok","Authorization":"Bearer placeholder-stream-value"}`,
+	})
+
+	if !strings.Contains(frame, "id: 12\n") {
+		t.Fatalf("expected SSE id, got %q", frame)
+	}
+	if !strings.Contains(frame, "event: TASK_CHUNK\n") {
+		t.Fatalf("expected SSE event type, got %q", frame)
+	}
+	if !strings.Contains(frame, `data: {"content":"ok"`) {
+		t.Fatalf("expected SSE data payload, got %q", frame)
+	}
+	if strings.Contains(frame, "placeholder-stream-value") {
+		t.Fatalf("SSE frame leaked secret: %q", frame)
+	}
+	if !strings.HasSuffix(frame, "\n\n") {
+		t.Fatalf("expected SSE frame delimiter, got %q", frame)
+	}
+}
+
+// TestFormatSSEReplayFramesUsesAfterEventID 验证 afterEventID 补拉后可直接编码为 SSE 帧。
+func TestFormatSSEReplayFramesUsesAfterEventID(t *testing.T) {
+	events := []Event{
+		{ID: 3, Type: EventSuccess, Payload: `{"status":"ok"}`},
+		{ID: 1, Type: EventCreated, Payload: `{"status":"created"}`},
+		{ID: 2, Type: EventStarted, Payload: `{"status":"running"}`},
+	}
+
+	frames := FormatSSEReplayFrames(events, 1)
+
+	if len(frames) != 2 {
+		t.Fatalf("expected 2 frames, got %d", len(frames))
+	}
+	if !strings.HasPrefix(frames[0], "id: 2\n") || !strings.HasPrefix(frames[1], "id: 3\n") {
+		t.Fatalf("unexpected replay frames: %#v", frames)
 	}
 }
 
