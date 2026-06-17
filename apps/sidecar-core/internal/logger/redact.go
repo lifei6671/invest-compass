@@ -1,6 +1,9 @@
 package logger
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // RedactedValue 是所有敏感字段进入日志、错误和导出内容前的统一替换值。
 const RedactedValue = "[REDACTED]"
@@ -28,6 +31,11 @@ func RedactError(err error) string {
 		return ""
 	}
 	return RedactText(err.Error())
+}
+
+// ExportLogText 拼接日志行并在导出前执行二次脱敏。
+func ExportLogText(lines []string) string {
+	return RedactText(strings.Join(lines, "\n"))
 }
 
 // redactMatchedField 保留字段名并替换字段值，便于排障时知道哪个字段被脱敏。

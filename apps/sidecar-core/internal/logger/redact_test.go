@@ -32,9 +32,9 @@ func TestFieldNamesMatchObservabilityContract(t *testing.T) {
 // TestRedactTextMasksKnownSecrets 验证日志脱敏覆盖首版明确禁止输出的敏感字段。
 func TestRedactTextMasksKnownSecrets(t *testing.T) {
 	input := strings.Join([]string{
-		"Authorization: Bearer sk-live-secret",
+		"Authorization: Bearer placeholder-auth-secret",
 		"Proxy-Authorization: Basic proxy-secret",
-		"api_key=sk-provider-secret",
+		"api_key=placeholder-provider-secret",
 		"proxy_password=super-proxy-password",
 		"license_key=license-secret",
 		"position_snapshot=100股成本价12.34",
@@ -43,9 +43,9 @@ func TestRedactTextMasksKnownSecrets(t *testing.T) {
 	redacted := RedactText(input)
 
 	for _, secret := range []string{
-		"sk-live-secret",
+		"placeholder-auth-secret",
 		"proxy-secret",
-		"sk-provider-secret",
+		"placeholder-provider-secret",
 		"super-proxy-password",
 		"license-secret",
 		"100股成本价12.34",
@@ -61,11 +61,11 @@ func TestRedactTextMasksKnownSecrets(t *testing.T) {
 
 // TestRedactErrorMasksSecretInError 验证错误对象进入日志前也会被脱敏。
 func TestRedactErrorMasksSecretInError(t *testing.T) {
-	err := errors.New("provider failed with Authorization: Bearer sk-error-secret")
+	err := errors.New("provider failed with Authorization: Bearer placeholder-error-secret")
 
 	redacted := RedactError(err)
 
-	if strings.Contains(redacted, "sk-error-secret") {
+	if strings.Contains(redacted, "placeholder-error-secret") {
 		t.Fatalf("脱敏错误仍包含密钥: %s", redacted)
 	}
 	if !strings.Contains(redacted, RedactedValue) {
@@ -77,5 +77,37 @@ func TestRedactErrorMasksSecretInError(t *testing.T) {
 func TestRedactErrorHandlesNil(t *testing.T) {
 	if got := RedactError(nil); got != "" {
 		t.Fatalf("expected empty redacted nil error, got %q", got)
+	}
+}
+
+// TestExportLogTextRedactsAgain 验证日志导出前会再次脱敏，同时保留排障字段。
+func TestExportLogTextRedactsAgain(t *testing.T) {
+	lines := []string{
+		`{"request_id":"req-1","trace_id":"trace-1","task_id":"task-1","message":"start"}`,
+		`Authorization: Bearer placeholder-export-auth`,
+		`api_key=placeholder-export-key`,
+		`proxy_password=placeholder-export-proxy`,
+		`position_input=用户一次性持仓输入`,
+	}
+
+	exported := ExportLogText(lines)
+
+	for _, field := range []string{"request_id", "trace_id", "task_id"} {
+		if !strings.Contains(exported, field) {
+			t.Fatalf("expected exported logs to keep field %q: %s", field, exported)
+		}
+	}
+	for _, secret := range []string{
+		"placeholder-export-auth",
+		"placeholder-export-key",
+		"placeholder-export-proxy",
+		"用户一次性持仓输入",
+	} {
+		if strings.Contains(exported, secret) {
+			t.Fatalf("exported logs leaked %q: %s", secret, exported)
+		}
+	}
+	if strings.Count(exported, RedactedValue) < 4 {
+		t.Fatalf("expected redaction markers in exported logs: %s", exported)
 	}
 }
