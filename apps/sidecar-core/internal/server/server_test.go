@@ -283,6 +283,60 @@ func TestStockSearchReturnsStandardSymbol(t *testing.T) {
 	}
 }
 
+// TestProviderStatusReturnsSafeStatus 验证数据源状态 API 返回脱敏后的可展示状态。
+func TestProviderStatusReturnsSafeStatus(t *testing.T) {
+	handler := NewHandler(Config{
+		Version:  "0.1.0",
+		Token:    "test-token",
+		DBStatus: "not_configured",
+		Ready:    true,
+		MarketProvider: fakeMarketProvider{
+			status: market.ProviderStatus{
+				Name:      "demo-provider",
+				Source:    "demo-source",
+				Available: false,
+				LastError: "Authorization: Bearer demo-sensitive-value",
+			},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/providers/status", strings.NewReader("{}"))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+	request.Header.Set("X-Request-Id", "req-provider-status")
+	request.Header.Set("X-Trace-Id", "trace-provider-status")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "demo-sensitive-value") {
+		t.Fatalf("provider status leaked secret: %s", recorder.Body.String())
+	}
+
+	var response apiResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal provider status response: %v", err)
+	}
+	if response.Code != 0 || response.Message != "ok" {
+		t.Fatalf("unexpected provider status envelope: %+v", response)
+	}
+	statuses, ok := response.Data.([]any)
+	if !ok || len(statuses) != 1 {
+		t.Fatalf("expected one provider status, got %#v", response.Data)
+	}
+	first, ok := statuses[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected status object, got %T", statuses[0])
+	}
+	if first["name"] != "demo-provider" ||
+		first["source"] != "demo-source" ||
+		first["available"] != false {
+		t.Fatalf("unexpected provider status data: %#v", first)
+	}
+}
+
 // assertErrorEnvelope 校验错误响应必须包含统一 envelope 和追踪 ID。
 func assertErrorEnvelope(t *testing.T, body string, message string) {
 	t.Helper()
@@ -304,6 +358,7 @@ func assertErrorEnvelope(t *testing.T, body string, message string) {
 
 type fakeMarketProvider struct {
 	searchResults []market.StockBasic
+	status        market.ProviderStatus
 }
 
 // Name 返回测试 Provider 名称。
@@ -313,6 +368,9 @@ func (provider fakeMarketProvider) Name() string {
 
 // Status 返回测试 Provider 状态。
 func (provider fakeMarketProvider) Status(context.Context) market.ProviderStatus {
+	if provider.status.Name != "" {
+		return provider.status
+	}
 	return market.ProviderStatus{Name: provider.Name(), Available: true}
 }
 

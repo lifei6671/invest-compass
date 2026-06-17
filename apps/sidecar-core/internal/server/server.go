@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/dashboard"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/logger"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/market"
 )
@@ -100,6 +101,8 @@ func (handler appHandler) ServeHTTP(response http.ResponseWriter, request *http.
 		handler.handleShutdown(response, request, context)
 	case "/api/stocks/search":
 		handler.handleStockSearch(response, request, context)
+	case "/api/providers/status":
+		handler.handleProviderStatus(response, request, context)
 	default:
 		writeError(response, http.StatusNotFound, 40400, "not_found", context)
 	}
@@ -191,6 +194,30 @@ func (handler appHandler) handleStockSearch(response http.ResponseWriter, reques
 		Code:      0,
 		Message:   "ok",
 		Data:      buildStockSearchResults(stocks),
+		RequestID: context.requestID,
+		TraceID:   context.traceID,
+	})
+}
+
+// handleProviderStatus 返回数据源状态的安全展示数据。
+func (handler appHandler) handleProviderStatus(response http.ResponseWriter, request *http.Request, context requestContext) {
+	if !handler.requireReadyToken(response, request, context) {
+		return
+	}
+	if handler.config.MarketProvider == nil {
+		writeError(response, http.StatusServiceUnavailable, 50301, "market_provider_unavailable", context)
+		return
+	}
+
+	status := handler.config.MarketProvider.Status(request.Context())
+	summary := dashboard.BuildSummary(dashboard.Input{
+		ProviderStatuses: []market.ProviderStatus{status},
+	})
+
+	writeJSON(response, http.StatusOK, apiResponse{
+		Code:      0,
+		Message:   "ok",
+		Data:      summary.ProviderStatuses,
 		RequestID: context.requestID,
 		TraceID:   context.traceID,
 	})

@@ -533,7 +533,10 @@ P7 跨平台桌面能力、打包、发布验收
   - 已复用 `report`、`task`、`logger` 既有规则，报告过滤软删除并按 `task_id` 去重，任务按 `updated_at` 倒序，Provider 最近错误统一脱敏。
   - 聚合结果不包含策略、公告、研报、资金流等首版不做字段。
   - 单测覆盖自选涨跌分布、最近报告/任务/新闻排序截断、Provider 错误脱敏和不返回非 MVP 字段。
-  - 受 T15/T16/T18 依赖约束，`/api/dashboard/summary`、`/api/providers/status` 和对应 Rust command 接入真实数据后再标记为 `[x]`。
+  - 已在 Go core `apps/sidecar-core/internal/server` 接入 `POST /api/providers/status`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
+  - Provider status API 复用 Dashboard 安全展示模型，返回 `name`、`source`、`available`、`last_error`，并对最近错误做脱敏。
+  - 单测覆盖 provider status API 的安全响应和敏感错误脱敏。
+  - 受 T15/T16/T18 依赖约束，`/api/dashboard/summary`、对应 Rust command 和 Dashboard 真实数据接入后再标记为 `[x]`。
 
 ---
 
