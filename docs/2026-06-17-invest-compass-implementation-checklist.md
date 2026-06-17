@@ -469,7 +469,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T18 新闻资讯基础能力
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T12、T10
 - 交付物：
   - `apps/sidecar-core/internal/news`
@@ -487,6 +487,13 @@ P7 跨平台桌面能力、打包、发布验收
   - 新闻 URL 输出前经过 scheme 校验。
 - 退出条件：
   - Dashboard、资讯中心、分析上下文可使用新闻数据。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/news` 纯模块，定义新闻条目、个股新闻请求、市场新闻请求和 Provider 契约。
+  - 已实现 HTTP(S) URL scheme 白名单校验，禁止 `javascript:`、`file:` 等危险链接进入输出。
+  - 已实现 `content_hash` 去重，忽略 URL 和来源以合并多来源转载，并保留首次出现条目。
+  - Provider 错误复用统一脱敏入口，避免授权头和 API Key 泄露。
+  - 单测覆盖 URL 校验、标准 symbol 绑定、去重、个股/市场新闻契约和错误脱敏。
+  - 受 T09/T14 后续数据与 API 链路约束，缓存、入库、排序 API 和 Rust command 接入完成后再标记为 `[x]`。
 
 ### T19 Dashboard summary 和 provider status
 
