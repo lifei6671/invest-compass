@@ -42,6 +42,51 @@ func TestFilterCacheCleanupTargetsKeepsReportsAndConfigs(t *testing.T) {
 	}
 }
 
+// TestValidateSettingRejectsSensitivePlaintext 验证 settings 不能保存敏感明文。
+func TestValidateSettingRejectsSensitivePlaintext(t *testing.T) {
+	err := ValidateSetting(Setting{Key: "api_key", Value: "plain-value"})
+
+	assertSettingsErrorCode(t, err, ErrorSensitiveSetting)
+}
+
+// TestValidateSettingAcceptsCredentialReference 验证 settings 可以保存系统凭据引用和脱敏状态。
+func TestValidateSettingAcceptsCredentialReference(t *testing.T) {
+	for _, setting := range []Setting{
+		{Key: "api_key_ref", Value: "keychain:item"},
+		{Key: "proxy_credential_ref", Value: "credential-manager:item"},
+		{Key: "masked_api_key", Value: "****1234"},
+		{Key: "has_api_key", Value: "true"},
+	} {
+		if err := ValidateSetting(setting); err != nil {
+			t.Fatalf("ValidateSetting(%+v) returned error: %v", setting, err)
+		}
+	}
+}
+
+// TestValidateWorkspacePathRequiresAbsolutePath 验证工作区路径必须是绝对路径。
+func TestValidateWorkspacePathRequiresAbsolutePath(t *testing.T) {
+	err := ValidateWorkspacePath("relative/workspace")
+
+	assertSettingsErrorCode(t, err, ErrorInvalidWorkspacePath)
+}
+
+// TestBuildCacheStatsOnlyCountsTemporaryTargets 验证缓存统计不把报告和配置算入可清理缓存。
+func TestBuildCacheStatsOnlyCountsTemporaryTargets(t *testing.T) {
+	stats := BuildCacheStats([]CacheUsage{
+		{Target: CacheTargetQuote, Bytes: 10},
+		{Target: CacheTargetNews, Bytes: 20},
+		{Target: CacheTargetReport, Bytes: 300},
+		{Target: CacheTargetConfig, Bytes: 400},
+	})
+
+	if stats.TotalBytes != 30 {
+		t.Fatalf("expected temporary total 30, got %+v", stats)
+	}
+	if len(stats.Items) != 2 {
+		t.Fatalf("expected 2 temporary cache items, got %+v", stats.Items)
+	}
+}
+
 // TestAboutLicenseViewIsFreePlaceholder 验证关于页只展示 FREE 占位且不提供激活入口。
 func TestAboutLicenseViewIsFreePlaceholder(t *testing.T) {
 	view := FreeLicenseView()

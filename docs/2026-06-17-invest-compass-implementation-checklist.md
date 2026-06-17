@@ -316,7 +316,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T11 settings / workspace / cache API 基线
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T08、T10
 - 交付物：
   - `/api/settings/get`
@@ -335,6 +335,14 @@ P7 跨平台桌面能力、打包、发布验收
   - 非法路径返回明确错误。
 - 退出条件：
   - 设置中心可依赖真实 API，不需要假状态。
+- 当前进展：
+  - 已扩展 `apps/sidecar-core/internal/settings` 设置规则模块。
+  - 已实现 settings 明文敏感配置拦截，禁止 `api_key`、密码、token、secret、Authorization 等敏感值作为普通配置保存。
+  - 已允许 `api_key_ref`、`proxy_credential_ref`、`masked_api_key`、`has_api_key` 等凭据引用和脱敏状态落库。
+  - 已实现工作区路径绝对路径校验，非法路径返回稳定错误码。
+  - 已实现缓存统计只汇总行情、K 线、新闻、图表图片等临时缓存，明确排除报告和配置。
+  - 单测覆盖敏感配置拦截、凭据引用放行、非法工作区路径和临时缓存统计。
+  - 受 T08/T09 依赖约束，`/api/settings/*`、`/api/workspace/*`、`/api/cache/*` 真实存储和 Rust command 接入完成后再标记为 `[x]`。
 
 ---
 

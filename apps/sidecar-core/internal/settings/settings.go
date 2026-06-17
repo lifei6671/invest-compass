@@ -2,6 +2,7 @@ package settings
 
 import (
 	"net/url"
+	"path/filepath"
 	"strings"
 )
 
@@ -13,6 +14,10 @@ const (
 	ErrorInvalidProxyURL ErrorCode = "invalid_proxy_url"
 	// ErrorProxyCredentialInURL 表示代理 URL 中包含 username/password。
 	ErrorProxyCredentialInURL ErrorCode = "proxy_credential_in_url"
+	// ErrorSensitiveSetting 表示 settings 试图保存敏感明文。
+	ErrorSensitiveSetting ErrorCode = "sensitive_setting"
+	// ErrorInvalidWorkspacePath 表示工作区路径不是可接受的绝对路径。
+	ErrorInvalidWorkspacePath ErrorCode = "invalid_workspace_path"
 )
 
 // Error 表示设置模块规则错误。
@@ -42,6 +47,24 @@ const (
 	// CacheTargetConfig 表示用户配置，不能被缓存清理删除。
 	CacheTargetConfig CacheTarget = "config"
 )
+
+// Setting 是 settings 表允许保存的单个键值配置。
+type Setting struct {
+	Key   string
+	Value string
+}
+
+// CacheUsage 是某类缓存的体积统计。
+type CacheUsage struct {
+	Target CacheTarget
+	Bytes  int64
+}
+
+// CacheStats 是设置中心可展示的临时缓存统计。
+type CacheStats struct {
+	Items      []CacheUsage
+	TotalBytes int64
+}
 
 // LicenseStatus 是关于页首版可展示的授权状态。
 type LicenseStatus string
@@ -73,11 +96,40 @@ func ValidateProxyURL(rawURL string) error {
 	return nil
 }
 
+// ValidateSetting 校验 settings 不保存 API Key、密码、token 等敏感明文。
+func ValidateSetting(setting Setting) error {
+	key := strings.ToLower(strings.TrimSpace(setting.Key))
+	if key == "" {
+		return nil
+	}
+	if isAllowedCredentialMetadata(key) {
+		return nil
+	}
+	if strings.Contains(key, "password") ||
+		strings.Contains(key, "token") ||
+		strings.Contains(key, "secret") ||
+		strings.Contains(key, "authorization") ||
+		key == "api_key" ||
+		key == "resolved_api_key" {
+		return &Error{Code: ErrorSensitiveSetting}
+	}
+	return nil
+}
+
+// ValidateWorkspacePath 校验工作区路径必须来自系统目录或用户选择后的绝对路径。
+func ValidateWorkspacePath(path string) error {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || !filepath.IsAbs(trimmed) {
+		return &Error{Code: ErrorInvalidWorkspacePath}
+	}
+	return nil
+}
+
 // FilterCacheCleanupTargets 过滤缓存清理目标，避免误删报告和配置。
 func FilterCacheCleanupTargets(targets []CacheTarget) []CacheTarget {
 	filtered := make([]CacheTarget, 0, len(targets))
 	for _, target := range targets {
-		if target == CacheTargetReport || target == CacheTargetConfig {
+		if !isTemporaryCacheTarget(target) {
 			continue
 		}
 		filtered = append(filtered, target)
@@ -85,7 +137,39 @@ func FilterCacheCleanupTargets(targets []CacheTarget) []CacheTarget {
 	return filtered
 }
 
+// BuildCacheStats 汇总可清理的临时缓存体积，明确排除报告和配置。
+func BuildCacheStats(usages []CacheUsage) CacheStats {
+	stats := CacheStats{
+		Items: make([]CacheUsage, 0, len(usages)),
+	}
+	for _, usage := range usages {
+		if !isTemporaryCacheTarget(usage.Target) {
+			continue
+		}
+		stats.Items = append(stats.Items, usage)
+		if usage.Bytes > 0 {
+			stats.TotalBytes += usage.Bytes
+		}
+	}
+	return stats
+}
+
 // FreeLicenseView 返回首版关于页 FREE 授权占位。
 func FreeLicenseView() LicenseView {
 	return LicenseView{Status: LicenseStatusFree}
+}
+
+// isAllowedCredentialMetadata 判断 key 是否属于允许落库的凭据引用或脱敏状态。
+func isAllowedCredentialMetadata(key string) bool {
+	return strings.HasSuffix(key, "_ref") || key == "masked_api_key" || key == "has_api_key"
+}
+
+// isTemporaryCacheTarget 判断缓存目标是否属于允许统计和清理的临时缓存。
+func isTemporaryCacheTarget(target CacheTarget) bool {
+	switch target {
+	case CacheTargetQuote, CacheTargetKline, CacheTargetNews, CacheTargetChartImage:
+		return true
+	default:
+		return false
+	}
 }
