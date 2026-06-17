@@ -536,7 +536,10 @@ P7 跨平台桌面能力、打包、发布验收
   - 已在 Go core `apps/sidecar-core/internal/server` 接入 `POST /api/providers/status`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
   - Provider status API 复用 Dashboard 安全展示模型，返回 `name`、`source`、`available`、`last_error`，并对最近错误做脱敏。
   - 单测覆盖 provider status API 的安全响应和敏感错误脱敏。
-  - 受 T15/T16/T18 依赖约束，`/api/dashboard/summary`、对应 Rust command 和 Dashboard 真实数据接入后再标记为 `[x]`。
+  - 已在 Go core `apps/sidecar-core/internal/server` 接入 `POST /api/dashboard/summary`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
+  - Dashboard summary API 只从 `Config.DashboardInput` 单一注入源构建响应，不在 handler 内拼散落数据或生成假数据。
+  - 单测覆盖 dashboard summary API 的自选涨跌分布、敏感错误脱敏和不返回非 MVP 字段。
+  - 受 T15/T16/T18 依赖约束，对应 Rust command 和 Dashboard 真实数据源接入后再标记为 `[x]`。
 
 ---
 

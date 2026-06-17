@@ -25,6 +25,7 @@ type Config struct {
 	DBStatus       string
 	Ready          bool
 	MarketProvider market.MarketProvider
+	DashboardInput dashboard.Input
 	OnShutdown     func()
 }
 
@@ -103,6 +104,8 @@ func (handler appHandler) ServeHTTP(response http.ResponseWriter, request *http.
 		handler.handleStockSearch(response, request, context)
 	case "/api/providers/status":
 		handler.handleProviderStatus(response, request, context)
+	case "/api/dashboard/summary":
+		handler.handleDashboardSummary(response, request, context)
 	default:
 		writeError(response, http.StatusNotFound, 40400, "not_found", context)
 	}
@@ -218,6 +221,21 @@ func (handler appHandler) handleProviderStatus(response http.ResponseWriter, req
 		Code:      0,
 		Message:   "ok",
 		Data:      summary.ProviderStatuses,
+		RequestID: context.requestID,
+		TraceID:   context.traceID,
+	})
+}
+
+// handleDashboardSummary 返回 Dashboard 首版聚合结果，数据只来自 Config.DashboardInput。
+func (handler appHandler) handleDashboardSummary(response http.ResponseWriter, request *http.Request, context requestContext) {
+	if !handler.requireReadyToken(response, request, context) {
+		return
+	}
+
+	writeJSON(response, http.StatusOK, apiResponse{
+		Code:      0,
+		Message:   "ok",
+		Data:      dashboard.BuildSummary(handler.config.DashboardInput),
 		RequestID: context.requestID,
 		TraceID:   context.traceID,
 	})

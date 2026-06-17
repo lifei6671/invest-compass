@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/dashboard"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/market"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/stock"
 )
@@ -334,6 +335,71 @@ func TestProviderStatusReturnsSafeStatus(t *testing.T) {
 		first["source"] != "demo-source" ||
 		first["available"] != false {
 		t.Fatalf("unexpected provider status data: %#v", first)
+	}
+}
+
+// TestDashboardSummaryReturnsInjectedData 验证 Dashboard summary API 只从注入数据源构建首版允许字段。
+func TestDashboardSummaryReturnsInjectedData(t *testing.T) {
+	handler := NewHandler(Config{
+		Version:  "0.1.0",
+		Token:    "test-token",
+		DBStatus: "not_configured",
+		Ready:    true,
+		DashboardInput: dashboard.Input{
+			WatchlistQuotes: []market.Quote{
+				{ChangePercent: 1},
+				{ChangePercent: -1},
+				{ChangePercent: 0},
+			},
+			ProviderStatuses: []market.ProviderStatus{{
+				Name:      "demo-provider",
+				Source:    "demo-source",
+				Available: false,
+				LastError: "Authorization: Bearer demo-sensitive-value",
+			}},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/dashboard/summary", strings.NewReader("{}"))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+	request.Header.Set("X-Request-Id", "req-dashboard")
+	request.Header.Set("X-Trace-Id", "trace-dashboard")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	payload := recorder.Body.String()
+	if strings.Contains(payload, "demo-sensitive-value") {
+		t.Fatalf("dashboard summary leaked secret: %s", payload)
+	}
+	for _, forbidden := range []string{"strategy", "announcement", "research", "fund_flow"} {
+		if strings.Contains(payload, forbidden) {
+			t.Fatalf("dashboard summary exposed unsupported field %q: %s", forbidden, payload)
+		}
+	}
+
+	var response apiResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal dashboard summary response: %v", err)
+	}
+	if response.Code != 0 || response.Message != "ok" {
+		t.Fatalf("unexpected dashboard summary envelope: %+v", response)
+	}
+	data, ok := response.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected dashboard summary object, got %#v", response.Data)
+	}
+	watchlist, ok := data["watchlist"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected watchlist summary object, got %#v", data["watchlist"])
+	}
+	if watchlist["up_count"] != float64(1) ||
+		watchlist["down_count"] != float64(1) ||
+		watchlist["flat_count"] != float64(1) {
+		t.Fatalf("unexpected watchlist summary: %#v", watchlist)
 	}
 }
 
