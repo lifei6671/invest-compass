@@ -140,7 +140,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T03 Go core 最小 HTTP server
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：T01
 - 交付物：
   - `core/cmd/invest-compass-core/main.go`
@@ -159,7 +159,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T04 sidecar stdin token 握手
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：T03
 - 交付物：
   - Go stdin 握手逻辑。
@@ -178,7 +178,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T05 Tauri 启动和管理 sidecar
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T04
 - 交付物：
   - Tauri sidecar 管理模块。
@@ -195,6 +195,10 @@ P7 跨平台桌面能力、打包、发布验收
   - 进程列表、日志、配置文件中没有 token。
 - 退出条件：
   - Tauri + Go sidecar 生命周期可控。
+- 当前进展：
+  - 已实现 Rust sidecar token、stdin 握手、ready JSON 解析、health/shutdown client 和 `core_health` 白名单 command。
+  - 已补 Go `/internal/shutdown`，合法 token 才能触发关闭回调。
+  - 待 Go core 二进制接入 Tauri 后，补齐应用启动/退出真实验收再改为 `[x]`。
 
 ### T06 Rust command 白名单代理基线
 
