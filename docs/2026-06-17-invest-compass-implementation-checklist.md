@@ -226,7 +226,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T07 Tauri capabilities 和 CSP 基线
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：T06
 - 交付物：
   - `apps/desktop/src-tauri/capabilities/`
@@ -242,6 +242,12 @@ P7 跨平台桌面能力、打包、发布验收
   - Markdown 或外链不突破 CSP。
 - 退出条件：
   - 桌面壳最小权限边界清晰。
+- 当前进展：
+  - 主窗口显式声明 `label: "main"`，并在 `tauri.conf.json` 中只启用 `main` capability。
+  - 默认 capability 只包含 `core:default`、`core:window:default`、`core:event:default`。
+  - 未使用的文件、通知、shell、updater 等插件权限不进入默认 capability。
+  - CSP 保持 `default-src 'self'`，并通过自动化测试防止任意远程脚本和 `unsafe-eval`。
+  - 已新增 `@invest-compass/desktop` 配置测试，覆盖 capability 显式绑定、最小插件权限和 CSP 脚本边界。
 
 ---
 
@@ -1123,6 +1129,7 @@ Windows：启动、Credential Manager、通知、托盘、sidecar、NSIS/MSI、�
 - token 不出现在 argv/env/日志/配置/数据库。
 - 前端不能直接访问 Go core。
 - Rust 不存在任意路径代理。
+- 当前状态：已通过本地自动化验证，后续跨平台打包验收仍归入 RG6。
 
 ### RG2：基础数据闭环门禁
 
