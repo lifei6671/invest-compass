@@ -1018,8 +1018,9 @@ P7 跨平台桌面能力、打包、发布验收
 - 当前进展：
   - 已在 `apps/sidecar-core/internal/logger` 新增日志导出文本二次脱敏规则。
   - 已复用统一 `RedactText` 作为唯一脱敏来源，避免日志、错误和导出各自维护敏感字段规则。
+  - 已在 `apps/sidecar-core/internal/logexport` 新增日志导出包规则，生成稳定文件名、UTC 时间和已脱敏内容，文件写入仍留给 Rust 路径授权层。
   - 导出文本保留 `request_id`、`trace_id`、`task_id` 等排障字段。
-  - 单测覆盖导出前二次脱敏 Authorization、API Key、代理密码和用户一次性持仓输入。
+  - 单测覆盖导出前二次脱敏 Authorization、API Key、代理密码和用户一次性持仓输入，以及导出包元数据稳定性。
   - 受 T37 依赖约束，`/api/logs/export`、Rust `export_logs`、导出目录选择和路径授权接入后再标记为 `[x]`。
 
 ### T41 检查更新入口
