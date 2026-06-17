@@ -6,6 +6,24 @@ import (
 	"time"
 )
 
+// ErrorCode 是报告模块对外稳定的错误码。
+type ErrorCode string
+
+const (
+	// ErrorReportNotFound 表示报告不存在或已软删除。
+	ErrorReportNotFound ErrorCode = "report_not_found"
+)
+
+// Error 表示报告模块规则错误。
+type Error struct {
+	Code ErrorCode
+}
+
+// Error 返回稳定错误码字符串，避免泄露报告输入快照。
+func (err *Error) Error() string {
+	return string(err.Code)
+}
+
 // Report 是分析报告的业务模型，字段对应 analysis_reports 表的首版核心列。
 type Report struct {
 	ID               int64
@@ -58,6 +76,17 @@ func VisibleReports(reports []Report) []Report {
 		visible = append(visible, report)
 	}
 	return visible
+}
+
+// FindVisibleReport 按报告 ID 查找未软删除报告，供详情 API 复用同一可见性规则。
+func FindVisibleReport(reports []Report, id int64) (Report, error) {
+	for _, report := range reports {
+		if report.ID != id || report.DeletedAt != nil {
+			continue
+		}
+		return report, nil
+	}
+	return Report{}, &Error{Code: ErrorReportNotFound}
 }
 
 // ExportMarkdown 导出报告 Markdown，默认不包含完整 input_snapshot。

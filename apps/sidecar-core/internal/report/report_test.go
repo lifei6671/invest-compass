@@ -1,6 +1,7 @@
 package report
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,31 @@ func TestVisibleReportsFiltersSoftDeleted(t *testing.T) {
 	}
 }
 
+// TestFindVisibleReportRejectsSoftDeleted 验证详情查询不能返回已软删除报告。
+func TestFindVisibleReportRejectsSoftDeleted(t *testing.T) {
+	deletedAt := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+
+	_, err := FindVisibleReport([]Report{
+		{ID: 1, TaskID: "task-visible", Title: "可见报告"},
+		{ID: 2, TaskID: "task-deleted", Title: "已删报告", DeletedAt: &deletedAt},
+	}, 2)
+
+	assertReportErrorCode(t, err, ErrorReportNotFound)
+}
+
+// TestFindVisibleReportReturnsVisibleReport 验证详情查询只返回未软删除报告。
+func TestFindVisibleReportReturnsVisibleReport(t *testing.T) {
+	report, err := FindVisibleReport([]Report{
+		{ID: 1, TaskID: "task-visible", Title: "可见报告"},
+	}, 1)
+	if err != nil {
+		t.Fatalf("FindVisibleReport returned error: %v", err)
+	}
+	if report.TaskID != "task-visible" {
+		t.Fatalf("unexpected report: %+v", report)
+	}
+}
+
 // TestExportMarkdownExcludesInputSnapshotByDefault 验证默认 Markdown 导出不包含完整 input_snapshot 和 userPosition。
 func TestExportMarkdownExcludesInputSnapshotByDefault(t *testing.T) {
 	report := Report{
@@ -86,5 +112,21 @@ func TestExportMarkdownCanIncludeInputSnapshotExplicitly(t *testing.T) {
 
 	if !strings.Contains(markdown, "输入快照") || !strings.Contains(markdown, "has_user_position") {
 		t.Fatalf("expected explicit input snapshot export, got %s", markdown)
+	}
+}
+
+// assertReportErrorCode 校验报告错误码稳定。
+func assertReportErrorCode(t *testing.T, err error, code ErrorCode) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var reportError *Error
+	if !errors.As(err, &reportError) {
+		t.Fatalf("expected report Error, got %T", err)
+	}
+	if reportError.Code != code {
+		t.Fatalf("expected error code %q, got %q", code, reportError.Code)
 	}
 }
