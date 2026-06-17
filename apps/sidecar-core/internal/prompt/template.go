@@ -2,7 +2,9 @@ package prompt
 
 import (
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 )
 
 // ErrorCode 是 Prompt 模板规则失败时对外稳定的错误码。
@@ -19,6 +21,8 @@ const (
 	ErrorUnsupportedVariable ErrorCode = "unsupported_prompt_variable"
 	// ErrorMissingPromptData 表示 Prompt 构建缺少核心上下文数据。
 	ErrorMissingPromptData ErrorCode = "missing_prompt_data"
+	// ErrorBuiltinTemplateReadOnly 表示内置模板不允许更新或删除。
+	ErrorBuiltinTemplateReadOnly ErrorCode = "builtin_prompt_template_readonly"
 )
 
 // Error 表示 Prompt 模板规则校验失败。
@@ -97,6 +101,27 @@ type Template struct {
 	Variables   []Variable
 	IsBuiltin   bool
 	Deleted     bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   time.Time
+}
+
+// CreateRequest 是创建 Prompt 模板所需的输入。
+type CreateRequest struct {
+	ID          int64
+	Name        string
+	Type        TemplateType
+	Description string
+	Content     string
+	IsBuiltin   bool
+}
+
+// UpdateRequest 是更新 Prompt 模板所需的输入。
+type UpdateRequest struct {
+	Name        string
+	Type        TemplateType
+	Description string
+	Content     string
 }
 
 // ValidateTemplate 校验模板类型和变量白名单，防止首版未闭环能力进入模板。
@@ -153,4 +178,70 @@ func FilterActiveTemplates(templates []Template) []Template {
 		active = append(active, template)
 	}
 	return active
+}
+
+// CreateTemplate 创建模板领域模型，并在保存前固化变量白名单结果。
+func CreateTemplate(request CreateRequest, now time.Time) (Template, error) {
+	template := Template{
+		ID:          request.ID,
+		Name:        request.Name,
+		Type:        request.Type,
+		Description: request.Description,
+		Content:     request.Content,
+		Variables:   ExtractVariables(request.Content),
+		IsBuiltin:   request.IsBuiltin,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := ValidateTemplate(template); err != nil {
+		return Template{}, err
+	}
+	return template, nil
+}
+
+// UpdateTemplate 更新非内置模板，并重新校验模板类型与变量白名单。
+func UpdateTemplate(existing Template, request UpdateRequest, now time.Time) (Template, error) {
+	if existing.IsBuiltin {
+		return Template{}, &Error{Code: ErrorBuiltinTemplateReadOnly}
+	}
+
+	updated := existing
+	updated.Name = request.Name
+	updated.Type = request.Type
+	updated.Description = request.Description
+	updated.Content = request.Content
+	updated.Variables = ExtractVariables(request.Content)
+	updated.UpdatedAt = now
+
+	if err := ValidateTemplate(updated); err != nil {
+		return Template{}, err
+	}
+	return updated, nil
+}
+
+// DeleteTemplate 对允许删除的模板执行软删除，避免列表和后续构建误用。
+func DeleteTemplate(existing Template, now time.Time) (Template, error) {
+	if !CanDeleteTemplate(existing) {
+		return Template{}, &Error{Code: ErrorBuiltinTemplateReadOnly}
+	}
+
+	deleted := existing
+	deleted.Deleted = true
+	deleted.DeletedAt = now
+	deleted.UpdatedAt = now
+	return deleted, nil
+}
+
+// ListTemplates 返回可见模板列表，并按更新时间倒序、ID 升序稳定排序。
+func ListTemplates(templates []Template) []Template {
+	listed := FilterActiveTemplates(templates)
+	sort.SliceStable(listed, func(leftIndex, rightIndex int) bool {
+		left := listed[leftIndex]
+		right := listed[rightIndex]
+		if left.UpdatedAt.Equal(right.UpdatedAt) {
+			return left.ID < right.ID
+		}
+		return left.UpdatedAt.After(right.UpdatedAt)
+	})
+	return listed
 }

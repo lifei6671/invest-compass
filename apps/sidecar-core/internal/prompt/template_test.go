@@ -3,6 +3,7 @@ package prompt
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 // TestValidateTemplateAcceptsSupportedTypesAndVariables 验证首版模板类型和变量白名单。
@@ -87,6 +88,136 @@ func TestFilterActiveTemplatesHidesSoftDeleted(t *testing.T) {
 
 	if len(active) != 1 || active[0].ID != 1 {
 		t.Fatalf("expected only active template, got %+v", active)
+	}
+}
+
+// TestCreateTemplateValidatesAndExtractsVariables 验证创建模板时统一校验并固化变量列表。
+func TestCreateTemplateValidatesAndExtractsVariables(t *testing.T) {
+	now := time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC)
+
+	template, err := CreateTemplate(CreateRequest{
+		ID:          9,
+		Name:        "自定义综合分析",
+		Type:        TemplateCustom,
+		Description: "用于个股综合分析",
+		Content:     "分析 {{stock_name}} 和 {{ stock_code }}，再看 {{news}}。",
+	}, now)
+	if err != nil {
+		t.Fatalf("CreateTemplate returned error: %v", err)
+	}
+
+	if template.ID != 9 || template.Name != "自定义综合分析" || template.Type != TemplateCustom {
+		t.Fatalf("unexpected created template: %+v", template)
+	}
+	if template.CreatedAt != now || template.UpdatedAt != now {
+		t.Fatalf("expected timestamps to be %s, got created=%s updated=%s", now, template.CreatedAt, template.UpdatedAt)
+	}
+	if template.Deleted || !template.DeletedAt.IsZero() {
+		t.Fatalf("new template should be active, got %+v", template)
+	}
+
+	wantVariables := []Variable{VariableStockName, VariableStockCode, VariableNews}
+	if len(template.Variables) != len(wantVariables) {
+		t.Fatalf("expected variables %+v, got %+v", wantVariables, template.Variables)
+	}
+	for index := range wantVariables {
+		if template.Variables[index] != wantVariables[index] {
+			t.Fatalf("index %d expected variable %q, got %q", index, wantVariables[index], template.Variables[index])
+		}
+	}
+}
+
+// TestUpdateTemplateRejectsBuiltin 验证内置模板只读，不能被更新。
+func TestUpdateTemplateRejectsBuiltin(t *testing.T) {
+	_, err := UpdateTemplate(Template{
+		ID:        1,
+		Name:      "内置系统模板",
+		Type:      TemplateSystem,
+		Content:   "分析 {{stock_name}}",
+		IsBuiltin: true,
+	}, UpdateRequest{
+		Name:    "尝试修改",
+		Type:    TemplateSystem,
+		Content: "修改 {{stock_name}}",
+	}, time.Now())
+
+	assertPromptErrorCode(t, err, ErrorBuiltinTemplateReadOnly)
+}
+
+// TestUpdateTemplateValidatesVariables 验证更新模板时同样执行变量白名单校验。
+func TestUpdateTemplateValidatesVariables(t *testing.T) {
+	_, err := UpdateTemplate(Template{
+		ID:      2,
+		Name:    "自定义模板",
+		Type:    TemplateCustom,
+		Content: "分析 {{stock_name}}",
+	}, UpdateRequest{
+		Name:    "自定义模板",
+		Type:    TemplateCustom,
+		Content: "分析 {{stock_name}} {{portfolio}}",
+	}, time.Now())
+
+	assertPromptErrorCode(t, err, ErrorUnsupportedVariable)
+}
+
+// TestDeleteTemplateSoftDeletesAllowedTemplate 验证允许删除的模板只做软删除。
+func TestDeleteTemplateSoftDeletesAllowedTemplate(t *testing.T) {
+	createdAt := time.Date(2026, 6, 17, 9, 0, 0, 0, time.UTC)
+	deletedAt := time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC)
+
+	template, err := DeleteTemplate(Template{
+		ID:        3,
+		Name:      "用户模板",
+		Type:      TemplateStockFull,
+		Content:   "分析 {{stock_name}}",
+		CreatedAt: createdAt,
+		UpdatedAt: createdAt,
+	}, deletedAt)
+	if err != nil {
+		t.Fatalf("DeleteTemplate returned error: %v", err)
+	}
+
+	if !template.Deleted || template.DeletedAt != deletedAt || template.UpdatedAt != deletedAt {
+		t.Fatalf("expected soft deleted template, got %+v", template)
+	}
+	if template.CreatedAt != createdAt {
+		t.Fatalf("expected created_at to stay %s, got %s", createdAt, template.CreatedAt)
+	}
+}
+
+// TestDeleteTemplateRejectsReadonlyBuiltin 验证只读内置模板不能删除。
+func TestDeleteTemplateRejectsReadonlyBuiltin(t *testing.T) {
+	_, err := DeleteTemplate(Template{
+		ID:        4,
+		Name:      "内置技术模板",
+		Type:      TemplateTechnical,
+		Content:   "分析 {{stock_name}}",
+		IsBuiltin: true,
+	}, time.Now())
+
+	assertPromptErrorCode(t, err, ErrorBuiltinTemplateReadOnly)
+}
+
+// TestListTemplatesFiltersDeletedAndSorts 验证列表不返回软删除模板，并按更新时间倒序稳定排序。
+func TestListTemplatesFiltersDeletedAndSorts(t *testing.T) {
+	base := time.Date(2026, 6, 17, 9, 0, 0, 0, time.UTC)
+	templates := []Template{
+		{ID: 1, Name: "old", Type: TemplateCustom, UpdatedAt: base},
+		{ID: 2, Name: "deleted", Type: TemplateCustom, UpdatedAt: base.Add(3 * time.Hour), Deleted: true},
+		{ID: 3, Name: "new", Type: TemplateCustom, UpdatedAt: base.Add(2 * time.Hour)},
+		{ID: 4, Name: "same time lower id", Type: TemplateCustom, UpdatedAt: base.Add(2 * time.Hour)},
+	}
+
+	listed := ListTemplates(templates)
+
+	wantIDs := []int64{3, 4, 1}
+	if len(listed) != len(wantIDs) {
+		t.Fatalf("expected %d templates, got %d: %+v", len(wantIDs), len(listed), listed)
+	}
+	for index, wantID := range wantIDs {
+		if listed[index].ID != wantID {
+			t.Fatalf("index %d expected ID %d, got %+v", index, wantID, listed[index])
+		}
 	}
 }
 
