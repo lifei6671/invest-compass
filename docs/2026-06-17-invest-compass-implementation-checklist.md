@@ -659,7 +659,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T26 分析任务创建和取消
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T16、T17、T18、T21、T24、T25
 - 交付物：
   - `/api/analysis/tasks`
@@ -677,6 +677,14 @@ P7 跨平台桌面能力、打包、发布验收
   - 用户持仓输入不进入普通日志。
 - 退出条件：
   - AI 分析主链路可从前端请求启动并取消。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/analysis` 纯规则模块。
+  - 已实现 `symbol`、`analysisType`、`aiConfigId`、`promptTemplateId` 创建请求校验和股票代码标准化。
+  - 已限制首版分析类型为 `stock_full`、`technical`。
+  - 已实现普通日志输入快照，默认只记录 `has_user_position`，不记录一次性持仓明细。
+  - 已实现取消规则：非终态任务可切换为 `CANCELLED` 并生成 `TASK_CANCELLED` 事件，终态任务不可重复取消。
+  - 单测覆盖缺少模型配置、缺少模板配置、非法分析类型、持仓输入脱敏快照和取消状态流转。
+  - 受 T16/T21/T25 依赖约束，真实任务创建、数据拉取、AI 调用、context cancellation 和 API/Rust command 接入完成后再标记为 `[x]`。
 
 ### T27 SSE 事件和 Rust 转发
 
