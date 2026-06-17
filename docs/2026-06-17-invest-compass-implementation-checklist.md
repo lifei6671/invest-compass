@@ -226,6 +226,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 已注册 `core_start` 和 `core_health`，没有实现任意 path / method 代理。
   - Rust 内部请求统一注入 runtime token、`X-Request-Id`、`X-Trace-Id`。
   - Go core 二进制路径由 Rust 侧单一函数解析，环境变量仅作为本地覆盖入口。
+  - 已新增桌面端安全测试，自动校验所有 `#[tauri::command]` 都显式注册到 `invoke_handler`，并禁止 `core_request(method, path, body)` 这类任意代理。
 
 ### T07 Tauri capabilities 和 CSP 基线
 
