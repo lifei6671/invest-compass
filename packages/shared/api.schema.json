@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifei6671.github.io/invest-compass/api.schema.json",
+  "title": "Invest Compass API Schema",
+  "type": "object",
+  "additionalProperties": true
+}

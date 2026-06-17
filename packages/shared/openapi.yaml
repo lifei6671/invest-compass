@@ -1,0 +1,6 @@
+openapi: 3.1.0
+info:
+  title: Invest Compass Local Core API
+  version: 0.1.0
+  description: Go core API is local-only and is called through Rust whitelist commands.
+paths: {}

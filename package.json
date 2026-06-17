@@ -1,0 +1,17 @@
+{
+  "name": "invest-compass",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "scripts": {
+    "dev": "pnpm --filter @invest-compass/desktop dev",
+    "build": "pnpm -r --if-present build",
+    "test": "pnpm -r --if-present test && pnpm core:test",
+    "check": "pnpm -r --if-present check && pnpm core:test && pnpm desktop:check",
+    "format:check": "pnpm format:check:go && pnpm format:check:rust",
+    "format:check:go": "test -z \"$(gofmt -l core)\"",
+    "format:check:rust": "cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check",
+    "core:test": "cd core && go test ./...",
+    "desktop:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml"
+  }
+}

@@ -1,0 +1,12 @@
+[package]
+name = "invest-compass-desktop"
+version = "0.1.0"
+description = "Invest Compass desktop shell"
+edition = "2021"
+license = "GPL-3.0-only"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
