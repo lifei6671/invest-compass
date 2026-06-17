@@ -342,7 +342,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T12 股票代码模型和标准化
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T09
 - 交付物：
   - `apps/sidecar-core/internal/stock`
@@ -354,6 +354,11 @@ P7 跨平台桌面能力、打包、发布验收
   - table-driven tests 覆盖合法、非法、边界 symbol。
 - 退出条件：
   - 股票代码成为所有后续 API 的统一输入类型。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/stock` 纯模型包，完成 `CN:SH:600519`、`CN:SZ:300750`、`HK:00700`、`US:AAPL` 解析和大小写标准化。
+  - 已定义稳定错误码：空输入、格式错误、不支持市场、不支持交易所、代码非法。
+  - table-driven tests 已覆盖合法、非法和边界输入。
+  - 受 T09 依赖约束，后续 API/storage 接入完成后再标记为 `[x]`。
 
 ### T13 首版合规 Market Provider
 
