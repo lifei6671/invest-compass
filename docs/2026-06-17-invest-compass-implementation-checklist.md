@@ -1072,10 +1072,11 @@ P7 跨平台桌面能力、打包、发布验收
   - 检查更新符合首版信任边界。
 - 当前进展：
   - 已新增 `apps/sidecar-core/internal/updatecheck` 检查更新信任边界规则模块。
+  - 已实现更新 JSON 解析和必填版本校验，解析后会清理首版支持字段首尾空白。
   - 已实现更新 JSON URL、下载链接和发布说明链接的 HTTPS 与 allowlist 校验。
   - 已实现首版 `PROMPT_ONLY` 结果模型，只表达版本提示或外链，不包含下载、安装或静默升级动作。
   - 已实现简单点分版本比较，支持判断当前版本是否低于 manifest 版本。
-  - 单测覆盖 HTTP URL 拒绝、非 allowlist 域名拒绝、manifest 链接 allowlist 校验、新版本只提示和当前已是最新。
+  - 单测覆盖非法 JSON、缺少版本、字段清理、HTTP URL 拒绝、非 allowlist 域名拒绝、manifest 链接 allowlist 校验、新版本只提示和当前已是最新。
   - 受 T37 依赖约束，Rust `check_update`、更新配置读取、远程 JSON 获取和设置页入口接入后再标记为 `[x]`。
 
 ### T42 sidecar 二进制命名和打包

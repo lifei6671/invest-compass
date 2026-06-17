@@ -5,6 +5,42 @@ import (
 	"testing"
 )
 
+// TestParseManifestRejectsInvalidJSON 验证更新 JSON 格式错误时返回稳定错误码。
+func TestParseManifestRejectsInvalidJSON(t *testing.T) {
+	_, err := ParseManifest([]byte(`{"version":`))
+
+	assertUpdateErrorCode(t, err, ErrorInvalidManifest)
+}
+
+// TestParseManifestRequiresVersion 验证更新 JSON 必须包含版本号。
+func TestParseManifestRequiresVersion(t *testing.T) {
+	_, err := ParseManifest([]byte(`{"download_url":"https://updates.invest-compass.example/download"}`))
+
+	assertUpdateErrorCode(t, err, ErrorInvalidManifest)
+}
+
+// TestParseManifestTrimsFields 验证更新 JSON 解析后会清理首尾空白，避免后续 allowlist 校验误判。
+func TestParseManifestTrimsFields(t *testing.T) {
+	manifest, err := ParseManifest([]byte(`{
+		"version":" 0.2.0 ",
+		"download_url":" https://updates.invest-compass.example/download ",
+		"release_notes_url":" https://updates.invest-compass.example/releases/0.2.0 "
+	}`))
+	if err != nil {
+		t.Fatalf("ParseManifest returned error: %v", err)
+	}
+
+	if manifest.Version != "0.2.0" {
+		t.Fatalf("unexpected version: %q", manifest.Version)
+	}
+	if manifest.DownloadURL != "https://updates.invest-compass.example/download" {
+		t.Fatalf("unexpected download URL: %q", manifest.DownloadURL)
+	}
+	if manifest.ReleaseNotesURL != "https://updates.invest-compass.example/releases/0.2.0" {
+		t.Fatalf("unexpected release notes URL: %q", manifest.ReleaseNotesURL)
+	}
+}
+
 // TestValidateManifestURLRejectsHTTP 验证更新 JSON 只能使用 HTTPS。
 func TestValidateManifestURLRejectsHTTP(t *testing.T) {
 	err := ValidateManifestURL("http://updates.invest-compass.example/latest.json", []string{"updates.invest-compass.example"})

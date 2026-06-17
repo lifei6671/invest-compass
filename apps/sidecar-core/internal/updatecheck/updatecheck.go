@@ -1,6 +1,7 @@
 package updatecheck
 
 import (
+	"encoding/json"
 	"net/url"
 	"strconv"
 	"strings"
@@ -16,6 +17,8 @@ const (
 	ErrorHostNotAllowed ErrorCode = "update_host_not_allowed"
 	// ErrorInvalidURL 表示更新相关链接不是合法 URL。
 	ErrorInvalidURL ErrorCode = "invalid_update_url"
+	// ErrorInvalidManifest 表示更新 JSON 结构无效或缺少必填字段。
+	ErrorInvalidManifest ErrorCode = "invalid_update_manifest"
 )
 
 // Action 是首版检查更新允许的用户动作。
@@ -43,6 +46,12 @@ type Manifest struct {
 	ReleaseNotesURL string
 }
 
+type manifestJSON struct {
+	Version         string `json:"version"`
+	DownloadURL     string `json:"download_url"`
+	ReleaseNotesURL string `json:"release_notes_url"`
+}
+
 // Result 是检查更新后的首版展示结果。
 type Result struct {
 	HasNewVersion   bool
@@ -51,6 +60,23 @@ type Result struct {
 	Action          Action
 	DownloadURL     string
 	ReleaseNotesURL string
+}
+
+// ParseManifest 解析更新 JSON，并清理首版支持字段的首尾空白。
+func ParseManifest(content []byte) (Manifest, error) {
+	var payload manifestJSON
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return Manifest{}, &Error{Code: ErrorInvalidManifest}
+	}
+	manifest := Manifest{
+		Version:         strings.TrimSpace(payload.Version),
+		DownloadURL:     strings.TrimSpace(payload.DownloadURL),
+		ReleaseNotesURL: strings.TrimSpace(payload.ReleaseNotesURL),
+	}
+	if manifest.Version == "" {
+		return Manifest{}, &Error{Code: ErrorInvalidManifest}
+	}
+	return manifest, nil
 }
 
 // ValidateManifestURL 校验更新 JSON URL 必须使用 HTTPS 且命中 allowlist。
