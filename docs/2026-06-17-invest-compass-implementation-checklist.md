@@ -634,8 +634,9 @@ P7 跨平台桌面能力、打包、发布验收
   - 已支持 base URL、model、temperature、max_tokens、timeout、普通 chat 和 stream chat。
   - 已支持 context cancellation，并将 401、429、5xx、取消/超时映射为稳定错误码。
   - 流式响应支持 `data: ...` chunk 和 `[DONE]` 结束语义。
+  - 流式响应会拒绝缺少 `choices` 的异常 chunk，避免异常 Provider payload 被静默吞掉。
   - Provider 错误会统一脱敏，错误文本不泄露 Authorization 或 API Key。
-  - mock server 单测覆盖成功、401、429、5xx、context cancellation 和流式 chunk。
+  - mock server 单测覆盖成功、401、429、5xx、context cancellation、流式 chunk 和异常流式 payload。
   - 受 T21 依赖约束，模型配置读取、系统凭据注入、真实连通性测试和分析任务复用接入后再标记为 `[x]`。
 
 ### T23 Prompt 模板 CRUD 和变量白名单

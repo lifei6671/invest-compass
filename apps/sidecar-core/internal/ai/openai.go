@@ -225,6 +225,10 @@ func (client OpenAICompatibleClient) readStream(body io.Reader, chunks chan<- Ch
 			chunks <- ChatChunk{Err: &Error{Code: ErrorUpstream, Message: err.Error()}}
 			return
 		}
+		if len(payload.Choices) == 0 {
+			chunks <- ChatChunk{Err: &Error{Code: ErrorUpstream, Message: "missing stream choices"}}
+			return
+		}
 		for _, choice := range payload.Choices {
 			if choice.Delta.Content != "" {
 				chunks <- ChatChunk{Content: choice.Delta.Content}

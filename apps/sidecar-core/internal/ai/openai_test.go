@@ -139,6 +139,32 @@ func TestStreamChatReadsChunks(t *testing.T) {
 	}
 }
 
+// TestStreamChatRejectsChunkWithoutChoices 验证异常流式 payload 不会被静默吞掉。
+func TestStreamChatRejectsChunkWithoutChoices(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		_, _ = response.Write([]byte("data: {\"id\":\"chunk-without-choices\"}\n\n"))
+		_, _ = response.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewOpenAICompatibleClient(ClientConfig{BaseURL: server.URL, APIKey: "dummy-provider-token", Timeout: time.Second})
+	chunks, err := client.StreamChat(context.Background(), ChatRequest{Model: "gpt-test", Messages: []Message{{Role: RoleUser, Content: "hello"}}})
+	if err != nil {
+		t.Fatalf("StreamChat returned error: %v", err)
+	}
+
+	var gotErr error
+	for chunk := range chunks {
+		if chunk.Err != nil {
+			gotErr = chunk.Err
+			break
+		}
+	}
+
+	assertAIErrorCode(t, gotErr, ErrorUpstream)
+}
+
 // assertAIErrorCode 校验 AI Provider 错误码稳定。
 func assertAIErrorCode(t *testing.T, err error, code ErrorCode) {
 	t.Helper()
