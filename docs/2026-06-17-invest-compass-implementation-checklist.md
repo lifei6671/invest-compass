@@ -576,7 +576,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T23 Prompt 模板 CRUD 和变量白名单
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T09
 - 交付物：
   - `/api/prompt-templates/list`
@@ -595,6 +595,13 @@ P7 跨平台桌面能力、打包、发布验收
   - CRUD 不返回已软删除模板。
 - 退出条件：
   - Prompt 模板页没有不可执行模板类型。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/prompt` 纯规则模块，定义首版模板类型和变量白名单。
+  - 已限制模板类型只允许 `system`、`stock_full`、`technical`、`custom`。
+  - 已限制变量只允许 `stock_name`、`stock_code`、`market`、`quote`、`kline_summary`、`indicators`、`news`、`analysis_language`。
+  - 已实现内置模板删除规则、软删除过滤和变量提取去重。
+  - 单测覆盖未支持模板类型、未支持变量、删除规则、软删除过滤和变量提取顺序。
+  - 受 T09 依赖约束，CRUD API、Rust command 和数据库持久化接入完成后再标记为 `[x]`。
 
 ### T24 Prompt 构建和合规输出约束
 
