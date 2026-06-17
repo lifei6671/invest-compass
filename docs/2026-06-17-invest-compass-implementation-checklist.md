@@ -865,6 +865,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 当前进展：
   - 已新增前端/shared 源码安全扫描，禁止 renderer 使用 `localStorage`、`sessionStorage`、`indexedDB` 保存敏感状态，禁止直连 Go core 和处理 runtime token。
   - 已新增前端生产源码 mock 数据扫描，禁止 `mock` / `fake` / `dummy` / `fixture` / `demo` / `sample` 业务数据和硬编码投研数据伪装真实能力。
+  - 已新增前端/shared 数据源扫描，禁止 renderer 绕过 typed invoke service 直接使用 `fetch`、`XMLHttpRequest`、`axios` 或硬编码 HTTP 数据源取数。
 
 ### T31 Dashboard 页面
 

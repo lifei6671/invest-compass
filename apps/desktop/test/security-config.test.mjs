@@ -103,6 +103,10 @@ test("前端生产源码禁止 mock 数据伪装真实能力", () => {
   assert.deepEqual(findRendererMockDataUsage(rendererBoundarySources), []);
 });
 
+test("前端和共享契约禁止绕过 typed invoke service 直接取数", () => {
+  assert.deepEqual(findRendererDataSourceBypass(rendererBoundarySources), []);
+});
+
 test("前端安全扫描能识别直连 Go core 和内部密钥字段", () => {
   const unsafeSource = `
     const resolved_api_key = "secret";
@@ -119,6 +123,21 @@ test("前端安全扫描能识别直连 Go core 和内部密钥字段", () => {
     "renderer source 使用浏览器持久化存储保存敏感状态",
     "renderer source 直连本地 Go core 地址",
     "renderer source 处理 runtime token header",
+  ]);
+});
+
+test("前端数据源扫描能识别直接 HTTP 和浏览器网络调用", () => {
+  const unsafeSource = `
+    const client = axios.create({ baseURL: "https://example.com" });
+    const response = await fetch("/api/stocks/search");
+    const xhr = new XMLHttpRequest();
+  `;
+
+  assert.deepEqual(findRendererDataSourceBypass([unsafeSource]), [
+    "renderer source 直接使用 fetch 取数",
+    "renderer source 直接使用 XMLHttpRequest 取数",
+    "renderer source 直接使用 axios 取数",
+    "renderer source 硬编码 HTTP 数据源地址",
   ]);
 });
 
@@ -228,6 +247,33 @@ function findRendererBoundaryLeaks(sources) {
     {
       pattern: /\bX-Invest-Compass-Token\b/,
       message: "renderer source 处理 runtime token header",
+    },
+  ];
+
+  return sources.flatMap((source) =>
+    checks
+      .filter((check) => check.pattern.test(source))
+      .map((check) => check.message),
+  );
+}
+
+function findRendererDataSourceBypass(sources) {
+  const checks = [
+    {
+      pattern: /\bfetch\s*\(/,
+      message: "renderer source 直接使用 fetch 取数",
+    },
+    {
+      pattern: /\bnew\s+XMLHttpRequest\b|\bXMLHttpRequest\s*\(/,
+      message: "renderer source 直接使用 XMLHttpRequest 取数",
+    },
+    {
+      pattern: /\baxios\b/,
+      message: "renderer source 直接使用 axios 取数",
+    },
+    {
+      pattern: /https?:\/\//,
+      message: "renderer source 硬编码 HTTP 数据源地址",
     },
   ];
 
