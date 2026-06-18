@@ -13,7 +13,7 @@
 - Tauri v2 桌面壳、React 前端、Go sidecar core 可以端到端启动。
 - Rust 只暴露白名单 command，不提供任意路径代理。
 - Go sidecar 只监听 `127.0.0.1`，runtime token 通过 stdin 握手传递。
-- SQLite 使用 `sqlc + database/sql`，所有业务表通过 migration 管理。
+- SQLite 使用 `GORM`，所有业务表通过 migration 管理。
 - 股票搜索、自选股、行情、K 线、技术指标、新闻资讯形成基础数据闭环。
 - OpenAI-compatible AI Provider、模型配置、Prompt 模板、模型测试可用。
 - API Key 和代理密码保存到系统凭据管理器，SQLite 只保存引用标识。
@@ -148,8 +148,12 @@ P7 跨平台桌面能力、打包、发布验收
 - 交付物：
   - `apps/sidecar-core/cmd/invest-compass-core/main.go`
   - `apps/sidecar-core/internal/server`
+  - `apps/sidecar-core/internal/actions`
   - `/internal/health`
 - 执行动作：
+  - `internal/server` 只负责本地 HTTP server 监听、初始化、启动和优雅关闭。
+  - `internal/actions/router.go` 使用 Gin 集中注册本地 HTTP API。
+  - `internal/actions/<module>` 负责各自业务 handler，并对外提供路由定义。
   - 只监听 `127.0.0.1`。
   - 所有 API 只接受 POST。
   - 返回统一响应结构和 `requestId` / `traceId`。
@@ -259,11 +263,12 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T08 SQLite migration 基线
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：T03
 - 交付物：
   - `apps/sidecar-core/migrations/`
-  - `apps/sidecar-core/internal/storage`
+  - `apps/sidecar-core/internal/dao`
+  - `apps/sidecar-core/internal/model`
   - 初始 schema migration。
 - 执行动作：
   - 建立 `stocks`、`watchlists`、`quotes`、`klines`、`news_items`。
@@ -276,33 +281,52 @@ P7 跨平台桌面能力、打包、发布验收
   - 唯一约束和软删除索引符合技术方案。
 - 退出条件：
   - 本地数据库结构可支撑首版闭环。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/dao.Migrate`，通过 GORM `AutoMigrate` 创建首版 SQLite schema。
+  - 已把首版 GORM schema 模型放入 `apps/sidecar-core/internal/model`，供 service 和 dao 共享。
+  - 已建立 `stocks`、`watchlists`、`quotes`、`klines`、`news_items`、`ai_configs`、`prompt_templates`、`analysis_reports`、`tasks`、`task_events`、`settings`。
+  - 所有业务表已包含 `created_at`、`updated_at`。
+  - `watchlists`、`news_items`、`ai_configs`、`prompt_templates`、`analysis_reports` 已具备软删除列。
+  - 已验证空库迁移成功、重复迁移幂等、active watchlist symbol 唯一约束和 K 线复合唯一约束。
+  - 已保留 `apps/sidecar-core/migrations/` 目录，用于后续发布后版本化迁移和备份策略扩展。
 
-### T09 sqlc 查询和 storage 事务层
+### T09 GORM dao 和事务层
 
 - 状态：`[ ]`
 - 依赖：T08
 - 交付物：
-  - sqlc 配置。
-  - 关键 CRUD query。
+  - `internal/dao` GORM 入口。
+  - `internal/model` 共享模型。
+  - `internal/service` 业务编排入口。
+  - `pkg/constant` 跨包非错误类常量。
+  - `pkg/xerr` 跨包错误码和通用错误类型。
+  - 关键 CRUD repository。
   - 事务封装。
 - 执行动作：
-  - 为自选股、AI 配置、Prompt、任务、事件、报告生成 query。
+  - 为自选股、AI 配置、Prompt、任务、事件、报告实现 GORM 数据访问。
   - 重要写操作使用事务。
   - 不写手拼 SQL 到业务 handler。
 - 验证：
-  - `sqlc generate`
+  - `go test ./...`
   - Go 单测覆盖 CRUD、唯一约束、软删除。
 - 退出条件：
   - 数据访问层类型安全且可测试。
 - 当前进展：
-  - 已新增 Go core 生产源码扫描，禁止非 `internal/storage` 层直接使用 `database/sql` 或手写 SQL 语句，防止业务 handler 绕过后续 `sqlc + database/sql` 数据访问边界。
+  - T08 已完成 GORM schema 和迁移基线，T09 后续聚焦 CRUD repository、事务封装和业务模块持久化接入。
+  - 已新增 Go core 生产源码扫描，禁止非 `internal/dao` 层直接使用 `database/sql` 或手写 SQL 语句，防止业务 handler 绕过 GORM dao 数据访问边界。
+  - 已新增 Gin/GORM 组件护栏，后续 Go HTTP 路由必须在 `internal/actions/router.go` 走 Gin，数据库访问入口必须走 `internal/dao` 的 GORM。
+  - 已新增 server/actions 架构护栏，`internal/server` 不得注册业务路由或承载 handler，action 子包不得直接依赖 Gin 路由注册 API。
+  - 已新增 `internal/service`、`internal/model`、`internal/dao`、`pkg/constant`、`pkg/xerr` 分层目录护栏。
+  - 已将现有业务模块迁移为 `internal/service/<module>` 子包，例如 `stock` 已迁入 `internal/service/stock`。
+  - 已将公共日志和脱敏辅助能力迁入 `apps/sidecar-core/pkg/logger`。
+  - 已将 service 层通用错误码和通用错误结构迁入 `apps/sidecar-core/pkg/xerr`，并新增护栏禁止 service 重新定义。
 
 ### T10 统一日志、错误和脱敏
 
 - 状态：`[x]`
 - 依赖：T03
 - 交付物：
-  - `apps/sidecar-core/internal/logger`
+  - `apps/sidecar-core/pkg/logger`
   - 统一错误响应。
   - secret redaction。
 - 执行动作：
@@ -315,7 +339,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 日志、错误、导出前都具备统一脱敏入口。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/logger`，提供稳定日志字段常量和统一脱敏入口。
+  - 已新增 `apps/sidecar-core/pkg/logger`，提供稳定日志字段常量和统一脱敏入口。
   - 脱敏覆盖 API Key、Authorization、Proxy-Authorization、代理密码、license key、用户一次性持仓输入。
   - HTTP handler 已接入 panic recovery，panic 会返回统一错误 envelope，并在写入日志前脱敏。
   - 单测覆盖字段契约、错误脱敏、密钥脱敏、nil error 和 panic recovery。
@@ -342,13 +366,13 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 设置中心可依赖真实 API，不需要假状态。
 - 当前进展：
-  - 已扩展 `apps/sidecar-core/internal/settings` 设置规则模块。
+  - 已扩展 `apps/sidecar-core/internal/service/settings` 设置规则模块。
   - 已实现 settings 明文敏感配置拦截，禁止 `api_key`、密码、token、secret、Authorization 等敏感值作为普通配置保存。
   - 已允许 `api_key_ref`、`proxy_credential_ref`、`masked_api_key`、`has_api_key` 等凭据引用和脱敏状态落库。
   - 已实现工作区路径绝对路径校验，非法路径返回稳定错误码。
   - 已实现缓存统计只汇总行情、K 线、新闻、图表图片等临时缓存，明确排除报告和配置。
   - 单测覆盖敏感配置拦截、凭据引用放行、非法工作区路径和临时缓存统计。
-  - 已在 Go core `apps/sidecar-core/internal/server` 接入 `POST /api/cache/stats` 和 `POST /api/cache/clean`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
+  - 已在 Go core `apps/sidecar-core/internal/actions/cache` 接入 `POST /api/cache/stats` 和 `POST /api/cache/clean`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
   - Cache stats 只从 `Config.CacheUsages` 单一注入源统计临时缓存，JSON 字段使用稳定 snake_case，明确排除报告和配置。
   - Cache clean 只把 `settings.FilterCacheCleanupTargets` 过滤后的临时目标交给 `CacheCleaner`，不会把报告或配置传入清理边界。
   - 单测覆盖 cache stats 排除受保护目标、cache clean 只清理临时目标。
@@ -363,7 +387,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[~]`
 - 依赖：T09
 - 交付物：
-  - `apps/sidecar-core/internal/stock`
+  - `apps/sidecar-core/internal/service/stock`
   - Symbol parser / validator。
 - 执行动作：
   - 支持 `CN:SH:600519`、`CN:SZ:300750`、`HK:00700`、`US:AAPL` 等格式。
@@ -373,10 +397,10 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 股票代码成为所有后续 API 的统一输入类型。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/stock` 纯模型包，完成 `CN:SH:600519`、`CN:SZ:300750`、`HK:00700`、`US:AAPL` 解析和大小写标准化。
+  - 已新增 `apps/sidecar-core/internal/service/stock` 纯模型包，完成 `CN:SH:600519`、`CN:SZ:300750`、`HK:00700`、`US:AAPL` 解析和大小写标准化。
   - 已定义稳定错误码：空输入、格式错误、不支持市场、不支持交易所、代码非法。
   - table-driven tests 已覆盖合法、非法和边界输入。
-  - 受 T09 依赖约束，后续 API/storage 接入完成后再标记为 `[x]`。
+  - 受 T09 依赖约束，后续 API/dao 接入完成后再标记为 `[x]`。
 
 ### T13 首版合规 Market Provider
 
@@ -396,7 +420,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 首版不依赖未授权或不稳定的隐式抓取路径。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/market` 契约包，定义 `MarketProvider`、Provider 状态、股票基础信息、行情快照和 K 线模型。
+  - 已新增 `apps/sidecar-core/internal/service/market` 契约包，定义 `MarketProvider`、Provider 状态、股票基础信息、行情快照和 K 线模型。
   - Provider 状态模型强制携带来源、授权边界、频率限制和支持市场描述。
   - Provider 错误会保留 provider/operation 可观测上下文，并复用统一脱敏入口避免泄露授权头和 API Key。
   - 单测已覆盖接口契约、标准 symbol 使用、合规状态描述和错误脱敏。
@@ -420,7 +444,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 前端可以基于真实 command 搜索股票。
 - 当前进展：
-  - 已在 Go core `apps/sidecar-core/internal/server` 接入 `POST /api/stocks/search`。
+  - 已在 Go core `apps/sidecar-core/internal/actions/stocks` 接入 `POST /api/stocks/search`。
   - 搜索 API 复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
   - 已实现 keyword 空值校验，空 keyword 返回 400 和稳定错误消息 `invalid_keyword`。
   - 已通过 `MarketProvider.Search` 返回标准字段：`symbol`、`name`、`code`、`market`、`exchange`。
@@ -449,7 +473,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 自选股页面可完整使用真实数据。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/watchlist` 自选股规则模块。
+  - 已新增 `apps/sidecar-core/internal/service/watchlist` 自选股规则模块。
   - 已复用 `stock.ParseSymbol` 作为 symbol 标准化唯一来源，避免自选股另行维护股票代码解析规则。
   - 已实现创建、更新元数据、软删除和 active 列表过滤排序规则。
   - 已实现 active symbol 唯一校验，软删除后同一 symbol 可重新添加。
@@ -477,7 +501,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 个股详情页可展示真实行情和 K 线。
 - 当前进展：
-  - 已在 `apps/sidecar-core/internal/market` 新增行情短缓存和 K 线缓存规则。
+  - 已在 `apps/sidecar-core/internal/service/market` 新增行情短缓存和 K 线缓存规则。
   - 已限制 quote 短缓存 TTL 必须处于 10-60 秒范围内。
   - 已实现 quote 按 symbol 命中和过期 miss 规则。
   - 已实现 K 线按 `symbol + period + adjust` 隔离缓存，并按 `trade_date` 升序返回。
@@ -489,7 +513,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[~]`
 - 依赖：T16
 - 交付物：
-  - `apps/sidecar-core/internal/indicator`
+  - `apps/sidecar-core/internal/service/indicator`
   - `/api/market/indicators`
   - `market_indicators`
 - 执行动作：
@@ -502,7 +526,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 前端无需自行计算业务指标。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/indicator` 纯计算模块。
+  - 已新增 `apps/sidecar-core/internal/service/indicator` 纯计算模块。
   - 已实现 MA、EMA、MACD、RSI、KDJ、BOLL、成交量均线、涨跌幅、区间最大回撤、区间波动率。
   - 固定输入输出单测覆盖全部指标，并覆盖数据不足、非法周期、非法输入的稳定错误码。
   - 受 T16 依赖约束，`/api/market/indicators` 和 `market_indicators` command 接入完成后再标记为 `[x]`。
@@ -512,7 +536,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[~]`
 - 依赖：T12、T10
 - 交付物：
-  - `apps/sidecar-core/internal/news`
+  - `apps/sidecar-core/internal/service/news`
   - `/api/news/list`
   - `/api/news/market`
   - 对应 Rust command。
@@ -528,7 +552,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - Dashboard、资讯中心、分析上下文可使用新闻数据。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/news` 纯模块，定义新闻条目、个股新闻请求、市场新闻请求和 Provider 契约。
+  - 已新增 `apps/sidecar-core/internal/service/news` 纯模块，定义新闻条目、个股新闻请求、市场新闻请求和 Provider 契约。
   - 已实现 HTTP(S) URL scheme 白名单校验，禁止 `javascript:`、`file:` 等危险链接进入输出。
   - 已实现 `content_hash` 去重，忽略 URL 和来源以合并多来源转载，并保留首次出现条目。
   - 已实现新闻缓存 TTL 校验，限制在 30-120 分钟范围内。
@@ -554,15 +578,15 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 总览页和数据源状态页没有假数据入口。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/dashboard` Dashboard 首版聚合规则模块。
+  - 已新增 `apps/sidecar-core/internal/service/dashboard` Dashboard 首版聚合规则模块。
   - 已实现自选股涨跌平分布、最近报告、最近任务、市场新闻、风险提示和 provider status 安全展示模型。
   - 已复用 `report`、`task`、`logger` 既有规则，报告过滤软删除并按 `task_id` 去重，任务按 `updated_at` 倒序，Provider 最近错误统一脱敏。
   - 聚合结果不包含策略、公告、研报、资金流等首版不做字段。
   - 单测覆盖自选涨跌分布、最近报告/任务/新闻排序截断、Provider 错误脱敏和不返回非 MVP 字段。
-  - 已在 Go core `apps/sidecar-core/internal/server` 接入 `POST /api/providers/status`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
+  - 已在 Go core `apps/sidecar-core/internal/actions/providers` 接入 `POST /api/providers/status`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
   - Provider status API 复用 Dashboard 安全展示模型，返回 `name`、`source`、`available`、`last_error`，并对最近错误做脱敏。
   - 单测覆盖 provider status API 的安全响应和敏感错误脱敏。
-  - 已在 Go core `apps/sidecar-core/internal/server` 接入 `POST /api/dashboard/summary`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
+  - 已在 Go core `apps/sidecar-core/internal/actions/dashboard` 接入 `POST /api/dashboard/summary`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
   - Dashboard summary API 只从 `Config.DashboardInput` 单一注入源构建响应，不在 handler 内拼散落数据或生成假数据。
   - 单测覆盖 dashboard summary API 的自选涨跌分布、敏感错误脱敏和不返回非 MVP 字段。
   - 受 T15/T16/T18 依赖约束，对应 Rust command 和 Dashboard 真实数据源接入后再标记为 `[x]`。
@@ -612,7 +636,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 模型配置页可真实保存和测试模型。
 - 当前进展：
-  - 已在 `apps/sidecar-core/internal/ai` 新增 AI 配置安全规则。
+  - 已在 `apps/sidecar-core/internal/service/ai` 新增 AI 配置安全规则。
   - 已实现配置列表安全展示模型，只返回 `api_key_ref`、`masked_api_key` 和 `has_api_key`，不包含真实 API Key。
   - 已实现 Go core 保存配置规则，拒绝保存请求携带 `raw_api_key`。
   - 已实现模型连通性测试请求的安全日志快照，只记录 `has_api_key`，不记录 `resolved_api_key` 字段名或运行期 Key 明文。
@@ -625,7 +649,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[~]`
 - 依赖：T21
 - 交付物：
-  - `apps/sidecar-core/internal/ai`
+  - `apps/sidecar-core/internal/service/ai`
   - OpenAI-compatible chat / stream chat。
 - 执行动作：
   - 支持 base URL、model、temperature、max_tokens、timeout。
@@ -637,7 +661,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - AI Provider 可被模型测试和分析任务复用。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/ai`，实现 OpenAI-compatible `/v1/chat/completions` 标准库 HTTP 客户端。
+  - 已新增 `apps/sidecar-core/internal/service/ai`，实现 OpenAI-compatible `/v1/chat/completions` 标准库 HTTP 客户端。
   - 已支持 base URL、model、temperature、max_tokens、timeout、普通 chat 和 stream chat。
   - 已支持 context cancellation，并将 401、429、5xx、取消/超时映射为稳定错误码。
   - 流式响应支持 `data: ...` chunk 和 `[DONE]` 结束语义。
@@ -668,7 +692,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - Prompt 模板页没有不可执行模板类型。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/prompt` 纯规则模块，定义首版模板类型和变量白名单。
+  - 已新增 `apps/sidecar-core/internal/service/prompt` 纯规则模块，定义首版模板类型和变量白名单。
   - 已限制模板类型只允许 `system`、`stock_full`、`technical`、`custom`。
   - 已限制变量只允许 `stock_name`、`stock_code`、`market`、`quote`、`kline_summary`、`indicators`、`news`、`analysis_language`。
   - 已实现内置模板删除规则、软删除过滤和变量提取去重。
@@ -682,7 +706,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[~]`
 - 依赖：T17、T18、T23
 - 交付物：
-  - `apps/sidecar-core/internal/prompt`
+  - `apps/sidecar-core/internal/service/prompt`
   - 个股综合分析 Prompt builder。
   - 技术面分析 Prompt builder。
 - 执行动作：
@@ -695,7 +719,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 分析任务可以稳定构建首版支持的 Prompt。
 - 当前进展：
-  - 已在 `apps/sidecar-core/internal/prompt` 中新增个股综合分析和技术面分析 Prompt builder。
+  - 已在 `apps/sidecar-core/internal/service/prompt` 中新增个股综合分析和技术面分析 Prompt builder。
   - 已实现 System、Context、User 三层 Prompt 分离。
   - System Prompt 固定包含“不构成投资建议”、风险、数据时效、事实/推断/观点区分、观察指标和用户自行决策提示。
   - System Prompt 明确禁止“稳赚”“必涨”“买入信号”等诱导表达。
@@ -712,7 +736,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 状态：`[~]`
 - 依赖：T09、T10
 - 交付物：
-  - `apps/sidecar-core/internal/task`
+  - `apps/sidecar-core/internal/service/task`
   - tasks / task_events 写入逻辑。
 - 执行动作：
   - 支持 `PENDING`、`RUNNING`、`SUCCESS`、`FAILED`、`CANCELLED`。
@@ -725,7 +749,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 长任务有可恢复、可查询的状态和事件基础。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/task` 纯状态机和事件模型。
+  - 已新增 `apps/sidecar-core/internal/service/task` 纯状态机和事件模型。
   - 已实现 `PENDING`、`RUNNING`、`SUCCESS`、`FAILED`、`CANCELLED` 状态定义和合法流转校验。
   - 已实现 `TASK_CREATED`、`TASK_STARTED`、`TASK_PROGRESS`、`TASK_LOG`、`TASK_CHUNK`、`TASK_SUCCESS`、`TASK_FAILED`、`TASK_CANCELLED` 事件类型。
   - 已实现事件 payload 入库前统一脱敏、按 id 递增回放、RUNNING 任务恢复为终态的基础决策。
@@ -753,7 +777,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - AI 分析主链路可从前端请求启动并取消。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/analysis` 纯规则模块。
+  - 已新增 `apps/sidecar-core/internal/service/analysis` 纯规则模块。
   - 已实现 `symbol`、`analysisType`、`aiConfigId`、`promptTemplateId` 创建请求校验和股票代码标准化。
   - 已限制首版分析类型为 `stock_full`、`technical`。
   - 已实现普通日志输入快照，默认只记录 `has_user_position`，不记录一次性持仓明细。
@@ -782,7 +806,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 分析页可展示真实进度和流式输出。
 - 当前进展：
-  - 已在 `apps/sidecar-core/internal/task` 新增任务事件 SSE 帧编码基础能力。
+  - 已在 `apps/sidecar-core/internal/service/task` 新增任务事件 SSE 帧编码基础能力。
   - 已复用 `ReplayEvents` 支持 afterEventID 之后的事件补拉和按事件 ID 递增排序。
   - 已支持多行 payload 按标准 SSE `data:` 行逐行编码，避免流式日志或 chunk 破坏事件帧。
   - SSE 帧包含 `id`、`event`、`data`，转发前统一复用事件 payload 脱敏。
@@ -810,7 +834,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 报告历史页和分析完成页可以使用真实报告数据。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/report` 报告域规则模块。
+  - 已新增 `apps/sidecar-core/internal/service/report` 报告域规则模块。
   - 已实现同一 `task_id` 报告去重规则，保留 `updated_at` 最新报告，支撑后续按 `task_id` 幂等保存。
   - 已实现软删除过滤规则，列表和详情可复用同一可见报告口径。
   - 已实现 Markdown 导出规则，默认只导出报告元信息、AI 正文和风险摘要，不包含完整 `input_snapshot`。
@@ -837,7 +861,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - sidecar 崩溃或重启不会留下永久 RUNNING 任务。
 - 当前进展：
-  - 已在 `apps/sidecar-core/internal/task` 补充任务历史列表排序规则，按 `updated_at` 倒序返回。
+  - 已在 `apps/sidecar-core/internal/service/task` 补充任务历史列表排序规则，按 `updated_at` 倒序返回。
   - 已实现批量 `RUNNING` 任务恢复规则，复用单任务恢复逻辑，将悬挂任务恢复为终态并生成恢复事件。
   - 已复用现有 `ReplayEvents` 支持 `afterEventId` 增量事件回放。
   - 单测覆盖任务列表排序、批量 RUNNING 恢复和事件回放增量顺序。
@@ -993,7 +1017,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 设置页没有假按钮、假状态或半成品入口。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/settings` 设置中心规则模块。
+  - 已新增 `apps/sidecar-core/internal/service/settings` 设置中心规则模块。
   - 已实现代理 URL 校验，禁止在 URL 中携带 username/password，代理密码必须留给系统凭据管理器链路处理。
   - 已实现缓存清理目标过滤，确保缓存清理规则不会包含报告和配置。
   - 已实现关于页 FREE 授权占位模型，不提供激活入口或授权 URL。
@@ -1057,9 +1081,9 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 用户可以导出可排障且不泄露敏感信息的日志。
 - 当前进展：
-  - 已在 `apps/sidecar-core/internal/logger` 新增日志导出文本二次脱敏规则。
+  - 已在 `apps/sidecar-core/pkg/logger` 新增日志导出文本二次脱敏规则。
   - 已复用统一 `RedactText` 作为唯一脱敏来源，避免日志、错误和导出各自维护敏感字段规则。
-  - 已在 `apps/sidecar-core/internal/logexport` 新增日志导出包规则，生成稳定文件名、UTC 时间和已脱敏内容，文件写入仍留给 Rust 路径授权层。
+  - 已在 `apps/sidecar-core/internal/service/logexport` 新增日志导出包规则，生成稳定文件名、UTC 时间和已脱敏内容，文件写入仍留给 Rust 路径授权层。
   - 导出文本保留 `request_id`、`trace_id`、`task_id` 等排障字段。
   - 已新增日志导出请求校验规则，缺少 `request_id`、`trace_id`、`task_id` 任一排障字段时返回稳定错误码。
   - 单测覆盖导出前二次脱敏 Authorization、API Key、代理密码和用户一次性持仓输入、排障字段校验，以及导出包元数据稳定性。
@@ -1083,7 +1107,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 检查更新符合首版信任边界。
 - 当前进展：
-  - 已新增 `apps/sidecar-core/internal/updatecheck` 检查更新信任边界规则模块。
+  - 已新增 `apps/sidecar-core/internal/service/updatecheck` 检查更新信任边界规则模块。
   - 已实现更新 JSON 解析和必填版本校验，解析后会清理首版支持字段首尾空白。
   - 已实现更新 JSON URL、下载链接和发布说明链接的 HTTPS 与 allowlist 校验。
   - 已实现首版 `PROMPT_ONLY` 结果模型，只表达版本提示或外链，不包含下载、安装或静默升级动作。
@@ -1205,7 +1229,7 @@ P7 跨平台桌面能力、打包、发布验收
 ### Batch B：数据和基础能力
 
 - T08 SQLite migration 基线
-- T09 sqlc 查询和 storage 事务层
+- T09 GORM dao 和事务层
 - T12 股票代码模型和标准化
 - T13 首版合规 Market Provider
 - T10 统一日志、错误和脱敏

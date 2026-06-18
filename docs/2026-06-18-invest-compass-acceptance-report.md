@@ -10,7 +10,7 @@
 
 首版总体验收仍不能标记通过，原因是以下关键链路尚未形成真实闭环：
 
-- SQLite migration、`sqlc + database/sql` storage 和数据库升级验证尚未完成。
+- GORM CRUD dao、service 业务编排、数据库升级备份验证尚未完成；SQLite schema/migration 基线已有自动化验证。
 - 系统凭据管理器适配尚未完成，macOS Keychain 和 Windows Credential Manager 保存/读取/删除未完成真实验收。
 - 多数业务 API 仍停留在规则模块或部分 Go API，尚未全部接入 Rust 白名单 command。
 - 前端页面主链路不在本轮“除前端外”开发目标内，但完整 T44 验收必须等待前端真实页面完成。
@@ -51,7 +51,7 @@ git diff --check
 | 9 | 任务失败后可以看到错误原因。 | 未通过 | 统一错误和任务事件模型已有基础；任务执行链路和历史详情未闭环。 |
 | 10 | 设置中心支持工作区、代理、通知、缓存。 | 未通过 | settings/cache 规则和部分 Go cache API 已有基础；真实 settings/workspace 存储、通知、代理密码凭据链路未闭环。 |
 | 11 | 应用有明确风险提示。 | 部分通过 | 技术方案、发布指南、Prompt 合规规则已包含“仅作研究辅助，不构成投资建议”；UI 展示仍需前端验收。 |
-| 12 | 数据库升级不会丢失用户已有数据。 | 未通过 | T08/T09 尚未完成，migration 可重复验证和升级备份策略未验收。 |
+| 12 | 数据库升级不会丢失用户已有数据。 | 部分通过 | T08 已完成空库迁移和重复迁移自动化验证；T09 CRUD repository、发布后升级备份策略和真实用户数据保留验证尚未完成。 |
 | 13 | API Key 存入系统凭据管理器，配置查询不回显真实 Key。 | 未通过 | Go 配置模型已拒绝真实 Key 落库和回显；系统凭据写入/删除未完成。 |
 | 14 | 前端不能直接访问 Go sidecar，Rust command 必须白名单化。 | 部分通过 | 已有 `core_start`、`core_health` 白名单基线和安全配置测试；全部业务 command 尚未补齐。 |
 | 15 | 首版不出现策略观察、授权激活、公告/研报/资金流等未闭环入口。 | 未执行 | 需要前端页面完成后逐屏检查；当前不能据此宣称通过。 |
@@ -90,7 +90,7 @@ git diff --check
 
 ## 6. 已知风险和遗留项
 
-- 数据库层未落地前，业务模块只能验证规则，不能证明真实数据闭环。
+- GORM schema/migration 基线已落地，现有业务模块已迁入 `internal/service/<module>`，HTTP 路由和 handler 已拆入 `internal/actions`，`internal/server` 已收缩为监听和启动层，公共日志能力已迁入 `pkg/logger`，通用错误码和错误类型已迁入 `pkg/xerr`；CRUD repository 和 service 编排尚未完成，业务模块仍不能证明真实数据闭环。
 - 凭据层未落地前，不能证明 API Key 和代理密码只存在系统凭据管理器和运行期内存。
 - 真实行情/新闻 Provider 未确认数据源授权前，不能接入或宣称可用。
 - 前端页面未完成前，不能验证“界面无 mock 数据”和“首版不出现未闭环入口”。

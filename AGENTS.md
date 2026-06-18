@@ -54,7 +54,8 @@
 - React + TypeScript + Vite 前端。
 - Go sidecar core。
 - SQLite 本地库。
-- `sqlc + database/sql` 数据访问。
+- `GORM` 数据访问。
+- `Gin` 本地 HTTP API。
 - `slog` 结构化日志。
 - Rust command 白名单代理。
 - Go sidecar stdin token 握手。
@@ -105,6 +106,19 @@ SQLite + 外部数据源 + AI Provider
 - Go：行情、新闻、指标、Prompt、AI 调用、任务、缓存、数据库。
 - SQLite：本地业务数据，不保存真实 API Key 和代理密码。
 
+Go core 分层规则：
+
+- `internal/service`：存放业务编排和核心业务逻辑。
+- `internal/dao`：存放 GORM 数据库访问、事务、迁移和备份相关代码。
+- `internal/model`：存放 service 和 dao 共享的结构体、持久化模型和跨层数据模型。
+- `pkg/constant`：存放跨包共享的非错误类常量。
+- `pkg/xerr`：存放跨包共享错误码和通用错误类型，service 层不得重复定义通用错误结构。
+- `internal/server`：只负责 HTTP server 监听、初始化、启动和优雅关闭，不注册业务路由。
+- `internal/actions/router.go`：集中注册 Gin 路由，组合各 action 子包提供的路由定义。
+- `internal/actions/<module>`：存放对应业务 handler，每个子包对外提供自己负责的路由定义，但不直接依赖 Gin 路由注册 API。
+- `internal/actions/httpx`：存放 actions 层共享的统一响应、追踪 ID、POST/token 安全边界等 HTTP 辅助能力。
+- 新增 Go 能力时优先按以上分层落位，避免在 handler、provider 或工具包中散落数据库读写。
+
 不要把复杂投研业务塞进 Rust。
 不要让前端直接访问 Go sidecar。
 不要让 Go core 持久化系统凭据。
@@ -120,7 +134,7 @@ SQLite + 外部数据源 + AI Provider
 - 界面绝对不能使用 mock 数据伪装真实能力。
 - UI 可以展示空状态、加载态、错误态或明确的“暂未实现”静态说明，但不得使用假行情、假报告、假任务、假 Provider 状态或假配置状态。
 - 所有代码的数据来源必须有单一来源。前端数据必须统一来自 typed invoke service / store，不能在页面、组件、hook、工具函数中各自拼接数据源。
-- Go core 数据必须统一经过对应 provider、storage、config、task 等模块，不能在 handler、业务函数和测试外辅助脚本中散落多套读取逻辑。
+- Go core 数据必须统一经过 service/dao/model/provider 等明确分层，不能在 handler、业务函数和测试外辅助脚本中散落多套读取逻辑。
 - 同一业务概念只能有一个权威模型和转换入口；如果需要派生数据，必须从权威数据结构计算得到，不能复制维护第二份状态。
 
 ### UI 对齐验收
@@ -208,7 +222,9 @@ secret redaction 必须覆盖：
 
 访问方式：
 
-- 使用 `sqlc + database/sql`。
+- 使用 `GORM`。
+- 数据库访问只能放在 `internal/dao`。
+- service 和 dao 共用结构体放在 `internal/model`。
 - 不要在业务 handler 中手拼 SQL。
 - 重要写操作使用事务。
 

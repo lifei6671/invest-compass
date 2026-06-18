@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { test } from "node:test";
 
 const tauriConfig = JSON.parse(
@@ -24,7 +24,19 @@ const goCoreBoundarySources = await readSourceFiles(
   (fileName, fileUrl) =>
     fileName.endsWith(".go") &&
     !fileName.endsWith("_test.go") &&
-    !fileUrl.pathname.includes("/internal/storage/"),
+    !fileUrl.pathname.includes("/internal/dao/"),
+);
+const goServerSources = await readSourceFiles(
+  [new URL("../../sidecar-core/internal/server/", import.meta.url)],
+  (fileName) => fileName.endsWith(".go") && !fileName.endsWith("_test.go"),
+);
+const goDaoSources = await readSourceFiles(
+  [new URL("../../sidecar-core/internal/dao/", import.meta.url)],
+  (fileName) => fileName.endsWith(".go") && !fileName.endsWith("_test.go"),
+);
+const goServiceSources = await readSourceFiles(
+  [new URL("../../sidecar-core/internal/service/", import.meta.url)],
+  (fileName) => fileName.endsWith(".go") && !fileName.endsWith("_test.go"),
 );
 
 test("Tauri 主窗口显式绑定 main capability", () => {
@@ -114,8 +126,113 @@ test("前端和共享契约禁止绕过 typed invoke service 直接取数", () =
   assert.deepEqual(findRendererDataSourceBypass(rendererBoundarySources), []);
 });
 
-test("Go core 非 storage 层禁止手写 SQL 或直接使用 database/sql", () => {
-  assert.deepEqual(findGoStorageBoundaryLeaks(goCoreBoundarySources), []);
+test("Go core 非 dao 层禁止手写 SQL 或直接使用 database/sql", () => {
+  assert.deepEqual(findGoDaoBoundaryLeaks(goCoreBoundarySources), []);
+});
+
+test("Go core actions 路由注册层必须使用 Gin 框架", async () => {
+  const routerSource = await readFile(
+    new URL("../../sidecar-core/internal/actions/router.go", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal(
+    routerSource.includes("\"github.com/gin-gonic/gin\""),
+    true,
+    "internal/actions/router.go 必须使用 github.com/gin-gonic/gin 承载本地 HTTP API 路由注册",
+  );
+});
+
+test("Go HTTP server 路由注册和业务 handler 必须拆到 actions", async () => {
+  const sidecarRoot = new URL("../../sidecar-core/", import.meta.url);
+  const routerUrl = new URL("internal/actions/router.go", sidecarRoot);
+
+  assert.equal(await pathExists(routerUrl), true, "internal/actions/router.go 必须集中注册 HTTP 路由");
+  assert.deepEqual(findGoServerHTTPBoundaryLeaks(goServerSources), []);
+
+  const actionRouterSource = await readFile(routerUrl, "utf8");
+  assert.equal(
+    actionRouterSource.includes("\"github.com/gin-gonic/gin\""),
+    true,
+    "actions/router.go 必须作为唯一 Gin 路由注册入口",
+  );
+
+  const actionSubpackageSources = await readSourceFiles(
+    [new URL("../../sidecar-core/internal/actions/", import.meta.url)],
+    (fileName, fileUrl) =>
+      fileName.endsWith(".go") &&
+      !fileName.endsWith("_test.go") &&
+      !fileUrl.pathname.endsWith("/internal/actions/router.go"),
+  );
+  assert.deepEqual(findGoActionSubpackageRouterLeaks(actionSubpackageSources), []);
+});
+
+test("Go dao 层必须使用 GORM 组件", () => {
+  assert.equal(
+    goDaoSources.some((source) => source.includes("\"gorm.io/gorm\"")),
+    true,
+    "internal/dao 必须使用 gorm.io/gorm 作为数据库访问入口",
+  );
+});
+
+test("Go core 必须保留 service dao model pkg/constant 和 pkg/xerr 分层目录", async () => {
+  const sidecarRoot = new URL("../../sidecar-core/", import.meta.url);
+  const requiredLayerDocs = [
+    "internal/service/doc.go",
+    "internal/dao/doc.go",
+    "internal/model/doc.go",
+    "pkg/constant/doc.go",
+    "pkg/xerr/doc.go",
+  ];
+
+  for (const layerDoc of requiredLayerDocs) {
+    const source = await readFile(new URL(layerDoc, sidecarRoot), "utf8");
+    assert.match(source, /^\/\/ Package /, `${layerDoc} 必须提供包职责说明`);
+  }
+});
+
+test("Go core 业务模块必须迁移到 service 子包", async () => {
+  const sidecarRoot = new URL("../../sidecar-core/", import.meta.url);
+  const servicePackages = [
+    "analysis",
+    "ai",
+    "dashboard",
+    "indicator",
+    "logexport",
+    "market",
+    "news",
+    "prompt",
+    "report",
+    "settings",
+    "sidecar",
+    "stock",
+    "task",
+    "updatecheck",
+    "watchlist",
+  ];
+
+  for (const packageName of servicePackages) {
+    assert.equal(
+      await pathExists(new URL(`internal/service/${packageName}/doc.go`, sidecarRoot)),
+      true,
+      `业务包必须放在 internal/service/${packageName}`,
+    );
+    assert.equal(
+      await pathExists(new URL(`internal/${packageName}/doc.go`, sidecarRoot)),
+      false,
+      `业务包不能继续留在 internal/${packageName}`,
+    );
+  }
+
+  assert.equal(await pathExists(new URL("pkg/logger/doc.go", sidecarRoot)), true);
+  assert.equal(await pathExists(new URL("internal/logger/doc.go", sidecarRoot)), false);
+});
+
+test("Go service 层禁止定义通用错误码和错误结构", async () => {
+  const sidecarRoot = new URL("../../sidecar-core/", import.meta.url);
+
+  assert.equal(await pathExists(new URL("pkg/xerr/doc.go", sidecarRoot)), true);
+  assert.deepEqual(findGoServiceErrorDefinitionLeaks(goServiceSources), []);
 });
 
 test("前端安全扫描能识别直连 Go core 和内部密钥字段", () => {
@@ -152,7 +269,7 @@ test("前端数据源扫描能识别直接 HTTP 和浏览器网络调用", () =>
   ]);
 });
 
-test("Go storage 边界扫描能识别 handler 中的 SQL 和 database/sql", () => {
+test("Go dao 边界扫描能识别 handler 中的 SQL 和 database/sql", () => {
   const unsafeSource = `
     package server
 
@@ -163,9 +280,9 @@ test("Go storage 边界扫描能识别 handler 中的 SQL 和 database/sql", () 
     }
   `;
 
-  assert.deepEqual(findGoStorageBoundaryLeaks([unsafeSource]), [
-    "go source 在非 storage 层直接使用 database/sql",
-    "go source 在非 storage 层手写 SQL 语句",
+  assert.deepEqual(findGoDaoBoundaryLeaks([unsafeSource]), [
+    "go source 在非 dao 层直接使用 database/sql",
+    "go source 在非 dao 层手写 SQL 语句",
   ]);
 });
 
@@ -213,6 +330,18 @@ async function readSourceFilesFromDirectory(directoryUrl, includeFile) {
   }
 
   return sources;
+}
+
+async function pathExists(fileUrl) {
+  try {
+    await stat(fileUrl);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function parseGenerateHandlerCommands(source) {
@@ -312,15 +441,80 @@ function findRendererDataSourceBypass(sources) {
   );
 }
 
-function findGoStorageBoundaryLeaks(sources) {
+function findGoDaoBoundaryLeaks(sources) {
   const checks = [
     {
       pattern: /"database\/sql"|\bdatabase\/sql\b/,
-      message: "go source 在非 storage 层直接使用 database/sql",
+      message: "go source 在非 dao 层直接使用 database/sql",
     },
     {
       pattern: /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b[\s\S]*\b(FROM|INTO|TABLE|SET|VALUES)\b/i,
-      message: "go source 在非 storage 层手写 SQL 语句",
+      message: "go source 在非 dao 层手写 SQL 语句",
+    },
+  ];
+
+  return sources.flatMap((source) =>
+    checks
+      .filter((check) => check.pattern.test(source))
+      .map((check) => check.message),
+  );
+}
+
+function findGoServerHTTPBoundaryLeaks(sources) {
+  const checks = [
+    {
+      pattern: /"github\.com\/gin-gonic\/gin"/,
+      message: "server package 不能直接依赖 Gin",
+    },
+    {
+      pattern: /\.(POST|GET|PUT|PATCH|DELETE|Handle)\s*\(/,
+      message: "server package 不能注册业务路由",
+    },
+    {
+      pattern: /"\/(?:api|internal)\//,
+      message: "server package 不能硬编码业务 API path",
+    },
+    {
+      pattern: /\bhandle[A-Z][A-Za-z0-9_]*\s*\(/,
+      message: "server package 不能承载业务 handler",
+    },
+  ];
+
+  return sources.flatMap((source) =>
+    checks
+      .filter((check) => check.pattern.test(source))
+      .map((check) => check.message),
+  );
+}
+
+function findGoActionSubpackageRouterLeaks(sources) {
+  const checks = [
+    {
+      pattern: /"github\.com\/gin-gonic\/gin"/,
+      message: "actions 子包不能直接依赖 Gin",
+    },
+    {
+      pattern: /\.(POST|GET|PUT|PATCH|DELETE|Handle)\s*\(/,
+      message: "actions 子包不能直接注册 Gin 路由",
+    },
+  ];
+
+  return sources.flatMap((source) =>
+    checks
+      .filter((check) => check.pattern.test(source))
+      .map((check) => check.message),
+  );
+}
+
+function findGoServiceErrorDefinitionLeaks(sources) {
+  const checks = [
+    {
+      pattern: /\btype\s+(ErrorCode|Code)\s+string\b/,
+      message: "service source 定义了错误码类型，应迁移到 pkg/xerr",
+    },
+    {
+      pattern: /\btype\s+Error\s+struct\s*\{[\s\S]*?\bCode\b/,
+      message: "service source 定义了通用 Error 结构，应迁移到 pkg/xerr",
     },
   ];
 

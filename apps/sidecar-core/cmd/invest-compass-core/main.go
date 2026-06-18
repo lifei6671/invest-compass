@@ -3,17 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"time"
 
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/server"
-	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/sidecar"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/sidecar"
 )
 
 const version = "0.1.0"
@@ -24,12 +23,7 @@ func main() {
 	port := flag.String("port", "0", "local listen port")
 	flag.Parse()
 
-	if err := validateListenHost(*host); err != nil {
-		slog.Error("Go core 只允许监听 127.0.0.1", "host", *host)
-		os.Exit(1)
-	}
-
-	listener, err := net.Listen("tcp", net.JoinHostPort(*host, *port))
+	listener, err := server.Listen(*host, *port)
 	if err != nil {
 		slog.Error("启动本地 HTTP server 失败", "error", err)
 		os.Exit(1)
@@ -68,8 +62,7 @@ func main() {
 	}
 
 	shutdownRequested := make(chan struct{}, 1)
-	httpServer := &http.Server{}
-	handler := server.NewHandler(server.Config{
+	handler := actions.NewHandler(actions.Config{
 		Version:  version,
 		Token:    handshake.Token,
 		DBStatus: "not_configured",
@@ -81,27 +74,9 @@ func main() {
 			}
 		},
 	})
-	httpServer.Handler = handler
 
-	go func() {
-		<-shutdownRequested
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		if err := httpServer.Shutdown(ctx); err != nil {
-			slog.Error("关闭本地 HTTP server 失败", "error", err)
-		}
-	}()
-
-	if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := server.Serve(listener, handler, shutdownRequested); err != nil {
 		slog.Error("本地 HTTP server 异常退出", "error", err)
 		os.Exit(1)
 	}
-}
-
-// validateListenHost 收紧 sidecar 监听地址，防止误配置成公网或局域网地址。
-func validateListenHost(host string) error {
-	if host != "127.0.0.1" {
-		return fmt.Errorf("invalid listen host %q", host)
-	}
-	return nil
 }

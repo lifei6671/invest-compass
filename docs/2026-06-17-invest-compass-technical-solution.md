@@ -73,7 +73,8 @@
 UI 组件：Ant Design + Tailwind CSS
 图表：Lightweight Charts + ECharts
 本地数据库：SQLite
-数据库访问：sqlc + database/sql
+数据库访问：GORM
+Go HTTP 框架：Gin
 日志：slog
 AI 接入：OpenAI-compatible Provider 抽象
 构建管理：pnpm workspace + Go module + Cargo
@@ -188,18 +189,29 @@ invest-compass/
 │       │       └── main.go
 │       ├── internal/
 │       │   ├── server/
-│       │   ├── market/
-│       │   ├── stock/
-│       │   ├── news/
-│       │   ├── report/
-│       │   ├── indicator/
-│       │   ├── ai/
-│       │   ├── prompt/
-│       │   ├── task/
-│       │   ├── storage/
-│       │   ├── config/
-│       │   ├── cache/
-│       │   └── logger/
+│       │   ├── service/
+│       │   │   ├── analysis/
+│       │   │   ├── ai/
+│       │   │   ├── dashboard/
+│       │   │   ├── indicator/
+│       │   │   ├── logexport/
+│       │   │   ├── market/
+│       │   │   ├── news/
+│       │   │   ├── prompt/
+│       │   │   ├── report/
+│       │   │   ├── settings/
+│       │   │   ├── sidecar/
+│       │   │   ├── stock/
+│       │   │   ├── task/
+│       │   │   ├── updatecheck/
+│       │   │   └── watchlist/
+│       │   ├── dao/
+│       │   ├── model/
+│       │   └── ...
+│       ├── pkg/
+│       │   ├── constant/
+│       │   ├── logger/
+│       │   └── xerr/
 │       ├── migrations/
 │       ├── go.mod
 │       └── go.sum
@@ -353,21 +365,26 @@ runtime token 禁止出现在命令行参数、环境变量、日志、配置文
 
 ### 5.2.1 server 模块
 
-负责本地 HTTP 服务。
+只负责本地 HTTP server 生命周期。
 
 核心能力：
 
 ```text
-路由注册
-中间件
-token 校验
-请求日志
-panic recovery
-统一错误响应
-SSE 流式事件，仅供 Rust 代理订阅
-健康检查
-request_id / trace_id 生成和透传
-敏感字段脱敏
+创建本地 listener
+初始化标准库 http.Server
+启动本地 HTTP 服务
+接收关闭信号并优雅关闭
+拒绝非 127.0.0.1 监听地址
+```
+
+### 5.2.1.1 actions 模块
+
+负责本地 HTTP API 的路由注册和 handler 分发。
+
+```text
+actions/router.go：唯一 Gin 路由注册入口。
+actions/<module>：业务 handler 子包，对外提供自身路由定义，不直接依赖 Gin 注册 API。
+actions/httpx：统一响应、request_id/trace_id、POST-only、token 校验、panic recovery 辅助能力。
 ```
 
 统一响应结构：
@@ -660,9 +677,25 @@ TASK_FAILED
 TASK_CANCELLED
 ```
 
-### 5.2.10 storage 模块
+### 5.2.10 Go core 分层
 
-负责 SQLite、迁移、事务、备份。
+Go core 按 server、actions、service、dao、model、pkg/constant、pkg/xerr 分层组织。
+
+职责：
+
+```text
+server：HTTP server 监听、初始化、启动和优雅关闭，不注册业务路由。
+actions/router.go：集中注册 Gin 路由，组合各 action 子包提供的路由定义。
+actions/<module>：业务 handler 子包，负责自己的业务 HTTP 处理，但不直接依赖 Gin 路由注册。
+actions/httpx：actions 层共享的统一响应、追踪 ID 和 token 安全边界。
+service：业务编排和核心业务逻辑，组合 provider、dao、prompt、AI、task 等能力。
+dao：GORM 数据库访问、事务、迁移和升级备份。
+model：service 和 dao 共享的结构体、持久化模型和跨层数据模型。
+pkg/constant：跨包共享的非错误类常量。
+pkg/xerr：跨包共享错误码和通用错误类型，service 层不得重复定义通用错误结构。
+```
+
+数据库层原则：
 
 原则：
 
@@ -673,6 +706,7 @@ TASK_CANCELLED
 4. 所有表必须有 created_at、updated_at。
 5. 重要业务表使用软删除。
 6. 运行中任务恢复必须可判断，避免 sidecar 重启后任务长期停在 RUNNING。
+7. 非 dao 层禁止直接使用 database/sql、GORM 数据库句柄或手写 SQL。
 ```
 
 ### 5.2.11 config 模块
@@ -960,6 +994,8 @@ CREATE TABLE ai_configs (
     provider TEXT NOT NULL,
     base_url TEXT,
     api_key_ref TEXT,
+    masked_api_key TEXT,
+    has_api_key BOOLEAN DEFAULT 0,
     model_name TEXT NOT NULL,
     temperature REAL DEFAULT 0.7,
     max_tokens INTEGER DEFAULT 4096,

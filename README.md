@@ -11,7 +11,8 @@
 必须交付：
 
 - Tauri v2 桌面壳、React + TypeScript + Vite 前端、Go sidecar core。
-- SQLite 本地库，使用 `sqlc + database/sql` 访问。
+- SQLite 本地库，使用 `GORM` 访问。
+- Go core 按 `server` / `actions` / `service` / `dao` / `model` / `pkg/constant` / `pkg/xerr` 分层组织。
 - Rust command 白名单代理，前端不得直接访问 Go sidecar。
 - Go sidecar 只监听 `127.0.0.1`，runtime token 通过 stdin 握手传递。
 - 股票搜索、自选股、行情、K 线、技术指标、新闻资讯。
