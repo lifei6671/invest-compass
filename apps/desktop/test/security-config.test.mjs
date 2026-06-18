@@ -19,6 +19,13 @@ const rendererBoundarySources = await readSourceFiles([
   new URL("../../frontend/src/", import.meta.url),
   new URL("../../packages/shared/src/", import.meta.url),
 ]);
+const goCoreBoundarySources = await readSourceFiles(
+  [new URL("../../sidecar-core/", import.meta.url)],
+  (fileName, fileUrl) =>
+    fileName.endsWith(".go") &&
+    !fileName.endsWith("_test.go") &&
+    !fileUrl.pathname.includes("/internal/storage/"),
+);
 
 test("Tauri 主窗口显式绑定 main capability", () => {
   assert.deepEqual(
@@ -107,6 +114,10 @@ test("前端和共享契约禁止绕过 typed invoke service 直接取数", () =
   assert.deepEqual(findRendererDataSourceBypass(rendererBoundarySources), []);
 });
 
+test("Go core 非 storage 层禁止手写 SQL 或直接使用 database/sql", () => {
+  assert.deepEqual(findGoStorageBoundaryLeaks(goCoreBoundarySources), []);
+});
+
 test("前端安全扫描能识别直连 Go core 和内部密钥字段", () => {
   const unsafeSource = `
     const resolved_api_key = "secret";
@@ -138,6 +149,23 @@ test("前端数据源扫描能识别直接 HTTP 和浏览器网络调用", () =>
     "renderer source 直接使用 XMLHttpRequest 取数",
     "renderer source 直接使用 axios 取数",
     "renderer source 硬编码 HTTP 数据源地址",
+  ]);
+});
+
+test("Go storage 边界扫描能识别 handler 中的 SQL 和 database/sql", () => {
+  const unsafeSource = `
+    package server
+
+    import "database/sql"
+
+    func listStocks(db *sql.DB) {
+      db.Query("SELECT * FROM stocks WHERE deleted_at IS NULL")
+    }
+  `;
+
+  assert.deepEqual(findGoStorageBoundaryLeaks([unsafeSource]), [
+    "go source 在非 storage 层直接使用 database/sql",
+    "go source 在非 storage 层手写 SQL 语句",
   ]);
 });
 
@@ -179,7 +207,7 @@ async function readSourceFilesFromDirectory(directoryUrl, includeFile) {
       sources.push(
         ...(await readSourceFilesFromDirectory(new URL(`${entry.name}/`, directoryUrl), includeFile)),
       );
-    } else if (includeFile(entry.name)) {
+    } else if (includeFile(entry.name, entryUrl)) {
       sources.push(await readFile(entryUrl, "utf8"));
     }
   }
@@ -274,6 +302,25 @@ function findRendererDataSourceBypass(sources) {
     {
       pattern: /https?:\/\//,
       message: "renderer source 硬编码 HTTP 数据源地址",
+    },
+  ];
+
+  return sources.flatMap((source) =>
+    checks
+      .filter((check) => check.pattern.test(source))
+      .map((check) => check.message),
+  );
+}
+
+function findGoStorageBoundaryLeaks(sources) {
+  const checks = [
+    {
+      pattern: /"database\/sql"|\bdatabase\/sql\b/,
+      message: "go source 在非 storage 层直接使用 database/sql",
+    },
+    {
+      pattern: /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b[\s\S]*\b(FROM|INTO|TABLE|SET|VALUES)\b/i,
+      message: "go source 在非 storage 层手写 SQL 语句",
     },
   ];
 

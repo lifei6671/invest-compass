@@ -294,6 +294,8 @@ P7 跨平台桌面能力、打包、发布验收
   - Go 单测覆盖 CRUD、唯一约束、软删除。
 - 退出条件：
   - 数据访问层类型安全且可测试。
+- 当前进展：
+  - 已新增 Go core 生产源码扫描，禁止非 `internal/storage` 层直接使用 `database/sql` 或手写 SQL 语句，防止业务 handler 绕过后续 `sqlc + database/sql` 数据访问边界。
 
 ### T10 统一日志、错误和脱敏
 
