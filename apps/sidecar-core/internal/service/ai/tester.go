@@ -1,0 +1,60 @@
+package ai
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/xerr"
+)
+
+// TestResult 是模型连通性测试的安全结果，不包含真实 API Key 或请求头。
+type TestResult struct {
+	OK       bool   `json:"ok"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Message  string `json:"message"`
+}
+
+// ConfigTester 定义 AI 配置连通性测试边界，便于 action 单测替换外部网络。
+type ConfigTester interface {
+	TestAIConfig(ctx context.Context, config Config, resolvedAPIKey string) (TestResult, error)
+}
+
+// OpenAIConfigTester 使用 OpenAI-compatible chat completions 执行真实连通性测试。
+type OpenAIConfigTester struct{}
+
+// TestAIConfig 根据配置和运行期密钥测试模型是否可访问。
+func (tester OpenAIConfigTester) TestAIConfig(ctx context.Context, config Config, resolvedAPIKey string) (TestResult, error) {
+	if strings.TrimSpace(resolvedAPIKey) == "" || strings.TrimSpace(config.ModelName) == "" {
+		return TestResult{}, &xerr.Error{Code: xerr.AIInvalidRequest}
+	}
+	if config.Provider != ProviderOpenAICompatible {
+		return TestResult{}, &xerr.Error{Code: xerr.AIInvalidRequest, Message: "unsupported provider"}
+	}
+
+	timeout := time.Duration(config.TimeoutSeconds) * time.Second
+	client := NewOpenAICompatibleClient(ClientConfig{
+		BaseURL: config.BaseURL,
+		APIKey:  resolvedAPIKey,
+		Timeout: timeout,
+	})
+	response, err := client.Chat(ctx, ChatRequest{
+		Model:       config.ModelName,
+		Temperature: config.Temperature,
+		MaxTokens:   16,
+		Messages: []Message{
+			{Role: RoleSystem, Content: "You are a connectivity probe."},
+			{Role: RoleUser, Content: "Reply with ok."},
+		},
+	})
+	if err != nil {
+		return TestResult{}, err
+	}
+	return TestResult{
+		OK:       true,
+		Provider: config.Provider,
+		Model:    config.ModelName,
+		Message:  strings.TrimSpace(response.Content),
+	}, nil
+}

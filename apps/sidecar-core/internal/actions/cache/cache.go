@@ -2,7 +2,6 @@ package cache
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -16,11 +15,16 @@ type Cleaner interface {
 	CleanCache(ctx context.Context, targets []settings.CacheTarget) error
 }
 
+// StatsProvider 是缓存统计 API 的单一读取边界，由实际存储层注入。
+type StatsProvider interface {
+	CacheUsages(ctx context.Context) ([]settings.CacheUsage, error)
+}
+
 // Config 是缓存 action 的运行期依赖。
 type Config struct {
-	Security httpx.SecurityConfig
-	Usages   []settings.CacheUsage
-	Cleaner  Cleaner
+	Security      httpx.SecurityConfig
+	StatsProvider StatsProvider
+	Cleaner       Cleaner
 }
 
 type cleanRequest struct {
@@ -42,8 +46,24 @@ func handleStats(config Config) http.HandlerFunc {
 		if !httpx.RequireReadyToken(response, request, config.Security, context) {
 			return
 		}
+		if config.StatsProvider == nil {
+			httpx.WriteError(response, http.StatusServiceUnavailable, 50304, "cache_stats_unavailable", context)
+			return
+		}
 
-		httpx.WriteOK(response, settings.BuildCacheStats(config.Usages), context)
+		usages, err := config.StatsProvider.CacheUsages(request.Context())
+		if err != nil {
+			slog.Warn(
+				"缓存统计失败",
+				logger.FieldRequestID, context.RequestID,
+				logger.FieldTraceID, context.TraceID,
+				"error", logger.RedactError(err),
+			)
+			httpx.WriteError(response, http.StatusInternalServerError, 50003, "cache_stats_failed", context)
+			return
+		}
+
+		httpx.WriteOK(response, settings.BuildCacheStats(usages), context)
 	}
 }
 
@@ -60,8 +80,7 @@ func handleClean(config Config) http.HandlerFunc {
 		}
 
 		var payload cleanRequest
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			httpx.WriteError(response, http.StatusBadRequest, 40001, "invalid_json", context)
+		if !httpx.DecodeJSON(response, request, context, &payload) {
 			return
 		}
 

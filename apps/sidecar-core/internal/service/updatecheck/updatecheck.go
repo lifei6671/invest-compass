@@ -32,12 +32,12 @@ type manifestJSON struct {
 
 // Result 是检查更新后的首版展示结果。
 type Result struct {
-	HasNewVersion   bool
-	CurrentVersion  string
-	LatestVersion   string
-	Action          Action
-	DownloadURL     string
-	ReleaseNotesURL string
+	HasNewVersion   bool   `json:"has_new_version"`
+	CurrentVersion  string `json:"current_version"`
+	LatestVersion   string `json:"latest_version"`
+	Action          Action `json:"action"`
+	DownloadURL     string `json:"download_url"`
+	ReleaseNotesURL string `json:"release_notes_url"`
 }
 
 // ParseManifest 解析更新 JSON，并清理首版支持字段的首尾空白。

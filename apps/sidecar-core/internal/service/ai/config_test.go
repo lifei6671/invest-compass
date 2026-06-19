@@ -15,7 +15,7 @@ func TestConfigListViewNeverContainsRawAPIKey(t *testing.T) {
 		Name:           "OpenAI",
 		Provider:       ProviderOpenAICompatible,
 		BaseURL:        "https://api.openai.com",
-		APIKeyRef:      "keychain:openai:1",
+		APIKeyRef:      "local-vault://ai-config/openai-compatible-1",
 		MaskedAPIKey:   "sk-p...7890",
 		HasAPIKey:      true,
 		ModelName:      "gpt-4.1-mini",
@@ -30,7 +30,7 @@ func TestConfigListViewNeverContainsRawAPIKey(t *testing.T) {
 
 	view := config.ListView()
 
-	if view.APIKeyRef != "keychain:openai:1" || view.MaskedAPIKey != "sk-p...7890" || !view.HasAPIKey {
+	if view.APIKeyRef != "local-vault://ai-config/openai-compatible-1" || view.MaskedAPIKey != "sk-p...7890" || !view.HasAPIKey {
 		t.Fatalf("unexpected safe key metadata: %+v", view)
 	}
 	if strings.Contains(view.String(), "raw_api_key") || strings.Contains(view.String(), "resolved_api_key") {
@@ -44,12 +44,48 @@ func TestSaveRequestRejectsRawAPIKey(t *testing.T) {
 		Name:           "OpenAI",
 		Provider:       ProviderOpenAICompatible,
 		BaseURL:        "https://api.openai.com",
-		APIKeyRef:      "keychain:openai:1",
+		APIKeyRef:      "local-vault://ai-config/openai-compatible-1",
 		MaskedAPIKey:   "sk-p...7890",
 		HasAPIKey:      true,
 		RawAPIKey:      "sk-raw-secret",
 		ModelName:      "gpt-4.1-mini",
 		TimeoutSeconds: 120,
+	})
+
+	assertAIErrorCode(t, err, xerr.AIRawAPIKeyNotAllowed)
+}
+
+// TestSaveRequestRejectsInvalidAPIKeyRef 验证 Go core 只接受 Rust 本地 vault 生成的 AI Key 引用。
+func TestSaveRequestRejectsInvalidAPIKeyRef(t *testing.T) {
+	for _, apiKeyRef := range []string{
+		"file:///tmp/plain-secret",
+		"local-vault://proxy/default",
+		"plain-reference",
+	} {
+		_, err := BuildConfigForSave(SaveRequest{
+			Name:         "OpenAI",
+			Provider:     ProviderOpenAICompatible,
+			BaseURL:      "https://api.openai.com",
+			APIKeyRef:    apiKeyRef,
+			MaskedAPIKey: "sk-p...7890",
+			HasAPIKey:    true,
+			ModelName:    "gpt-4.1-mini",
+		})
+
+		assertAIErrorCode(t, err, xerr.AIInvalidCredentialRef)
+	}
+}
+
+// TestSaveRequestRejectsUnmaskedAPIKeyDisplay 验证脱敏展示字段不能被明文 API Key 旁路滥用。
+func TestSaveRequestRejectsUnmaskedAPIKeyDisplay(t *testing.T) {
+	_, err := BuildConfigForSave(SaveRequest{
+		Name:         "OpenAI",
+		Provider:     ProviderOpenAICompatible,
+		BaseURL:      "https://api.openai.com",
+		APIKeyRef:    "local-vault://ai-config/openai-compatible-1",
+		MaskedAPIKey: "sk-live-raw-secret-123456",
+		HasAPIKey:    true,
+		ModelName:    "gpt-4.1-mini",
 	})
 
 	assertAIErrorCode(t, err, xerr.AIRawAPIKeyNotAllowed)
@@ -61,7 +97,7 @@ func TestBuildConfigForSaveKeepsOnlyCredentialMetadata(t *testing.T) {
 		Name:           "OpenAI",
 		Provider:       ProviderOpenAICompatible,
 		BaseURL:        "https://api.openai.com",
-		APIKeyRef:      "keychain:openai:1",
+		APIKeyRef:      "local-vault://ai-config/openai-compatible-1",
 		MaskedAPIKey:   "sk-p...7890",
 		HasAPIKey:      true,
 		ModelName:      "gpt-4.1-mini",
@@ -74,7 +110,7 @@ func TestBuildConfigForSaveKeepsOnlyCredentialMetadata(t *testing.T) {
 		t.Fatalf("BuildConfigForSave returned error: %v", err)
 	}
 
-	if config.APIKeyRef != "keychain:openai:1" || config.MaskedAPIKey != "sk-p...7890" || !config.HasAPIKey {
+	if config.APIKeyRef != "local-vault://ai-config/openai-compatible-1" || config.MaskedAPIKey != "sk-p...7890" || !config.HasAPIKey {
 		t.Fatalf("unexpected saved key metadata: %+v", config)
 	}
 }

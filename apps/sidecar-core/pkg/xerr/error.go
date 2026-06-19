@@ -50,9 +50,13 @@ const (
 
 	// MarketInvalidQuoteCacheTTL 表示行情短缓存 TTL 不在 10-60 秒范围内。
 	MarketInvalidQuoteCacheTTL Code = "invalid_quote_cache_ttl"
+	// MarketProviderUnconfigured 表示尚未配置真实行情数据源。
+	MarketProviderUnconfigured Code = "market_provider_unconfigured"
 
 	// NewsInvalidCacheTTL 表示新闻缓存 TTL 不在 30-120 分钟范围内。
 	NewsInvalidCacheTTL Code = "invalid_news_cache_ttl"
+	// NewsProviderUnconfigured 表示尚未配置真实新闻数据源。
+	NewsProviderUnconfigured Code = "news_provider_unconfigured"
 	// NewsMissingTitle 表示新闻标题为空。
 	NewsMissingTitle Code = "missing_news_title"
 	// NewsUnsafeURL 表示新闻链接使用了不允许的 URL scheme。
@@ -63,6 +67,8 @@ const (
 
 	// AIRawAPIKeyNotAllowed 表示 Go core 保存配置时收到了真实 API Key。
 	AIRawAPIKeyNotAllowed Code = "raw_api_key_not_allowed"
+	// AIInvalidCredentialRef 表示 AI 配置携带了非法本地凭据引用。
+	AIInvalidCredentialRef Code = "invalid_ai_credential_ref"
 	// AIInvalidRequest 表示 AI 请求参数不足。
 	AIInvalidRequest Code = "invalid_ai_request"
 	// AIUnauthorized 表示 AI Provider 返回认证失败。
@@ -87,6 +93,8 @@ const (
 	SettingsProxyCredentialInURL Code = "proxy_credential_in_url"
 	// SettingsSensitiveSetting 表示 settings 试图保存敏感明文。
 	SettingsSensitiveSetting Code = "sensitive_setting"
+	// SettingsInvalidCredentialRef 表示 settings 携带了非法本地凭据引用。
+	SettingsInvalidCredentialRef Code = "invalid_setting_credential_ref"
 	// SettingsInvalidWorkspacePath 表示工作区路径不是可接受的绝对路径。
 	SettingsInvalidWorkspacePath Code = "invalid_workspace_path"
 

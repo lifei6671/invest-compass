@@ -39,9 +39,9 @@
 
 发布前必须确认：
 
-- macOS Apple Silicon 包含 `invest-compass-core-aarch64-apple-darwin`。
-- macOS Intel 包含 `invest-compass-core-x86_64-apple-darwin`。
-- Windows x64 包含 `invest-compass-core-x86_64-pc-windows-msvc.exe`。
+- 构建输入目录包含当前 target triple 对应的 Go sidecar 文件。
+- macOS 发布包运行时包含 `invest-compass-core`。
+- Windows x64 发布包运行时包含 `invest-compass-core.exe`。
 - Tauri 配置只声明首版需要的权限。
 - Go sidecar 只监听 `127.0.0.1`。
 - runtime token 不出现在 argv、env、日志、配置文件或数据库中。
@@ -54,13 +54,15 @@ API Key 和代理密码属于敏感凭据。
 
 首版约定：
 
-- API Key 保存到系统凭据管理器。
-- macOS 使用 Keychain。
-- Windows 使用 Credential Manager。
-- SQLite 只保存 `api_key_ref`、`proxy_credential_ref`、`has_api_key` 和脱敏展示值。
+- API Key 和代理密码保存到 Rust 本地文件 vault。
+- macOS / Windows 均使用本地文件 vault，首版不强制依赖平台凭据服务。
+- Unix/macOS 下本地 vault 目录应以 `0700` 权限保存，secret 文件应以 `0600` 权限保存。
+- AI Provider、本地 vault 引用和代理 profile 必须解析为明确文件名，非法值不会创建弱语义凭据文件或隐式 `.secret` 文件。
+- Go core 只接受 `local-vault://ai-config/` 和 `local-vault://proxy/` 这两类凭据引用。
+- SQLite 只保存 `api_key_ref`、`proxy_credential_ref`、`has_api_key` 和包含脱敏标记的展示值。
 - 前端和日志导出不得包含真实 API Key、代理密码、Authorization 或 Proxy-Authorization。
 
-验收 Keychain 或 Credential Manager 时，只确认条目存在，不使用会打印明文 secret 的命令。
+验收本地 vault 时，只确认引用存在、文件创建/删除符合预期，不使用会打印明文 secret 的命令。
 
 ## 5. 数据来源和时效
 
@@ -84,7 +86,7 @@ AI 报告必须保留：
 
 ## 6. 基本使用流程
 
-首版主流程：
+首版目标主流程如下。当前仅在 RG5/T31-T38 通过后，才能作为内测用户可执行流程：
 
 1. 启动桌面应用。
 2. 在设置中确认工作区和网络代理配置。
@@ -100,7 +102,7 @@ AI 报告必须保留：
 
 - 网络和代理是否可用。
 - 模型配置是否完整。
-- API Key 是否已写入系统凭据管理器。
+- API Key 或代理密码是否已写入 Rust 本地文件 vault。
 - 数据源是否可用。
 - sidecar 是否正常启动。
 
@@ -113,18 +115,16 @@ pnpm --dir apps format:check
 pnpm --dir apps check
 pnpm --dir apps test
 pnpm --dir apps build
-go test ./...
+(cd apps/sidecar-core && go test ./...)
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 git diff --check
 ```
 
-`go test ./...` 需要在 `apps/sidecar-core` 目录执行。
-
 跨平台发布还需要人工确认：
 
-- macOS Apple Silicon 启动、sidecar、Keychain、通知、托盘和打包产物。
-- macOS Intel 启动、sidecar、Keychain、通知、托盘和打包产物。
-- Windows x64 启动、sidecar、Credential Manager、通知、托盘和安装包。
+- macOS Apple Silicon 启动、sidecar、本地 vault、通知、托盘和打包产物。
+- macOS Intel 启动、sidecar、本地 vault、通知、托盘和打包产物。
+- Windows x64 启动、sidecar、本地 vault、通知、托盘和安装包。
 
 ## 8. 已知未闭环项
 

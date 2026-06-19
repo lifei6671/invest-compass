@@ -139,7 +139,7 @@ Tauri 负责桌面能力和安全边界，Go 负责业务能力。这样可以�
 7. 所有第三方数据源必须做 Provider 抽象，避免被单一数据源锁死。
 8. 股票代码、市场、时间周期、复权类型等必须标准化。
 9. API Key、代理密码、持仓输入等敏感字段必须统一脱敏，禁止进入普通日志、错误响应和导出文件。
-10. macOS 与 Windows 都必须使用系统目录、系统凭据管理和平台签名能力，不硬编码平台路径。
+10. macOS 与 Windows 都必须使用系统目录、Rust 本地文件 vault 和平台签名能力，不硬编码平台路径。
 
 ---
 
@@ -261,22 +261,22 @@ core_start()
 core_health()
 stock_search(keyword)
 market_quote(symbol)
-market_kline(symbol, period, adjust)
-market_indicators(symbol, period, adjust, indicators)
-news_list(filters)
-news_market(filters)
+market_kline(symbol, period, adjust, limit)
+market_indicators(symbol, period, adjust, limit, indicators)
+news_list(symbol, limit)
+news_market(market, limit)
 watchlist_list()
 watchlist_create(payload)
 watchlist_update(id, payload)
 watchlist_delete(id)
 ai_config_list()
 ai_config_save(payload)
-ai_config_test(id)
-prompt_template_list(filters)
-prompt_template_get(id)
-prompt_template_create(payload)
-prompt_template_update(id, payload)
-prompt_template_delete(id)
+ai_config_test({ id, api_key_ref })
+prompt_templates_list()
+prompt_templates_get(id)
+prompt_templates_create(payload)
+prompt_templates_update(payload)
+prompt_templates_delete(id)
 analysis_task_create(payload)
 task_list(filters)
 task_get(task_id)
@@ -287,8 +287,11 @@ report_list(filters)
 report_get(id)
 report_delete(id)
 dashboard_summary()
+providers_status()
 settings_get(keys)
 settings_set(payload)
+workspace_get()
+workspace_set(payload)
 cache_stats()
 cache_clean(scope)
 export_logs()
@@ -302,7 +305,25 @@ check_update()
 license_status()
 ```
 
-Rust 层不提供 `core_request(method, path, body)` 这类任意路径代理。每个 command 必须固定允许访问的 Go API、HTTP 方法、请求 schema 和响应字段。`/internal/*`、shutdown、日志导出、系统凭据写入等敏感能力只能由对应的白名单 command 调用。
+Rust 层不提供 `core_request(method, path, body)` 这类任意路径代理。每个 command 必须固定允许访问的 Go API、HTTP 方法、请求 schema 和响应字段。`/internal/*`、shutdown、日志导出、本地 vault 写入等敏感能力只能由对应的白名单 command 调用。
+
+报告相关 command 必须固定映射：
+
+- `report_list(filters)` -> `POST /api/reports/list`
+- `report_get(id)` -> `POST /api/reports/get`
+- `report_delete(id)` -> `POST /api/reports/delete`
+
+报告查询结果默认不返回完整 `input_snapshot`。一次性持仓输入只允许作为任务输入快照的内部审计材料，默认复制、导出和历史查询链路都不得包含完整 `userPosition`。
+
+检查更新 command 必须固定映射：
+
+- `check_update()` -> `POST /api/update/check`
+
+日志导出 command 必须固定映射：
+
+- `export_logs(target_dir)` -> `POST /api/logs/export`
+
+日志导出 API 只生成已二次脱敏的导出包，不直接写入用户目录。真实文件写入必须由 Rust 在用户选择的授权目录内完成。Rust `export_logs(target_dir)` 必须先校验 `target_dir` 是已存在目录，非法目录不得触发 Go core 导出请求；写入时必须拒绝带目录分隔符或路径穿越的文件名，不得覆盖目标目录中已有同名文件，Unix/macOS 下导出文件权限必须为 `0600`，并返回实际写入的 `file_path` 和 `file_name`。
 
 Tauri v2 capability 原则：
 
@@ -331,7 +352,7 @@ Tauri v2 capability 原则：
 7. Tauri 通过 sidecar stdin 完成一次性握手，传入 runtime token。
 8. Go core 初始化数据库、配置、缓存。
 9. Go core 输出 ready JSON：
-   {"status":"ready","port":xxxxx,"pid":xxxxx}
+   {"status":"ready","port":xxxxx,"pid":xxxxx,"protocolVersion":"1"}
 10. Tauri 仅在内存保存 port/token。
 11. 前端进入主界面。
 ```
@@ -344,7 +365,7 @@ runtime token 禁止出现在命令行参数、环境变量、日志、配置文
 1. Tauri 使用 sidecar stdin 写入单行 JSON：{"token":"...","protocolVersion":"1"}，随后关闭 stdin。
 2. Go core 必须在 5 秒内从 stdin 读完并安装 token，超时或 JSON 非法则退出。
 3. Go core 在握手完成前不得注册业务路由；即使端口已分配，也必须拒绝所有请求。
-4. Go core 只在 token 安装成功后输出 ready JSON。
+4. Go core 只在 token 安装成功后输出携带 `protocolVersion` 的 ready JSON。
 5. macOS 和 Windows 都使用 stdin 语义，不依赖平台特有 FD/HANDLE 继承。
 6. 如果 Tauri sidecar API 无法满足 stdin 握手，才允许降级为 Rust `std::process::Command` 自管子进程；降级方案必须同时覆盖 macOS 和 Windows。
 ```
@@ -375,6 +396,7 @@ runtime token 禁止出现在命令行参数、环境变量、日志、配置文
 启动本地 HTTP 服务
 接收关闭信号并优雅关闭
 拒绝非 127.0.0.1 监听地址
+配置 ReadHeaderTimeout、ReadTimeout、WriteTimeout、IdleTimeout，避免异常连接长期占用 sidecar
 ```
 
 ### 5.2.1.1 actions 模块
@@ -384,7 +406,7 @@ runtime token 禁止出现在命令行参数、环境变量、日志、配置文
 ```text
 actions/router.go：唯一 Gin 路由注册入口。
 actions/<module>：业务 handler 子包，对外提供自身路由定义，不直接依赖 Gin 注册 API。
-actions/httpx：统一响应、request_id/trace_id、POST-only、token 校验、panic recovery 辅助能力。
+actions/httpx：统一响应、request_id/trace_id、POST-only、token 校验、JSON 请求体上限、panic recovery 辅助能力。
 ```
 
 统一响应结构：
@@ -408,6 +430,10 @@ actions/httpx：统一响应、request_id/trace_id、POST-only、token 校验、
   "requestId": "..."
 }
 ```
+
+`requestId` / `traceId` 可从 Rust 转发请求头透传，但 Go core 只接受 1-128 位 ASCII 字母、数字、`-`、`_`、`.`。缺失、超长或包含换行/空格等异常字符时必须重新生成本地 ID，避免异常头值进入统一响应、日志和导出链路。
+
+Go core 所有业务 handler 必须通过 `actions/httpx.DecodeJSON` 解码 JSON 请求体，单个请求体上限为 1 MiB，且请求体只允许包含一个 JSON object 文档。超过上限时返回 HTTP 413 和稳定错误码 `41300/request_body_too_large`；`null`、数组、合法 JSON 后追加额外内容或包含未知字段时返回 `40001/invalid_json`，避免异常本地请求占用过多内存、拼写错误、零值请求或未知字段被业务层忽略。
 
 ### 5.2.2 stock 模块
 
@@ -709,6 +735,8 @@ pkg/xerr：跨包共享错误码和通用错误类型，service 层不得重复�
 7. 非 dao 层禁止直接使用 database/sql、GORM 数据库句柄或手写 SQL。
 ```
 
+Go sidecar 生产启动时，在 `dao.Open` 和 `dao.Migrate` 前执行迁移前备份：已有 SQLite 主库复制到同工作区 `backups/` 目录，首次启动缺失库跳过，同名备份拒绝覆盖。真实发布升级仍需在 macOS / Windows 安装包中做恢复演练。
+
 ### 5.2.11 config 模块
 
 负责应用配置。
@@ -726,8 +754,11 @@ pkg/xerr：跨包共享错误码和通用错误类型，service 层不得重复�
 通知设置
 开机自启
 关闭后最小化到托盘
+主窗口状态：window.main.x / window.main.y / window.main.width / window.main.height
 缓存大小上限
 ```
+
+Rust 桌面运行期启动时从 Go core settings 读取主窗口状态并恢复位置和尺寸；关闭主窗口时写回当前外层窗口位置和尺寸。恢复只接受完整且尺寸合理的数据，缺字段、非法数字或过小尺寸时保留 Tauri 默认窗口状态。
 
 ### 5.2.12 license 模块
 
@@ -1110,6 +1141,7 @@ API 边界：
 6. Go sidecar 对非 POST 请求统一返回 405，并记录脱敏后的安全日志。
 7. 读取、查询、删除、更新等语义都通过 POST 路径和 JSON body 表达。
 8. API Key、代理密码、用户持仓输入等敏感字段不得出现在响应、日志、错误详情和导出文件中。
+9. Go sidecar 统一限制 JSON 请求体大小，只接受 JSON object，并拒绝尾随内容和未知字段，超限或非法 JSON 请求不得进入业务 service 或 dao 层。
 ```
 
 ### 8.1 健康检查
@@ -1141,6 +1173,8 @@ POST /api/stocks/search
   "keyword": "茅台"
 }
 ```
+
+`keyword` 去除首尾空白后不能为空。Rust `stock_search` 必须在转发前做同样校验，非法参数不得进入 Go core。
 
 返回：
 
@@ -1176,6 +1210,27 @@ POST /api/market/quote
 }
 ```
 
+响应字段至少包含：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "symbol": "CN:SH:600519",
+    "price": 1688.5,
+    "change_amount": 12.3,
+    "change_percent": 0.73,
+    "quote_time": "2026-06-18T10:30:00Z",
+    "provider": "provider-name"
+  },
+  "traceId": "...",
+  "requestId": "..."
+}
+```
+
+Go core 先读取 10-60 秒 quote 短缓存；缓存未命中时才调用 `MarketProvider.Quote`，成功后写入 `quotes`。
+
 ### 8.4 获取 K线
 
 ```http
@@ -1188,9 +1243,14 @@ POST /api/market/kline
 {
   "symbol": "CN:SH:600519",
   "period": "day",
-  "adjust": "qfq"
+  "adjust": "qfq",
+  "limit": 120
 }
 ```
+
+`period` 首版只允许 `day`、`week`、`month`；`adjust` 首版只允许 `none`、`qfq`、`hfq`；`limit` 必须为 1-500。Rust `market_kline` 必须在转发前做同样校验，非法参数不得进入 Go core。
+
+Go core 先读取 `symbol + period + adjust` 对应的 K 线缓存；缓存足量时不重复调用 Provider。返回数组必须按 `trade_date` 升序排列，Provider 返回后按交易日写入 `klines`。
 
 ### 8.5 获取技术指标
 
@@ -1205,11 +1265,36 @@ POST /api/market/indicators
   "symbol": "CN:SH:600519",
   "period": "day",
   "adjust": "qfq",
+  "limit": 120,
   "indicators": ["ma", "macd", "rsi"]
 }
 ```
 
-指标由 Go core 基于 K线统一计算。首版不单独落指标缓存表，允许复用 K线缓存和内存短缓存；前端不得自行计算业务指标。
+`indicators` 首版只允许 `ma`、`ema`、`macd`、`rsi`、`kdj`、`boll`、`volume_ma`、`change_percent`、`max_drawdown`、`volatility`。`limit` 必须为 1-500，Rust `market_indicators` 必须在转发前做同样校验，非法参数不得进入 Go core。
+
+响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "symbol": "CN:SH:600519",
+    "period": "day",
+    "adjust": "qfq",
+    "indicators": {
+      "ma": {
+        "ma5": [null, null, null, null, 102.4]
+      },
+      "max_drawdown": 2.1
+    }
+  },
+  "traceId": "...",
+  "requestId": "..."
+}
+```
+
+指标由 Go core 基于 K线统一计算。首版不单独落指标缓存表，允许复用 K线缓存；缓存不足时由 Go core 通过行情 Provider 拉取 K 线并写回 `klines`。序列前置空结果使用 JSON `null`，前端不得自行计算业务指标。
 
 ### 8.6 自选股
 
@@ -1220,12 +1305,62 @@ POST /api/watchlist/update
 POST /api/watchlist/delete
 ```
 
+Rust `watchlist_update` 和 `watchlist_delete` 必须在转发前校验 `id > 0`，非法参数不得进入 Go core。
+
 ### 8.7 新闻资讯
 
 ```http
 POST /api/news/list
 POST /api/news/market
 ```
+
+个股新闻请求：
+
+```json
+{
+  "symbol": "CN:SH:600519",
+  "limit": 20
+}
+```
+
+市场新闻请求：
+
+```json
+{
+  "market": "CN",
+  "limit": 20
+}
+```
+
+响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      {
+        "id": "content-hash",
+        "source": "provider-name",
+        "title": "新闻标题",
+        "url": "https://example.com/news",
+        "summary": "摘要",
+        "content_hash": "content-hash",
+        "published_at": "2026-06-18T09:30:00Z",
+        "symbols": ["CN:SH:600519"],
+        "tags": ["company"]
+      }
+    ]
+  },
+  "traceId": "...",
+  "requestId": "..."
+}
+```
+
+新闻 `limit` 必须为 1-100。Rust `news_list` 和 `news_market` 必须在转发前做同样校验，非法参数不得进入 Go core。
+
+Go core 输出新闻前必须执行 HTTP(S) URL scheme 校验和 `content_hash` 去重。新闻缓存写入 `news_items`，按 30-120 分钟缓存策略读取；缓存不足时通过合规 `news.Provider` 拉取。首版不接公告、研报、资金流专用数据源。
 
 ### 8.8 AI 配置
 
@@ -1240,27 +1375,38 @@ AI 配置密钥规则：
 
 ```text
 1. 前端到 Rust command 的 `ai_config_save(payload)` 可以接收一次性明文 API Key。
-2. Rust/Tauri 负责写入系统凭据管理器，并向 Go core 保存 api_key_ref。
+2. Rust/Tauri 负责写入本地文件 vault，并向 Go core 保存 api_key_ref。
 3. `/api/ai/configs/list` 只返回 has_api_key、masked_api_key、api_key_ref，不返回真实 Key。
 4. 测试连接失败时不得把请求头、Key、代理认证信息写入错误消息。
 5. 日志、trace、导出配置必须经过统一 secret redaction。
-6. Go core 不直接写系统 Keychain/Credential Manager，不持久化真实 Key。
+6. Go core 不直接写本地 vault，不持久化真实 Key。
+7. 新建 AI 配置尚未获得数据库 ID 时，Rust 写入本地 vault 必须生成唯一 api_key_ref，禁止多个新配置因 `id=0` 覆盖同一个密钥文件。
+8. 更新 AI Key 时，Rust 必须先校验旧 api_key_ref 是合法本地 vault 引用，再写入新密钥并删除被替换的旧 api_key_ref；如果删除旧引用失败，必须回滚本次新写入的密钥文件，避免历史密钥残留或孤儿 secret 文件。
+9. Unix/macOS 下本地 vault 目录必须收紧为 `0700`，secret 文件创建和更新后必须收紧为 `0600`，避免被同机其他用户枚举或读取。
+10. AI Provider、本地 vault 引用和代理 profile 清理后的文件名片段不能为空，非法值必须在 Rust 边界拒绝，禁止退化为弱语义文件名或落到 `.secret` 这类隐式文件。
+11. Go core 保存 AI 配置和 settings 前必须再次校验凭据引用 scheme，只允许 `local-vault://ai-config/` 和 `local-vault://proxy/`，禁止任意 `_ref` 绕过敏感配置拦截。
+12. `masked_api_key` 只能保存空值或包含 `*` / `...` 的脱敏展示文本；Go core 必须拒绝没有脱敏标记的非空值，避免明文 Key 通过展示字段旁路落库。
 ```
+
+Rust command `ai_config_list()`、`ai_config_save(payload)`、`ai_config_delete(payload)`、`ai_config_test({ id, api_key_ref })` 分别固定映射到 `POST /api/ai/configs/list`、`POST /api/ai/configs/save`、`POST /api/ai/configs/delete`、`POST /api/ai/configs/test`。`ai_config_delete` 和 `ai_config_test` 必须在读取或删除本地 vault 前校验 `id > 0`，非法参数不得误删本地凭据或进入 Go core。Go core 保存接口必须拒绝 `raw_api_key`，真实明文 Key 只能由 Rust command 一次性接收并写入本地文件 vault。
+
+Go core 生产启动时必须注入 OpenAI-compatible 模型连通性 tester。若 tester 未注入，视为后端配置错误，不能把模型测试能力写成可用。
 
 跨平台凭据实现：
 
 ```text
-macOS：Rust/Tauri 写入系统 Keychain。
-Windows：Rust/Tauri 写入 Windows Credential Manager。
+macOS / Windows：Rust/Tauri 写入本地文件 vault。
+默认目录：macOS 使用 ~/Library/Application Support/Invest Compass/credentials，Windows 使用 %APPDATA%/Invest Compass/credentials。
+开发和测试可用 INVEST_COMPASS_CREDENTIAL_DIR 覆盖本地 vault 目录。
 SQLite：只保存 api_key_ref、has_api_key、masked_api_key。
-模型测试/AI 分析：Rust 从系统凭据管理器读取真实 Key，通过本次白名单请求传给 Go core；Go 仅在内存中使用，禁止写入日志、数据库和任务事件。
+模型测试/AI 分析：Rust 从本地 vault 读取真实 Key，通过本次白名单请求传给 Go core；Go 仅在内存中使用，禁止写入日志、数据库和任务事件。
 ```
 
 Rust 到 Go 的内部密钥注入协议：
 
 ```text
-1. 前端请求只允许携带 aiConfigId，不允许携带真实 API Key。
-2. Rust command 根据 aiConfigId 查询 ai_key_ref，并从系统凭据管理器读取真实 Key。
+1. 前端请求只允许携带 aiConfigId 和可落库的 api_key_ref，不允许携带真实 API Key。
+2. Rust command 根据 api_key_ref 从本地 vault 读取真实 Key。
 3. Rust 转发给 Go core 时，在内部请求体加入 resolved_api_key。
 4. resolved_api_key 不进入前端类型、OpenAPI 对外文档、SQLite、任务事件、报告快照和日志。
 5. Go core 收到 resolved_api_key 后只保存在当前请求/任务内存中，AI 调用结束后释放。
@@ -1279,6 +1425,8 @@ POST /api/prompt-templates/delete
 
 首版模板类型只允许 `system`、`stock_full`、`technical`、`custom`。模板保存时必须校验变量白名单，不允许首版未支持的 `announcements`、`reports`、`portfolio` 等变量。
 
+Rust command `prompt_templates_list()`、`prompt_templates_get(id)`、`prompt_templates_create(payload)`、`prompt_templates_update(payload)`、`prompt_templates_delete(id)` 分别固定映射到上述 Go API，禁止通过通用 path 代理调用。涉及模板 ID 的 command 必须在转发前校验 `id > 0`。
+
 ### 8.10 分析任务
 
 创建任务：
@@ -1292,20 +1440,23 @@ POST /api/analysis/tasks
 ```json
 {
   "symbol": "CN:SH:600519",
-  "analysisType": "stock_full",
-  "aiConfigId": 1,
-  "promptTemplateId": 2,
-  "userPosition": {
-    "costPrice": 1680,
+  "analysis_type": "stock_full",
+  "ai_config_id": 1,
+  "api_key_ref": "local-vault://ai-config/openai-compatible-1",
+  "prompt_template_id": 2,
+  "user_position": {
+    "cost_price": 1680,
     "shares": 100,
-    "riskLevel": "medium"
+    "risk_level": "medium"
   }
 }
 ```
 
-`userPosition` 仅用于本次分析上下文和报告输入快照，不作为持仓数据单独落库，也不进入普通日志。
+`user_position` 仅用于本次分析上下文和报告输入快照，不作为持仓数据单独落库，也不进入普通日志。Go core 普通日志和任务事件只记录 `has_user_position`；`analysis_reports.input_snapshot` 可以保存本次 `user_position` 详情，但不得包含 `resolved_api_key`、`raw_api_key` 或其他 API Key 字段。`api_key_ref` 是可落库的本地 vault 引用，不是真实 API Key。
 
-以上请求结构是前端到 Rust command 的输入。Rust 转发给 Go core 时会补充内部字段 `resolved_api_key`，该字段不得暴露给前端。
+以上请求结构是前端到 Rust command 的输入。Rust 转发给 Go core 时会补充内部字段 `resolved_api_key`，该字段不得暴露给前端。`analysis_task_create(payload)` 必须在读取本地 vault 前校验 `symbol`、`analysis_type` 非空、`api_key_ref` 必须是 `local-vault://ai-config/` 引用，并校验 `ai_config_id > 0` 和 `prompt_template_id > 0`；非法请求不得触发凭据读取或进入 Go core。
+
+Go core 创建 `PENDING` 任务和 `TASK_CREATED` 事件后异步启动分析执行器。执行器只能读取已落库的真实行情、K 线、新闻缓存和 Prompt 模板；缺少必要上下文时必须把任务标记为 `FAILED`，不得生成占位行情或假新闻。执行成功后按 `task_id` 幂等保存报告，并写入 `TASK_STARTED`、`TASK_CHUNK`、`TASK_SUCCESS` 等事件。取消任务必须先持久化 `CANCELLED` 状态和 `TASK_CANCELLED` 事件，再取消当前进程内运行中的 executor context；执行器收到 `context.Canceled` 时直接退出，不追加 `TASK_FAILED`。
 
 返回：
 
@@ -1327,7 +1478,7 @@ POST /api/analysis/tasks
 POST /api/tasks/events/stream
 ```
 
-该 SSE 接口仅供 Rust 层订阅。前端通过 `analysis_task_subscribe(task_id)` 接收 Tauri Channel 或 event，不直接使用浏览器 `EventSource` 连接 Go core。
+该 SSE 接口仅供 Rust 层订阅。前端通过 `analysis_task_subscribe(task_id)` 接收 Tauri Channel 或 event，不直接使用浏览器 `EventSource` 连接 Go core。Go core 首次查询已有待补拉事件时会写出后返回；首次没有新增事件时会保持连接等待新事件，并在 `TASK_SUCCESS`、`TASK_FAILED` 或 `TASK_CANCELLED` 后结束。Rust 订阅 command 必须解析 Go core SSE 帧，兼容 LF/CRLF 帧边界和多行 `data:` 合并语义，并以 `analysis-task-event` 事件名向当前窗口分发结构化 payload，返回本轮分发数量和 `last_event_id` 便于后续补拉。
 
 任务查询与事件回放：
 
@@ -1337,7 +1488,11 @@ POST /api/tasks/get
 POST /api/tasks/events
 ```
 
-`afterEventId` 用于 SSE 断线后补拉事件。任务历史页必须优先读取任务详情和事件回放，再恢复订阅。
+`task_list(limit)` 的 `limit` 必须为 1-100，Go core 在 HTTP 边界拒绝无界任务历史查询。`afterEventId` 用于 SSE 断线后补拉事件，必须大于等于 0，其中 0 表示从头补拉。任务历史页必须优先读取任务详情和事件回放，再恢复订阅。
+
+Rust command `task_list(limit)`、`task_get(task_id)`、`task_events(task_id, after_event_id)` 分别固定映射到上述任务查询与事件回放 Go API，禁止通过通用 path 代理调用。`task_get`、`task_events`、`analysis_task_cancel` 和 `analysis_task_subscribe` 必须在 Rust 边界拒绝空 `task_id`；`task_list`、`task_events` 和 `analysis_task_subscribe` 必须在 Rust 边界复用同样的 `limit` / `after_event_id` 校验，非法参数不得转发到 Go core。
+
+Go core 启动时必须扫描 `RUNNING` 任务，并在同一事务中写入恢复后的终态任务和恢复事件，避免 sidecar 崩溃或重启后任务永久悬挂。恢复事件 payload 写入 `task_events` 前必须复用统一 secret redaction。
 
 取消任务：
 
@@ -1352,6 +1507,19 @@ POST /api/reports/get
 POST /api/reports/list
 POST /api/reports/delete
 ```
+
+报告删除使用软删除。`list` 和 `get` 只返回未删除报告，已删除报告详情按未找到处理。
+报告历史查询默认不返回完整 `input_snapshot`，避免一次性持仓输入进入普通历史浏览、复制和默认导出路径。
+Rust `report_get` 和 `report_delete` 必须在转发前校验 `id > 0`，非法参数不得进入 Go core。
+
+检查更新：
+
+```http
+POST /api/update/check
+```
+
+检查更新 API 只返回 `PROMPT_ONLY` 版本提示结果，不返回下载、安装或静默升级动作。
+manifest URL、下载链接和发布说明链接都必须使用 HTTPS 且命中 allowlist。
 
 ### 8.11 Dashboard 聚合
 
@@ -1371,6 +1539,19 @@ POST /api/dashboard/summary
 
 不做策略、资金流、公告、研报聚合。
 
+Go core 生产环境的 `dashboard/summary` 必须从统一 `dao.Store` 聚合真实本地数据：
+
+- active 自选股列表。
+- active 自选股对应的最新 quote 缓存。
+- 未软删除的最近分析报告。
+- 最近任务状态。
+- 市场新闻缓存。
+- `MarketProvider.Status` 和新闻 Provider 可选 `Status` 能力返回的数据源可用性。
+
+如果缓存缺失，接口返回空集合或 0 统计，不生成假行情、假新闻或假报告。真实 Market/News Provider 未配置时，`providers/status` 和 `dashboard/summary` 只能分别返回 `available=false`、`source=unconfigured` 的不可用状态；新闻 Provider 如果实现可选 `Status(ctx)`，Dashboard 和 Provider 状态接口必须复用该真实状态，不能因 Provider 非空就假定可用；搜索、行情、K 线和新闻接口仍不得伪造数据。
+
+Rust command `dashboard_summary()` 固定映射到 `POST /api/dashboard/summary`，不得通过通用 path 代理调用。
+
 ### 8.12 设置、缓存、日志和工作区
 
 ```http
@@ -1384,7 +1565,8 @@ POST /api/workspace/set
 POST /api/providers/status
 ```
 
-这些接口同样只供 Rust 白名单 command 调用。其中 `logs/export` 必须先脱敏 API Key、代理密码、持仓输入和授权信息。
+这些接口同样只供 Rust 白名单 command 调用。其中 `providers_status()` 固定映射到 `POST /api/providers/status`；`workspace_set(payload)` 必须在 Rust 边界拒绝空路径和相对路径；`logs/export` 必须先脱敏 API Key、代理密码、持仓输入和授权信息。
+`POST /api/logs/export` 从 Go core 运行期内存 `slog` 快照生成已二次脱敏的导出包，必须保留 `request_id`、`trace_id`，任务链路日志存在时必须继续保留 `task_id` 方便排障；Go core 不直接写入用户目录。Rust `export_logs(target_dir)` 在调用该 API 前先校验目标目录存在，避免无效目标触发日志包生成；写入导出文件时必须使用不覆盖已有文件的方式，防止用户目录中同名文件被替换；Unix/macOS 下必须使用当前用户私有读写权限创建导出文件。
 
 ---
 
@@ -1498,9 +1680,12 @@ proxy_credential_ref
 ```text
 1. proxy.http_url / proxy.socks5_url 禁止包含 username/password。
 2. 代理用户名可存 SQLite settings。
-3. 代理密码必须走系统凭据管理器，SQLite 只保存 proxy_credential_ref。
-4. macOS 使用 Keychain，Windows 使用 Credential Manager。
-5. 日志和导出配置不得包含代理认证明文。
+3. 代理密码必须走 Rust 本地文件 vault，SQLite 只保存 proxy_credential_ref。
+4. Rust `settings_set` 可以接收一次性 proxy_password，写入本地 vault 后只向 Go core 转发 proxy_credential_ref。
+5. Rust `settings_set` 清理代理凭据时必须删除本地 vault 文件，并向 Go core 清空 proxy_credential_ref。
+6. 同一次 `settings_set` 请求不得同时携带新 proxy_password 和 clear_proxy_credential，Rust 必须在读写本地 vault 前拒绝这种冲突请求。
+7. macOS / Windows 都使用 Rust 本地文件 vault。
+8. 日志和导出配置不得包含代理认证明文。
 ```
 
 ### 11.2 API Key 保存
@@ -1510,7 +1695,7 @@ API Key 不直接明文暴露给前端。
 首版固定方案：
 
 ```text
-1. 使用系统凭据管理器保存真实 API Key。
+1. 使用 Rust 本地文件 vault 保存真实 API Key。
 2. SQLite 的 ai_configs 只保存 api_key_ref。
 3. 前端只展示 has_api_key 和 masked_api_key。
 4. 删除模型配置时同步删除对应凭据项。
@@ -1519,11 +1704,11 @@ API Key 不直接明文暴露给前端。
 跨平台实现：
 
 ```text
-macOS：系统 Keychain。
-Windows：Windows Credential Manager。
+macOS：本地文件 vault。
+Windows：本地文件 vault。
 ```
 
-不采用“主密钥和密文同时保存在工作区”的方案。如果后续需要跨平台加密文件或迁移能力，可以评估 Tauri Stronghold，但不得降低系统凭据管理器方案的默认安全边界。
+首版本地文件 vault 不做强加密，安全性低于平台凭据服务；它的边界是避免前端、Go core、SQLite、日志和报告直接接触真实 Key。如果后续需要更强安全性，可以评估 Tauri Stronghold、keyring crate 或平台凭据服务。
 
 ---
 
@@ -1562,9 +1747,10 @@ Windows：Windows Credential Manager。
 2. Go core 为任务生成 task_id，任务日志、SSE 事件、报告快照都必须关联 task_id。
 3. 对外部 Provider 调用记录 provider、latency、status、trace_id，不记录密钥和完整请求头。
 4. 日志字段统一使用 request_id、trace_id、task_id、provider、symbol。
-5. secret redaction 覆盖 API Key、Authorization、Proxy-Authorization、代理密码、license key、用户持仓输入。
-6. 首版不暴露公网 `/metrics`；本地调试可以在开发模式输出 Provider latency、error_count、SSE reconnect_count。
-7. Rust command、Go handler、Provider 调用的 span 命名分别使用 desktop.<command>、core.<handler>、provider.<name>。
+5. Go core 只回显规范化后的 request_id / trace_id，拒绝把超长、换行或空格等异常头值写入响应和日志。
+6. secret redaction 覆盖 API Key、Authorization、Proxy-Authorization、代理密码、license key、用户持仓输入。
+7. 首版不暴露公网 `/metrics`；本地调试可以在开发模式输出 Provider latency、error_count、SSE reconnect_count。
+8. Rust command、Go handler、Provider 调用的 span 命名分别使用 desktop.<command>、core.<handler>、provider.<name>。
 ```
 
 ### 12.4 数据合规
@@ -1600,19 +1786,25 @@ Windows：Windows Credential Manager。
 
 ```text
 1. 用户点击检查更新后读取更新配置。
-2. 请求更新 JSON。
-3. 发现新版本后提示用户。
-4. 展示下载页面或发布说明链接。
+2. Rust `check_update()` 固定调用 Go core `POST /api/update/check`。
+3. Go core 优先使用静态配置；静态配置为空时从 settings 表读取 `update.manifest_url` 和逗号分隔的 `update.allowed_hosts`。
+4. Go core 校验更新 JSON URL 的 HTTPS 和 allowlist 后拉取 manifest。
+5. Go core 拉取 manifest 时拒绝 HTTP 3xx 重定向，避免跳转到未校验来源。
+6. Go core 拒绝超过 256 KiB 的 manifest 响应体，不接受截断后的更新 JSON。
+7. Go core 校验 manifest 内下载链接和发布说明链接仍命中 allowlist。
+8. 发现新版本后只提示用户，并展示下载页面或发布说明链接。
 ```
 
 首版检查更新信任边界：
 
 ```text
 1. 更新 JSON 必须来自 HTTPS。
-2. 域名必须在内置 allowlist 中。
+2. 域名必须在内置或 settings 配置的 allowlist 中。
 3. 展示的下载链接和发布说明链接也必须匹配 allowlist。
-4. 外链只允许 https scheme，并通过系统浏览器打开。
-5. 不允许从更新 JSON 执行脚本、命令或自定义 URL scheme。
+4. manifest 拉取不跟随 HTTP 3xx 重定向。
+5. manifest 响应体最大 256 KiB，超限直接返回失败。
+6. 外链只允许 https scheme，并通过系统浏览器打开。
+7. 不允许从更新 JSON 执行脚本、命令或自定义 URL scheme。
 ```
 
 后续自动更新流程：
@@ -1655,10 +1847,15 @@ macOS Universal，可选
 1. macOS 分别产出 aarch64-apple-darwin 与 x86_64-apple-darwin sidecar；Universal 包可选。
 2. Windows 产出 x86_64-pc-windows-msvc sidecar，文件名带 .exe。
 3. sidecar 按 Tauri externalBin 规则随包分发，不从运行时下载。
-4. desktop 与 core 必须带 protocolVersion，启动时校验兼容性。
-5. macOS 发布需要 Developer ID 签名和 notarization。
-6. Windows 发布需要代码签名证书；未签名包只允许开发/内部测试。
-7. Windows 安装包优先 NSIS，MSI 作为后续可选。
+4. `scripts/build-sidecar.mjs` 默认构建当前平台 sidecar，也必须支持 `--target=<triple>` 和 `--all-targets` 选择首版三类目标。
+5. desktop 与 core 必须带 protocolVersion，启动时校验兼容性。
+6. Windows sidecar 必须使用 GUI subsystem 构建，避免桌面应用启动 sidecar 时弹出控制台窗口。
+7. 发布包运行时优先解析主程序同目录的 `invest-compass-core` / `invest-compass-core.exe`；环境变量覆盖仅用于本地调试，源码目录 `src-tauri/binaries` 只作为开发 fallback。
+8. 应用级退出事件必须显式停止 Go sidecar，不能依赖进程退出后的 Drop 清理。
+9. 打包前必须实际生成 Apple Silicon、macOS Intel 和 Windows x64 三类 sidecar 产物；安装包启动验收仍必须在目标平台完成。
+10. macOS 发布需要 Developer ID 签名和 notarization。
+11. Windows 发布需要代码签名证书；未签名包只允许开发/内部测试。
+12. Windows 安装包优先 NSIS，MSI 作为后续可选。
 ```
 
 sidecar 命名：
@@ -1754,7 +1951,7 @@ Rust 代理到 Go
 Go 返回结果
 任务 SSE 事件
 应用退出时清理 sidecar
-macOS Keychain / Windows Credential Manager 凭据保存与删除
+Rust 本地文件 vault 凭据保存与删除
 macOS / Windows sidecar 启动握手
 Tauri capability 权限拒绝用例
 ```
@@ -1847,7 +2044,7 @@ OpenAI-compatible 接入
 模型配置页
 Prompt 模板页
 模型连通性测试
-macOS Keychain / Windows Credential Manager 保存 API Key
+Rust 本地文件 vault 保存 API Key
 ```
 
 验收标准：
@@ -1959,7 +2156,7 @@ desktop-010 实现系统通知
 desktop-011 实现检查更新入口
 desktop-012 实现日志导出脱敏
 desktop-013 实现 Tauri capabilities / CSP 基线
-desktop-014 实现 macOS Keychain / Windows Credential Manager 适配
+desktop-014 实现 Rust 本地文件 vault 适配
 desktop-015 实现 AI Key 内部注入协议
 ```
 
@@ -2073,7 +2270,7 @@ SSE 断线后重新拉取任务状态
 CI 多平台构建
 安装包手工验收
 路径全部通过系统目录获取
-macOS Keychain 与 Windows Credential Manager 分别验收
+macOS 与 Windows 本地文件 vault 分别验收
 sidecar 二进制按 target triple 命名并随包分发
 ```
 
@@ -2096,7 +2293,7 @@ sidecar 二进制按 target triple 命名并随包分发
 应对：
 
 ```text
-真实 API Key 存系统凭据管理器
+真实 API Key 存 Rust 本地文件 vault
 配置查询接口只返回脱敏状态
 统一 secret redaction
 日志导出前二次脱敏
@@ -2135,10 +2332,10 @@ CSP 禁止远程脚本
 10. 设置中心支持工作区、代理、通知、缓存。
 11. 应用有明确风险提示。
 12. 数据库升级不会丢失用户已有数据。
-13. API Key 存入系统凭据管理器，配置查询不回显真实 Key。
+13. API Key 存入 Rust 本地文件 vault，配置查询不回显真实 Key。
 14. 前端不能直接访问 Go sidecar，Rust command 必须白名单化。
 15. 首版不出现策略观察、授权激活、公告/研报/资金流等未闭环入口。
-16. macOS 使用 Keychain，Windows 使用 Credential Manager，凭据保存/删除均通过验收。
+16. macOS / Windows 使用 Rust 本地文件 vault，凭据保存/删除均通过验收。
 17. Prompt 模板、任务历史、报告历史、技术指标均有 Rust command 和 Go API 闭环。
 18. 检查更新链接只允许 HTTPS allowlist 域名。
 19. 总览页、资讯中心和数据源状态均有 Rust command 和 Go API 闭环。

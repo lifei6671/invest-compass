@@ -113,6 +113,24 @@ func TestNewsProviderContractSupportsStockAndMarketNews(t *testing.T) {
 	}
 }
 
+// TestProviderStatusFromProviderUsesOptionalStatus 验证新闻 Provider 可显式报告不可用状态。
+func TestProviderStatusFromProviderUsesOptionalStatus(t *testing.T) {
+	status := ProviderStatusFromProvider(context.Background(), fakeProvider{})
+
+	if status.Name != "fake-news" || status.Source != "licensed-feed" || status.Available {
+		t.Fatalf("unexpected provider status: %+v", status)
+	}
+}
+
+// TestProviderStatusFromProviderReturnsUnconfigured 验证未配置新闻 Provider 时状态接口不会伪造可用。
+func TestProviderStatusFromProviderReturnsUnconfigured(t *testing.T) {
+	status := ProviderStatusFromProvider(context.Background(), nil)
+
+	if status.Source != "unconfigured" || status.Available {
+		t.Fatalf("unexpected unconfigured status: %+v", status)
+	}
+}
+
 // TestProviderErrorRedactsSensitiveRequest 验证新闻 Provider 错误不会泄露授权头或密钥。
 func TestProviderErrorRedactsSensitiveRequest(t *testing.T) {
 	err := NewProviderError(
@@ -135,6 +153,11 @@ type fakeProvider struct{}
 // Name 返回测试新闻 Provider 名称。
 func (fakeProvider) Name() string {
 	return "fake-news"
+}
+
+// Status 返回固定新闻 Provider 状态，用于验证可选状态能力。
+func (fakeProvider) Status(context.Context) ProviderStatus {
+	return ProviderStatus{Name: "fake-news", Source: "licensed-feed", Available: false}
 }
 
 // List 返回固定个股新闻，用于验证 Provider 契约。

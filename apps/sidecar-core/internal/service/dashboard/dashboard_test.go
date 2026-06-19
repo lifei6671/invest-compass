@@ -63,7 +63,7 @@ func TestBuildSummaryKeepsRecentReportsTasksAndNews(t *testing.T) {
 // TestProviderStatusRedactsLastError 验证数据源状态会脱敏最近错误。
 func TestProviderStatusRedactsLastError(t *testing.T) {
 	summary := BuildSummary(Input{
-		ProviderStatuses: []market.ProviderStatus{
+		ProviderStatuses: []ProviderStatus{
 			{Name: "demo", Available: false, LastError: "Authorization: Bearer demo-sensitive-value"},
 		},
 	})
@@ -88,6 +88,30 @@ func TestSummaryJSONDoesNotExposeUnsupportedMVPFields(t *testing.T) {
 	for _, forbidden := range []string{"strategy", "announcement", "research", "fund_flow"} {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("summary exposed unsupported field %q: %s", forbidden, payload)
+		}
+	}
+}
+
+// TestSummaryJSONDoesNotExposeReportInputSnapshot 验证 Dashboard 不回显报告输入快照中的一次性持仓。
+func TestSummaryJSONDoesNotExposeReportInputSnapshot(t *testing.T) {
+	summary := BuildSummary(Input{
+		Reports: []report.Report{{
+			ID:            1,
+			TaskID:        "task-sensitive",
+			Title:         "敏感报告",
+			InputSnapshot: `{"user_position":{"cost_price":123.45,"shares":100}}`,
+			UpdatedAt:     time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC),
+		}},
+	})
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("marshal summary: %v", err)
+	}
+	payload := string(encoded)
+
+	for _, forbidden := range []string{"InputSnapshot", "input_snapshot", "user_position", "cost_price"} {
+		if strings.Contains(payload, forbidden) {
+			t.Fatalf("dashboard summary leaked report snapshot field %q: %s", forbidden, payload)
 		}
 	}
 }

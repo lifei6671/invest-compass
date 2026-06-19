@@ -7,6 +7,7 @@ import (
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/stock"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/xerr"
 )
 
 // MarketArea 表示行情 Provider 支持的市场区域。
@@ -64,6 +65,44 @@ type ProviderStatus struct {
 	LastCheckedAt  time.Time
 	LastError      string
 	SupportedAreas []MarketArea
+}
+
+// UnconfiguredProviderStatus 返回未配置真实行情 Provider 时的安全展示状态。
+func UnconfiguredProviderStatus() ProviderStatus {
+	return ProviderStatus{
+		Name:      "market-provider",
+		Source:    "unconfigured",
+		Available: false,
+		LastError: "market_provider_unconfigured",
+	}
+}
+
+// UnconfiguredProvider 是生产默认行情 Provider，明确表示首版尚未配置真实数据源。
+type UnconfiguredProvider struct{}
+
+// Name 返回未配置行情 Provider 的稳定名称。
+func (UnconfiguredProvider) Name() string {
+	return "market-provider"
+}
+
+// Status 返回不可用状态，避免 UI 或日志把未配置误判成真实数据源。
+func (UnconfiguredProvider) Status(context.Context) ProviderStatus {
+	return UnconfiguredProviderStatus()
+}
+
+// Search 在未配置真实数据源时快速失败，不返回假股票数据。
+func (UnconfiguredProvider) Search(context.Context, string) ([]StockBasic, error) {
+	return nil, &xerr.Error{Code: xerr.MarketProviderUnconfigured}
+}
+
+// Quote 在未配置真实数据源时快速失败，不返回假行情。
+func (UnconfiguredProvider) Quote(context.Context, stock.Symbol) (Quote, error) {
+	return Quote{}, &xerr.Error{Code: xerr.MarketProviderUnconfigured}
+}
+
+// Kline 在未配置真实数据源时快速失败，不返回假 K 线。
+func (UnconfiguredProvider) Kline(context.Context, KlineRequest) ([]KlineBar, error) {
+	return nil, &xerr.Error{Code: xerr.MarketProviderUnconfigured}
 }
 
 // Supports 判断 Provider 是否声明支持目标市场区域。

@@ -22,6 +22,11 @@ type Provider interface {
 	Market(ctx context.Context, request MarketRequest) ([]Item, error)
 }
 
+// StatusProvider 是新闻 Provider 可选实现的状态能力，不强制改动已有数据源契约。
+type StatusProvider interface {
+	Status(ctx context.Context) ProviderStatus
+}
+
 // ListRequest 是个股新闻查询请求。
 type ListRequest struct {
 	Symbol stock.Symbol
@@ -45,6 +50,62 @@ type Item struct {
 	PublishedAt time.Time
 	Symbols     []stock.Symbol
 	Tags        []string
+}
+
+// ProviderStatus 描述新闻数据源的安全展示状态。
+type ProviderStatus struct {
+	Name      string
+	Source    string
+	Available bool
+	LastError string
+}
+
+// UnconfiguredProviderStatus 返回未配置真实新闻 Provider 时的安全展示状态。
+func UnconfiguredProviderStatus() ProviderStatus {
+	return ProviderStatus{
+		Name:      "news-provider",
+		Source:    "unconfigured",
+		Available: false,
+		LastError: "news_provider_unconfigured",
+	}
+}
+
+// UnconfiguredProvider 是生产默认新闻 Provider，明确表示首版尚未配置真实数据源。
+type UnconfiguredProvider struct{}
+
+// Name 返回未配置新闻 Provider 的稳定名称。
+func (UnconfiguredProvider) Name() string {
+	return "news-provider"
+}
+
+// Status 返回不可用状态，避免 UI 或日志把未配置误判成真实数据源。
+func (UnconfiguredProvider) Status(context.Context) ProviderStatus {
+	return UnconfiguredProviderStatus()
+}
+
+// List 在未配置真实数据源时快速失败，不返回假新闻。
+func (UnconfiguredProvider) List(context.Context, ListRequest) ([]Item, error) {
+	return nil, &xerr.Error{Code: xerr.NewsProviderUnconfigured}
+}
+
+// Market 在未配置真实数据源时快速失败，不返回假市场新闻。
+func (UnconfiguredProvider) Market(context.Context, MarketRequest) ([]Item, error) {
+	return nil, &xerr.Error{Code: xerr.NewsProviderUnconfigured}
+}
+
+// ProviderStatusFromProvider 读取新闻 Provider 的安全展示状态，未配置时明确返回不可用。
+func ProviderStatusFromProvider(ctx context.Context, provider Provider) ProviderStatus {
+	if provider == nil {
+		return UnconfiguredProviderStatus()
+	}
+	if statusProvider, ok := provider.(StatusProvider); ok {
+		return statusProvider.Status(ctx)
+	}
+	return ProviderStatus{
+		Name:      provider.Name(),
+		Source:    provider.Name(),
+		Available: true,
+	}
 }
 
 // ProviderError 是新闻 Provider 调用失败时的可观测错误。

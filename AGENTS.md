@@ -62,7 +62,7 @@
 - 股票搜索、自选股、行情、K 线、技术指标、新闻资讯。
 - OpenAI-compatible AI Provider。
 - 模型配置、Prompt 模板、模型连通性测试。
-- 系统凭据管理器保存 API Key 和代理密码。
+- Rust 本地文件 vault 保存 API Key 和代理密码引用。
 - 个股 AI 分析任务、任务事件、报告保存、报告历史、任务历史。
 - 设置中心：工作区、代理、通知、缓存、开机自启、检查更新入口。
 - macOS 和 Windows 基础启动、凭据、sidecar、打包验收。
@@ -102,7 +102,7 @@ SQLite + 外部数据源 + AI Provider
 职责划分：
 
 - React：页面、图表、表格、设置、任务状态展示。
-- Rust：桌面能力、安全代理、sidecar 生命周期、系统凭据、权限收口。
+- Rust：桌面能力、安全代理、sidecar 生命周期、本地凭据 vault、权限收口。
 - Go：行情、新闻、指标、Prompt、AI 调用、任务、缓存、数据库。
 - SQLite：本地业务数据，不保存真实 API Key 和代理密码。
 
@@ -121,7 +121,7 @@ Go core 分层规则：
 
 不要把复杂投研业务塞进 Rust。
 不要让前端直接访问 Go sidecar。
-不要让 Go core 持久化系统凭据。
+不要让 Go core 持久化真实凭据。
 
 ---
 
@@ -192,10 +192,9 @@ Go core 分层规则：
 
 ### 凭据
 
-- API Key 保存到系统凭据管理器：
-  - macOS：Keychain
-  - Windows：Credential Manager
-- 代理密码也保存到系统凭据管理器。
+- API Key 保存到 Rust 管理的本地文件 vault。
+- 代理密码也保存到 Rust 管理的本地文件 vault。
+- 本地文件 vault 是首版简化替代方案，安全性低于平台凭据服务；后续可替换为更强方案，但首版不再强制依赖平台凭据服务。
 - SQLite 只保存 `api_key_ref`、`proxy_credential_ref`、`has_api_key`、`masked_api_key`。
 - 前端到 Rust 可以一次性提交明文 API Key。
 - Go core 只能在当前请求或任务内存中使用 `resolved_api_key`。
@@ -475,7 +474,7 @@ cd apps && pnpm install
 cd apps && pnpm build
 cd apps && pnpm test
 cd apps/sidecar-core && go test ./...
-cargo check
+cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
 cd apps/desktop && pnpm tauri build
 ```
 
@@ -483,8 +482,8 @@ cd apps/desktop && pnpm tauri build
 
 跨平台能力必须做真实验收：
 
-- macOS：启动、Keychain、通知、托盘、sidecar、打包、签名/公证方案。
-- Windows：启动、Credential Manager、通知、托盘、sidecar、NSIS/MSI、签名方案。
+- macOS：启动、本地凭据 vault、通知、托盘、sidecar、打包、签名/公证方案。
+- Windows：启动、本地凭据 vault、通知、托盘、sidecar、NSIS/MSI、签名方案。
 
 不能完成验证时，最终回复必须说明：
 

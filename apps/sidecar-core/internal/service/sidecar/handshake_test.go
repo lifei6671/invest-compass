@@ -63,9 +63,10 @@ func TestReadHandshakeReturnsContextErrorWhenNoInputArrives(t *testing.T) {
 // TestReadyMessageUsesStableJSONFields 验证 ready JSON 字段稳定，方便 Rust 层解析。
 func TestReadyMessageUsesStableJSONFields(t *testing.T) {
 	message := ReadyMessage{
-		Status: "ready",
-		Port:   5432,
-		PID:    100,
+		Status:          "ready",
+		Port:            5432,
+		PID:             100,
+		ProtocolVersion: ProtocolVersion,
 	}
 
 	payload, err := json.Marshal(message)
@@ -73,7 +74,7 @@ func TestReadyMessageUsesStableJSONFields(t *testing.T) {
 		t.Fatalf("marshal ready message: %v", err)
 	}
 
-	if string(payload) != `{"status":"ready","port":5432,"pid":100}` {
+	if string(payload) != `{"status":"ready","port":5432,"pid":100,"protocolVersion":"1"}` {
 		t.Fatalf("unexpected ready payload: %s", payload)
 	}
 }

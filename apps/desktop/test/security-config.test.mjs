@@ -5,6 +5,7 @@ import { test } from "node:test";
 const tauriConfig = JSON.parse(
   await readFile(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"),
 );
+const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
 const mainCapability = JSON.parse(
   await readFile(
     new URL("../src-tauri/capabilities/default.json", import.meta.url),
@@ -18,7 +19,11 @@ const commandSources = await readCommandSources(
 const rendererBoundarySources = await readSourceFiles([
   new URL("../../frontend/src/", import.meta.url),
   new URL("../../packages/shared/src/", import.meta.url),
-]);
+], (fileName) =>
+  /\.(ts|tsx)$/.test(fileName) &&
+  !fileName.includes(".test.") &&
+  !fileName.includes(".spec."),
+);
 const goCoreBoundarySources = await readSourceFiles(
   [new URL("../../sidecar-core/", import.meta.url)],
   (fileName, fileUrl) =>
@@ -92,6 +97,19 @@ test("CSP 不允许任意远程脚本或弱化脚本执行策略", () => {
   assert.doesNotMatch(csp, /default-src[^;]*https?:/);
 });
 
+test("Tauri externalBin 必须随包声明 Go sidecar", () => {
+  assert.deepEqual(
+    tauriConfig.bundle?.externalBin,
+    ["binaries/invest-compass-core"],
+    "externalBin 必须使用 Tauri sidecar 基名，实际文件由构建脚本补 target triple 后缀",
+  );
+  assert.match(
+    packageJson.scripts?.["sidecar:build"] ?? "",
+    /scripts\/build-sidecar\.mjs/,
+    "sidecar:build 必须通过专用脚本产出 target triple sidecar 文件",
+  );
+});
+
 test("Rust command 必须显式注册到 invoke_handler 白名单", () => {
   assert.deepEqual(
     parseGenerateHandlerCommands(libSource),
@@ -101,6 +119,249 @@ test("Rust command 必须显式注册到 invoke_handler 白名单", () => {
 
 test("Rust command 禁止实现任意路径 core_request 代理", () => {
   assert.deepEqual(findArbitraryProxyCommands(commandSources), []);
+});
+
+test("settings 和 cache Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    [
+      "cache_clean",
+      "cache_stats",
+      "settings_get",
+      "settings_set",
+      "workspace_get",
+      "workspace_set",
+    ].filter((command) => !commands.includes(command)),
+    [],
+    "settings/cache/workspace command 必须显式声明，不能用通用代理代替",
+  );
+
+  assert.deepEqual(findMissingFixedCommandPaths(commandSources), []);
+});
+
+test("股票搜索 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.equal(commands.includes("stock_search"), true, "stock_search command 必须显式声明");
+
+  const combinedSource = commandSources.join("\n");
+  assert.equal(
+    combinedSource.includes('"/api/stocks/search"'),
+    true,
+    "stock_search 必须固定映射到 /api/stocks/search",
+  );
+});
+
+test("行情 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    ["market_quote", "market_kline", "market_indicators"].filter(
+      (command) => !commands.includes(command),
+    ),
+    [],
+    "market quote/kline/indicators command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of ["/api/market/quote", "/api/market/kline", "/api/market/indicators"]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `行情 command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
+test("自选股 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    [
+      "watchlist_create",
+      "watchlist_delete",
+      "watchlist_list",
+      "watchlist_update",
+    ].filter((command) => !commands.includes(command)),
+    [],
+    "watchlist command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of [
+    "/api/watchlist/list",
+    "/api/watchlist/create",
+    "/api/watchlist/update",
+    "/api/watchlist/delete",
+  ]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `watchlist command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
+test("新闻 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    ["news_list", "news_market"].filter((command) => !commands.includes(command)),
+    [],
+    "news command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of ["/api/news/list", "/api/news/market"]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `news command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
+test("Dashboard 和 Provider 状态 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    ["dashboard_summary", "providers_status"].filter((command) => !commands.includes(command)),
+    [],
+    "dashboard/provider command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of ["/api/dashboard/summary", "/api/providers/status"]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `dashboard/provider command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
+test("Prompt 模板 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    [
+      "prompt_templates_create",
+      "prompt_templates_delete",
+      "prompt_templates_get",
+      "prompt_templates_list",
+      "prompt_templates_update",
+    ].filter((command) => !commands.includes(command)),
+    [],
+    "prompt template command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of [
+    "/api/prompt-templates/list",
+    "/api/prompt-templates/get",
+    "/api/prompt-templates/create",
+    "/api/prompt-templates/update",
+    "/api/prompt-templates/delete",
+  ]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `prompt template command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
+test("AI 配置 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    ["ai_config_delete", "ai_config_list", "ai_config_save", "ai_config_test"].filter(
+      (command) => !commands.includes(command),
+    ),
+    [],
+    "AI config command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of [
+    "/api/ai/configs/list",
+    "/api/ai/configs/save",
+    "/api/ai/configs/delete",
+    "/api/ai/configs/test",
+  ]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `AI config command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
+test("任务历史 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    [
+      "analysis_task_cancel",
+      "analysis_task_create",
+      "analysis_task_subscribe",
+      "task_events",
+      "task_get",
+      "task_list",
+    ].filter((command) => !commands.includes(command)),
+    [],
+    "task command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of [
+    "/api/analysis/tasks",
+    "/api/tasks/cancel",
+    "/api/tasks/events/stream",
+    "/api/tasks/list",
+    "/api/tasks/get",
+    "/api/tasks/events",
+  ]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `task history command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
+test("报告历史 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    ["report_delete", "report_get", "report_list"].filter((command) => !commands.includes(command)),
+    [],
+    "report history command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of ["/api/reports/list", "/api/reports/get", "/api/reports/delete"]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `report history command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
+test("检查更新 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.equal(commands.includes("check_update"), true, "check_update command 必须显式声明");
+
+  const combinedSource = commandSources.join("\n");
+  assert.equal(
+    combinedSource.includes('"/api/update/check"'),
+    true,
+    "check_update 必须固定映射到 /api/update/check",
+  );
+});
+
+test("日志导出 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.equal(commands.includes("export_logs"), true, "export_logs command 必须显式声明");
+
+  const combinedSource = commandSources.join("\n");
+  assert.equal(
+    combinedSource.includes('"/api/logs/export"'),
+    true,
+    "export_logs 必须固定映射到 /api/logs/export",
+  );
 });
 
 test("Rust command 安全扫描能识别任意 method/path/body 代理", () => {
@@ -377,6 +638,22 @@ function findArbitraryProxyCommands(sources) {
   }
 
   return failures;
+}
+
+function findMissingFixedCommandPaths(sources) {
+  const combinedSource = sources.join("\n");
+  const requiredPaths = [
+    "/api/settings/get",
+    "/api/settings/set",
+    "/api/workspace/get",
+    "/api/workspace/set",
+    "/api/cache/stats",
+    "/api/cache/clean",
+  ];
+
+  return requiredPaths
+    .filter((path) => !combinedSource.includes(`"${path}"`))
+    .map((path) => `缺少固定 Go API path ${path}`);
 }
 
 function hasArbitraryProxyParams(params) {

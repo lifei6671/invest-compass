@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -56,6 +57,24 @@ func TestRedactTextMasksKnownSecrets(t *testing.T) {
 	}
 	if strings.Count(redacted, RedactedValue) < 6 {
 		t.Fatalf("expected at least 6 redaction markers, got %q", redacted)
+	}
+}
+
+// TestRedactTextKeepsJSONPayloadValid 验证 JSON payload 脱敏后仍可被任务事件回放解析。
+func TestRedactTextKeepsJSONPayloadValid(t *testing.T) {
+	input := `{"Authorization":"Bearer placeholder-json-secret","userPosition":"满仓","has_user_position":true}`
+
+	redacted := RedactText(input)
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(redacted), &payload); err != nil {
+		t.Fatalf("redacted JSON should remain valid, got %q: %v", redacted, err)
+	}
+	if strings.Contains(redacted, "placeholder-json-secret") || strings.Contains(redacted, "满仓") {
+		t.Fatalf("redacted JSON leaked secret: %s", redacted)
+	}
+	if payload["has_user_position"] != true {
+		t.Fatalf("redaction should keep safe presence flag, got %#v", payload)
 	}
 }
 

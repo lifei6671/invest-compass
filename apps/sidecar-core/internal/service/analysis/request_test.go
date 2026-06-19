@@ -81,6 +81,37 @@ func TestInputSnapshotForLogRedactsUserPosition(t *testing.T) {
 	}
 }
 
+// TestInputSnapshotForReportKeepsOneTimePosition 验证报告输入快照保留本次分析的一次性持仓输入。
+func TestInputSnapshotForReportKeepsOneTimePosition(t *testing.T) {
+	validated, err := ValidateCreateRequest(CreateRequest{
+		Symbol:           "US:AAPL",
+		AnalysisType:     AnalysisStockFull,
+		AIConfigID:       7,
+		PromptTemplateID: 9,
+		UserPosition: &UserPosition{
+			CostPrice: 123.45,
+			Shares:    10,
+			RiskLevel: "medium",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ValidateCreateRequest returned error: %v", err)
+	}
+
+	snapshot := validated.InputSnapshotForReport()
+
+	for _, expected := range []string{"US:AAPL", "stock_full", "123.45", "10", "medium"} {
+		if !strings.Contains(snapshot, expected) {
+			t.Fatalf("report snapshot missing %q: %s", expected, snapshot)
+		}
+	}
+	for _, forbidden := range []string{"resolved_api_key", "raw_api_key", "api_key"} {
+		if strings.Contains(snapshot, forbidden) {
+			t.Fatalf("report snapshot leaked credential field %q: %s", forbidden, snapshot)
+		}
+	}
+}
+
 // TestCreateTaskBuildsPendingTaskAndSafeCreatedEvent 验证分析创建请求会落成待执行任务和安全创建事件。
 func TestCreateTaskBuildsPendingTaskAndSafeCreatedEvent(t *testing.T) {
 	validated, err := ValidateCreateRequest(CreateRequest{

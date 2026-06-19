@@ -12,6 +12,8 @@ import (
 const (
 	// ProviderOpenAICompatible 表示 OpenAI-compatible AI Provider。
 	ProviderOpenAICompatible = "openai-compatible"
+	// LocalAIConfigVaultRefPrefix 是 Rust 本地 vault 中 AI Key 引用的唯一合法前缀。
+	LocalAIConfigVaultRefPrefix = "local-vault://ai-config/"
 )
 
 // Config 是 Go core 可持久化的 AI 配置模型，不包含真实 API Key。
@@ -82,7 +84,7 @@ func (config Config) ListView() ListView {
 	}
 }
 
-// SaveRequest 是 Rust 写入系统凭据后转给 Go core 的配置保存输入。
+// SaveRequest 是 Rust 写入本地 vault 后转给 Go core 的配置保存输入。
 type SaveRequest struct {
 	ID             int64
 	Name           string
@@ -105,6 +107,12 @@ func BuildConfigForSave(request SaveRequest) (Config, error) {
 	if strings.TrimSpace(request.RawAPIKey) != "" {
 		return Config{}, &xerr.Error{Code: xerr.AIRawAPIKeyNotAllowed}
 	}
+	if err := validateAPIKeyRef(request.APIKeyRef, request.HasAPIKey); err != nil {
+		return Config{}, err
+	}
+	if err := validateMaskedAPIKey(request.MaskedAPIKey); err != nil {
+		return Config{}, err
+	}
 	return Config{
 		ID:             request.ID,
 		Name:           request.Name,
@@ -120,6 +128,30 @@ func BuildConfigForSave(request SaveRequest) (Config, error) {
 		StreamEnabled:  request.StreamEnabled,
 		IsDefault:      request.IsDefault,
 	}, nil
+}
+
+// validateAPIKeyRef 校验可落库的 API Key 引用只能来自 Rust 本地 vault。
+func validateAPIKeyRef(reference string, hasAPIKey bool) error {
+	trimmed := strings.TrimSpace(reference)
+	if trimmed == "" {
+		if hasAPIKey {
+			return &xerr.Error{Code: xerr.AIInvalidCredentialRef}
+		}
+		return nil
+	}
+	if !strings.HasPrefix(trimmed, LocalAIConfigVaultRefPrefix) {
+		return &xerr.Error{Code: xerr.AIInvalidCredentialRef}
+	}
+	return nil
+}
+
+// validateMaskedAPIKey 校验展示字段只能保存空值或已脱敏文本，避免明文 Key 从展示字段旁路落库。
+func validateMaskedAPIKey(maskedAPIKey string) error {
+	trimmed := strings.TrimSpace(maskedAPIKey)
+	if trimmed == "" || strings.Contains(trimmed, "*") || strings.Contains(trimmed, "...") {
+		return nil
+	}
+	return &xerr.Error{Code: xerr.AIRawAPIKeyNotAllowed}
 }
 
 // TestRequest 是 Rust 注入运行期密钥后发给 Go core 的模型连通性测试输入。

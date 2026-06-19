@@ -21,10 +21,10 @@ type Bundle struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ValidateRequest 校验导出日志是否包含定位问题所需的核心链路字段。
+// ValidateRequest 校验导出日志是否包含全局排障必需字段；task_id 只在任务链路出现时保留。
 func ValidateRequest(request Request) error {
 	content := strings.Join(request.Lines, "\n")
-	for _, field := range []string{logger.FieldRequestID, logger.FieldTraceID, logger.FieldTaskID} {
+	for _, field := range []string{logger.FieldRequestID, logger.FieldTraceID} {
 		if !strings.Contains(content, field) {
 			return &xerr.Error{Code: xerr.LogExportMissingTroubleshootingField}
 		}

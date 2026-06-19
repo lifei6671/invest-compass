@@ -1,1 +1,13 @@
+pub mod ai_config;
 pub mod core;
+pub mod dashboard;
+pub mod logs;
+pub mod market;
+pub mod news;
+pub mod prompt;
+pub mod providers;
+pub mod reports;
+pub mod settings;
+pub mod tasks;
+pub mod update;
+pub mod watchlist;

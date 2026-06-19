@@ -17,7 +17,7 @@
 - Go sidecar 只监听 `127.0.0.1`，runtime token 通过 stdin 握手传递。
 - 股票搜索、自选股、行情、K 线、技术指标、新闻资讯。
 - OpenAI-compatible AI Provider、模型配置、Prompt 模板、模型连通性测试。
-- API Key 和代理密码保存到系统凭据管理器，SQLite 只保存引用标识。
+- API Key 和代理密码保存到 Rust 管理的本地文件 vault，SQLite 只保存引用标识和脱敏状态。
 - 个股 AI 分析任务、任务事件、报告保存、报告历史、任务历史。
 - 设置中心覆盖工作区、代理、通知、缓存、开机自启和检查更新入口。
 

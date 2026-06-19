@@ -2,7 +2,12 @@ package dao
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -21,7 +26,7 @@ func TestOpenRequiresPath(t *testing.T) {
 
 // TestOpenConnectsSQLiteWithGORM 验证 dao 入口通过 GORM 打开 SQLite。
 func TestOpenConnectsSQLiteWithGORM(t *testing.T) {
-	db, err := Open(context.Background(), Config{Path: "file::memory:?cache=shared"})
+	db, err := Open(context.Background(), Config{Path: testSQLitePath(t)})
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
@@ -39,7 +44,7 @@ func TestOpenConnectsSQLiteWithGORM(t *testing.T) {
 
 // TestMigrateCreatesInitialSchema 验证首版 SQLite schema 能在空库完整创建。
 func TestMigrateCreatesInitialSchema(t *testing.T) {
-	db, err := Open(context.Background(), Config{Path: "file::memory:?cache=shared"})
+	db, err := Open(context.Background(), Config{Path: testSQLitePath(t)})
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
@@ -76,7 +81,7 @@ func TestMigrateCreatesInitialSchema(t *testing.T) {
 
 // TestMigrateIsIdempotent 验证重复迁移不会破坏已有数据库。
 func TestMigrateIsIdempotent(t *testing.T) {
-	db, err := Open(context.Background(), Config{Path: "file::memory:?cache=shared"})
+	db, err := Open(context.Background(), Config{Path: testSQLitePath(t)})
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
@@ -93,9 +98,94 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestBackupBeforeMigrationCopiesExistingSQLiteFile 验证迁移前备份会复制已有用户数据库文件。
+func TestBackupBeforeMigrationCopiesExistingSQLiteFile(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "invest-compass.sqlite3")
+	if err := os.WriteFile(dbPath, []byte("user database"), 0o600); err != nil {
+		t.Fatalf("write sqlite file: %v", err)
+	}
+	backupTime := time.Date(2026, 6, 18, 8, 9, 10, 0, time.UTC)
+
+	result, err := BackupBeforeMigration(context.Background(), BackupConfig{
+		Path:      dbPath,
+		BackupDir: filepath.Join(tempDir, "backups"),
+		Now:       backupTime,
+	})
+	if err != nil {
+		t.Fatalf("backup sqlite before migration: %v", err)
+	}
+
+	expectedPath := filepath.Join(tempDir, "backups", "invest-compass-20260618T080910000000000Z.sqlite3.bak")
+	if !result.Created || len(result.Files) != 1 || result.Files[0] != expectedPath {
+		t.Fatalf("unexpected backup result: %+v", result)
+	}
+	content, err := os.ReadFile(expectedPath)
+	if err != nil {
+		t.Fatalf("read backup file: %v", err)
+	}
+	if string(content) != "user database" {
+		t.Fatalf("unexpected backup content: %q", string(content))
+	}
+}
+
+// TestBackupBeforeMigrationSkipsMissingOrMemoryDatabase 验证首次启动或内存库不会生成无意义备份。
+func TestBackupBeforeMigrationSkipsMissingOrMemoryDatabase(t *testing.T) {
+	tempDir := t.TempDir()
+	for _, path := range []string{
+		filepath.Join(tempDir, "missing.sqlite3"),
+		"file:memory?mode=memory&cache=shared",
+	} {
+		result, err := BackupBeforeMigration(context.Background(), BackupConfig{
+			Path:      path,
+			BackupDir: filepath.Join(tempDir, "backups"),
+			Now:       time.Date(2026, 6, 18, 8, 9, 10, 0, time.UTC),
+		})
+		if err != nil {
+			t.Fatalf("backup should skip %s without error: %v", path, err)
+		}
+		if result.Created || len(result.Files) != 0 {
+			t.Fatalf("expected no backup for %s, got %+v", path, result)
+		}
+	}
+}
+
+// TestBackupBeforeMigrationRefusesOverwrite 验证备份文件重名时直接失败，避免覆盖已有用户备份。
+func TestBackupBeforeMigrationRefusesOverwrite(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "invest-compass.sqlite3")
+	backupDir := filepath.Join(tempDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o700); err != nil {
+		t.Fatalf("create backup dir: %v", err)
+	}
+	if err := os.WriteFile(dbPath, []byte("current database"), 0o600); err != nil {
+		t.Fatalf("write sqlite file: %v", err)
+	}
+	existing := filepath.Join(backupDir, "invest-compass-20260618T080910000000000Z.sqlite3.bak")
+	if err := os.WriteFile(existing, []byte("existing backup"), 0o600); err != nil {
+		t.Fatalf("write existing backup: %v", err)
+	}
+
+	_, err := BackupBeforeMigration(context.Background(), BackupConfig{
+		Path:      dbPath,
+		BackupDir: backupDir,
+		Now:       time.Date(2026, 6, 18, 8, 9, 10, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatal("expected backup overwrite to fail")
+	}
+	content, readErr := os.ReadFile(existing)
+	if readErr != nil {
+		t.Fatalf("read existing backup: %v", readErr)
+	}
+	if string(content) != "existing backup" {
+		t.Fatalf("existing backup was overwritten: %q", string(content))
+	}
+}
+
 // TestInitialSchemaEnforcesCoreUniqueConstraints 验证首版关键唯一约束真实生效。
 func TestInitialSchemaEnforcesCoreUniqueConstraints(t *testing.T) {
-	db, err := Open(context.Background(), Config{Path: "file::memory:?cache=shared"})
+	db, err := Open(context.Background(), Config{Path: testSQLitePath(t)})
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
@@ -123,6 +213,13 @@ func TestInitialSchemaEnforcesCoreUniqueConstraints(t *testing.T) {
 	if err := db.Exec(insertKline, "US:AAPL", "day", "none", "2026-06-18").Error; err == nil {
 		t.Fatal("expected duplicate kline key to fail")
 	}
+}
+
+// testSQLitePath 为每个测试创建隔离的共享内存库，避免跨测试数据污染。
+func testSQLitePath(t *testing.T) string {
+	t.Helper()
+	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	return fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
 }
 
 // assertColumns 验证迁移后的表包含指定列，避免 schema 缺列时静默通过。

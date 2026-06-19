@@ -50,6 +50,10 @@ type LicenseStatus string
 const (
 	// LicenseStatusFree 表示首版仅展示 FREE 占位。
 	LicenseStatusFree LicenseStatus = "FREE"
+	// LocalAIConfigVaultRefPrefix 是 AI Key 本地 vault 引用的唯一合法前缀。
+	LocalAIConfigVaultRefPrefix = "local-vault://ai-config/"
+	// LocalProxyVaultRefPrefix 是代理密码本地 vault 引用的唯一合法前缀。
+	LocalProxyVaultRefPrefix = "local-vault://proxy/"
 )
 
 // LicenseView 是关于页授权信息展示模型。
@@ -81,7 +85,10 @@ func ValidateSetting(setting Setting) error {
 		return nil
 	}
 	if isAllowedCredentialMetadata(key) {
-		return nil
+		return validateCredentialMetadata(key, setting.Value)
+	}
+	if strings.HasSuffix(key, "_ref") {
+		return &xerr.Error{Code: xerr.SettingsInvalidCredentialRef}
 	}
 	if strings.Contains(key, "password") ||
 		strings.Contains(key, "token") ||
@@ -139,7 +146,38 @@ func FreeLicenseView() LicenseView {
 
 // isAllowedCredentialMetadata 判断 key 是否属于允许落库的凭据引用或脱敏状态。
 func isAllowedCredentialMetadata(key string) bool {
-	return strings.HasSuffix(key, "_ref") || key == "masked_api_key" || key == "has_api_key"
+	return key == "api_key_ref" ||
+		key == "proxy_credential_ref" ||
+		key == "masked_api_key" ||
+		key == "has_api_key"
+}
+
+// validateCredentialMetadata 校验可落库的凭据元数据只包含本地 vault 引用和脱敏状态。
+func validateCredentialMetadata(key string, value string) error {
+	trimmed := strings.TrimSpace(value)
+	switch key {
+	case "api_key_ref":
+		if trimmed == "" || strings.HasPrefix(trimmed, LocalAIConfigVaultRefPrefix) {
+			return nil
+		}
+	case "proxy_credential_ref":
+		if trimmed == "" || strings.HasPrefix(trimmed, LocalProxyVaultRefPrefix) {
+			return nil
+		}
+	case "masked_api_key":
+		return validateMaskedAPIKey(trimmed)
+	case "has_api_key":
+		return nil
+	}
+	return &xerr.Error{Code: xerr.SettingsInvalidCredentialRef}
+}
+
+// validateMaskedAPIKey 校验 settings 中的 API Key 展示值必须是脱敏文本。
+func validateMaskedAPIKey(maskedAPIKey string) error {
+	if maskedAPIKey == "" || strings.Contains(maskedAPIKey, "*") || strings.Contains(maskedAPIKey, "...") {
+		return nil
+	}
+	return &xerr.Error{Code: xerr.SettingsSensitiveSetting}
 }
 
 // isTemporaryCacheTarget 判断缓存目标是否属于允许统计和清理的临时缓存。

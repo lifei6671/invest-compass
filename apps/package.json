@@ -6,12 +6,13 @@
   "scripts": {
     "dev": "pnpm sidecar:build && pnpm --filter @invest-compass/desktop dev",
     "build": "pnpm sidecar:build && pnpm -r --if-present build",
-    "test": "pnpm -r --if-present test && pnpm sidecar:test",
+    "test": "pnpm -r --if-present test && pnpm scripts:test && pnpm sidecar:test",
     "check": "pnpm -r --if-present check && pnpm sidecar:test && pnpm desktop:check",
     "format:check": "pnpm format:check:go && pnpm format:check:rust",
     "format:check:go": "test -z \"$(gofmt -l sidecar-core)\"",
     "format:check:rust": "cargo fmt --manifest-path desktop/src-tauri/Cargo.toml -- --check",
-    "sidecar:build": "cd sidecar-core && go build -o ../desktop/src-tauri/binaries/invest-compass-core ./cmd/invest-compass-core",
+    "sidecar:build": "node ../scripts/build-sidecar.mjs",
+    "scripts:test": "node --test ../scripts/*.test.mjs",
     "sidecar:test": "cd sidecar-core && go test ./...",
     "desktop:check": "cargo check --manifest-path desktop/src-tauri/Cargo.toml"
   }

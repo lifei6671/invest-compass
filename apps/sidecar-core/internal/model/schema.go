@@ -166,7 +166,7 @@ type TaskEvent struct {
 	UpdatedAt time.Time
 }
 
-// Setting 是非敏感设置表，真实凭据只允许保存系统凭据引用。
+// Setting 是非敏感设置表，真实凭据只允许保存本地 vault 引用。
 type Setting struct {
 	Key       string `gorm:"primaryKey"`
 	Value     string

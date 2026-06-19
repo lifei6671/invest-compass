@@ -51,11 +51,11 @@ func TestValidateSettingRejectsSensitivePlaintext(t *testing.T) {
 	assertSettingsErrorCode(t, err, xerr.SettingsSensitiveSetting)
 }
 
-// TestValidateSettingAcceptsCredentialReference 验证 settings 可以保存系统凭据引用和脱敏状态。
+// TestValidateSettingAcceptsCredentialReference 验证 settings 可以保存本地 vault 引用和脱敏状态。
 func TestValidateSettingAcceptsCredentialReference(t *testing.T) {
 	for _, setting := range []Setting{
-		{Key: "api_key_ref", Value: "keychain:item"},
-		{Key: "proxy_credential_ref", Value: "credential-manager:item"},
+		{Key: "api_key_ref", Value: "local-vault://ai-config/openai-compatible-1"},
+		{Key: "proxy_credential_ref", Value: "local-vault://proxy/default"},
 		{Key: "masked_api_key", Value: "****1234"},
 		{Key: "has_api_key", Value: "true"},
 	} {
@@ -63,6 +63,26 @@ func TestValidateSettingAcceptsCredentialReference(t *testing.T) {
 			t.Fatalf("ValidateSetting(%+v) returned error: %v", setting, err)
 		}
 	}
+}
+
+// TestValidateSettingRejectsInvalidCredentialReference 验证 settings 凭据引用不能用任意 _ref 绕过敏感配置拦截。
+func TestValidateSettingRejectsInvalidCredentialReference(t *testing.T) {
+	for _, setting := range []Setting{
+		{Key: "api_key_ref", Value: "local-vault://proxy/default"},
+		{Key: "proxy_credential_ref", Value: "file:///tmp/proxy-secret"},
+		{Key: "license_key_ref", Value: "local-vault://license/demo"},
+	} {
+		err := ValidateSetting(setting)
+
+		assertSettingsErrorCode(t, err, xerr.SettingsInvalidCredentialRef)
+	}
+}
+
+// TestValidateSettingRejectsUnmaskedAPIKeyDisplay 验证脱敏展示字段不能保存疑似明文 Key。
+func TestValidateSettingRejectsUnmaskedAPIKeyDisplay(t *testing.T) {
+	err := ValidateSetting(Setting{Key: "masked_api_key", Value: "sk-live-raw-secret-123456"})
+
+	assertSettingsErrorCode(t, err, xerr.SettingsSensitiveSetting)
 }
 
 // TestValidateWorkspacePathRequiresAbsolutePath 验证工作区路径必须是绝对路径。

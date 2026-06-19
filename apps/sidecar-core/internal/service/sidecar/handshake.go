@@ -19,9 +19,10 @@ type Handshake struct {
 }
 
 type ReadyMessage struct {
-	Status string `json:"status"`
-	Port   int    `json:"port"`
-	PID    int    `json:"pid"`
+	Status          string `json:"status"`
+	Port            int    `json:"port"`
+	PID             int    `json:"pid"`
+	ProtocolVersion string `json:"protocolVersion"`
 }
 
 // ReadHandshake 从 stdin 读取单行 JSON 握手，并受 context 超时控制。

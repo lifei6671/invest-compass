@@ -1,20 +1,29 @@
 package stocks
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/httpx"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/xerr"
 )
+
+// Store 是股票 action 依赖的数据访问边界。
+type Store interface {
+	UpsertStocks(ctx context.Context, stocks []model.Stock) error
+}
 
 // Config 是股票 action 的运行期依赖。
 type Config struct {
 	Security       httpx.SecurityConfig
 	MarketProvider market.MarketProvider
+	Store          Store
 }
 
 type searchRequest struct {
@@ -49,8 +58,7 @@ func handleSearch(config Config) http.HandlerFunc {
 		}
 
 		var payload searchRequest
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			httpx.WriteError(response, http.StatusBadRequest, 40001, "invalid_json", context)
+		if !httpx.DecodeJSON(response, request, context, &payload) {
 			return
 		}
 
@@ -62,6 +70,11 @@ func handleSearch(config Config) http.HandlerFunc {
 
 		stocks, err := config.MarketProvider.Search(request.Context(), keyword)
 		if err != nil {
+			var ruleError *xerr.Error
+			if errors.As(err, &ruleError) && ruleError.Code == xerr.MarketProviderUnconfigured {
+				httpx.WriteError(response, http.StatusServiceUnavailable, 50301, string(ruleError.Code), context)
+				return
+			}
 			slog.Warn(
 				"股票搜索 Provider 调用失败",
 				logger.FieldRequestID, context.RequestID,
@@ -71,6 +84,18 @@ func handleSearch(config Config) http.HandlerFunc {
 			)
 			httpx.WriteError(response, http.StatusBadGateway, 50200, "market_provider_error", context)
 			return
+		}
+		if config.Store != nil {
+			if err := config.Store.UpsertStocks(request.Context(), modelStocksFromMarket(stocks)); err != nil {
+				slog.Warn(
+					"股票基础信息缓存写入失败",
+					logger.FieldRequestID, context.RequestID,
+					logger.FieldTraceID, context.TraceID,
+					"error", logger.RedactError(err),
+				)
+				httpx.WriteError(response, http.StatusInternalServerError, 50004, "stock_cache_error", context)
+				return
+			}
 		}
 
 		httpx.WriteOK(response, buildSearchResults(stocks), context)
@@ -90,4 +115,21 @@ func buildSearchResults(stocks []market.StockBasic) []searchResult {
 		})
 	}
 	return results
+}
+
+// modelStocksFromMarket 转换 Provider 股票基础信息为可持久化缓存模型。
+func modelStocksFromMarket(stocks []market.StockBasic) []model.Stock {
+	result := make([]model.Stock, 0, len(stocks))
+	for _, item := range stocks {
+		result = append(result, model.Stock{
+			Symbol:   item.Symbol.String(),
+			Market:   item.Market,
+			Code:     item.Code,
+			Name:     item.Name,
+			Exchange: item.Exchange,
+			Industry: item.Industry,
+			Concept:  item.Concept,
+		})
+	}
+	return result
 }

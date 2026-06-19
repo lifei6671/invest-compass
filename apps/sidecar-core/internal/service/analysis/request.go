@@ -91,6 +91,22 @@ func (request ValidatedCreateRequest) InputSnapshotForLog() string {
 	return logger.RedactText(string(encoded))
 }
 
+// InputSnapshotForReport 返回报告审计用输入快照，可包含一次性持仓输入但不得包含密钥。
+func (request ValidatedCreateRequest) InputSnapshotForReport() string {
+	payload := map[string]any{
+		"symbol":             request.Symbol.String(),
+		"analysis_type":      request.AnalysisType,
+		"ai_config_id":       request.AIConfigID,
+		"prompt_template_id": request.PromptTemplateID,
+		"user_position":      request.UserPosition,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return logger.RedactText(string(encoded))
+}
+
 // CreateTask 将已校验分析请求转换为待执行任务和创建事件。
 func CreateTask(request ValidatedCreateRequest, taskID string, now time.Time) (task.Task, task.Event) {
 	payload := map[string]any{

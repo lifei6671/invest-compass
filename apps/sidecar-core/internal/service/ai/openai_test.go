@@ -58,6 +58,58 @@ func TestChatSendsOpenAICompatibleRequest(t *testing.T) {
 	}
 }
 
+// TestOpenAIConfigTesterUsesResolvedAPIKey 验证配置连通性测试复用 OpenAI-compatible Provider 且只使用运行期密钥。
+func TestOpenAIConfigTesterUsesResolvedAPIKey(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		gotAuth = request.Header.Get("Authorization")
+		if request.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if payload["model"] != "gpt-connectivity" || payload["stream"] == true {
+			t.Fatalf("unexpected tester request payload: %#v", payload)
+		}
+
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"id":"chatcmpl-test","choices":[{"message":{"content":" ok "}}]}`))
+	}))
+	defer server.Close()
+
+	result, err := OpenAIConfigTester{}.TestAIConfig(context.Background(), Config{
+		Provider:       ProviderOpenAICompatible,
+		BaseURL:        server.URL,
+		ModelName:      "gpt-connectivity",
+		Temperature:    0.2,
+		TimeoutSeconds: 1,
+	}, "sk-runtime-secret")
+	if err != nil {
+		t.Fatalf("TestAIConfig returned error: %v", err)
+	}
+
+	if gotAuth != "Bearer sk-runtime-secret" {
+		t.Fatalf("expected runtime Authorization header, got %q", gotAuth)
+	}
+	if !result.OK || result.Provider != ProviderOpenAICompatible || result.Model != "gpt-connectivity" || result.Message != "ok" {
+		t.Fatalf("unexpected safe test result: %+v", result)
+	}
+}
+
+// TestOpenAIConfigTesterRejectsMissingRuntimeKey 验证连通性测试必须由 Rust 注入运行期密钥。
+func TestOpenAIConfigTesterRejectsMissingRuntimeKey(t *testing.T) {
+	_, err := OpenAIConfigTester{}.TestAIConfig(context.Background(), Config{
+		Provider:  ProviderOpenAICompatible,
+		BaseURL:   "https://api.example.com/v1",
+		ModelName: "gpt-test",
+	}, "")
+
+	assertAIErrorCode(t, err, xerr.AIInvalidRequest)
+}
+
 // TestChatMapsHTTPErrorStatus 验证 401、429、5xx 会映射为稳定错误码且不泄露密钥。
 func TestChatMapsHTTPErrorStatus(t *testing.T) {
 	tests := []struct {
