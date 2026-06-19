@@ -453,7 +453,10 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增未配置 Provider 的安全状态模型，真实数据源未配置时只返回 `available=false` 和 `source=unconfigured`，不伪造行情、搜索或 K 线能力。
   - Provider 错误会保留 provider/operation 可观测上下文，并复用统一脱敏入口避免泄露授权头和 API Key。
   - 单测已覆盖接口契约、标准 symbol 使用、合规状态描述、未配置状态和错误脱敏。
-  - 真实合规数据 Provider 仍需确认数据源授权和访问限制后接入，完成后再标记为 `[x]`。
+  - 已新增 `sina-tencent-market` 真实组合 Provider：`SinaSource/SinaProvider` 只负责新浪 suggest/实时行情，`TencentSource/TencentProvider` 只负责腾讯结构化 K 线，`EastMoneySource/EastMoneyProvider` 只负责东方财富 `push2his` K 线兜底，`CompositeMarketProvider` 对外组合成完整 `MarketProvider`；授权和样例验收完成前，生产 `main.go` 仍保持 `UnconfiguredProvider` 安全状态。
+  - K 线 Provider 链路为腾讯优先、东财 direct HTTP 兜底；不迁移 chromedp Cookie 抓取逻辑，也不依赖本地浏览器路径。
+  - Provider 单测覆盖新浪搜索解析、GB18030 解码、A 股实时行情字段映射、非股票六位代码拒绝、腾讯 K 线解析、不复权参数映射、东财 push2his K 线解析、拆分后的新浪/腾讯/东财职责边界、组合 Provider 委派和东财兜底、异常字段快速失败、状态元信息和未支持市场拒绝。
+  - 当前 Provider 仅声明支持 `CN` A 股；`HK` / `US`、数据源授权复核、真实外网样例查询和跨平台开发环境验收完成前，T13 仍保持 `[~]`，不能标记为 `[x]`。
 
 ### T14 股票搜索和基础信息 API
 
@@ -482,7 +485,7 @@ P7 跨平台桌面能力、打包、发布验收
   - Rust `stock_search` 已在转发前拒绝空 keyword，非法请求不进入 Go core。
   - 已新增 Rust 白名单 command `stock_search(keyword)`，固定映射到 `POST /api/stocks/search`，禁止通用 path 代理。
   - 单测覆盖空 keyword、有效 keyword 返回标准 symbol、搜索后写入股票缓存、DAO 按 symbol upsert、Rust command 固定 path 和 Rust command 空 keyword 早失败。
-  - 受 T13 后续接入约束，真实合规 Provider 注入完成后再标记为 `[x]`。
+  - 受 T13 合规验收和生产注入约束，数据源授权、真实外网样例查询、跨平台开发环境验收完成后再标记为 `[x]`。
 
 ### T15 自选股 CRUD
 
@@ -618,7 +621,50 @@ P7 跨平台桌面能力、打包、发布验收
   - Rust `news_list` 和 `news_market` 已在转发前校验 `limit` 必须为 1-100，非法请求不进入 Go core。
   - 已新增 Rust 白名单 command：`news_list`、`news_market`，固定映射到 `POST /api/news/list` 和 `POST /api/news/market`，禁止通用 path 代理。
   - 单测覆盖重复新闻不重复入库、列表按发布时间排序、新闻 URL 输出前 scheme 校验、个股新闻 API 写入缓存、市场新闻缓存命中不重复请求 Provider、Rust command 固定 path 和 Rust command 非法 `limit` 早失败。
+  - 已新增 `CailianpressProvider` 和 `SinaLiveProvider` 的 service 层抓取清洗实现，分别清洗财联社电报和新浪财经直播快讯为统一 `news.Item`；尚未注入生产入口。
   - 受真实合规新闻 Provider 数据源授权约束，Provider 注入、Dashboard/资讯中心/分析上下文真实新闻数据闭环完成后再标记为 `[x]`。
+
+### P3 补充：市场资讯扩展 Provider 预研
+
+- 状态：service 层已新增，尚未接入 API、Rust command、SQLite 缓存、前端页面或分析任务上下文。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/service/marketinfo`，通过腾讯财经公开接口抓取并清洗全球主要指数，支持 Markdown 渲染给后续 AI 上下文使用。
+  - 已在 `marketinfo` 新增 `CLSMarketStatisticProvider`，通过财联社 `x-quote` 行情概览接口抓取并清洗全市场上涨/下跌家数、涨停/跌停家数、指数内部涨跌家数、涨跌分布和派生情绪描述。
+  - 已在 `marketinfo` 新增 `EastMoneyMutualTop10Provider` 和 `EastMoneyStockScreenerProvider`，分别清洗东财沪深港通/港股通十大成交和东财条件选股列表。
+  - 已在 `fundflow` 新增 `EastMoneyStockFundFlowProvider`，清洗东财个股资金流榜单和个股历史资金流序列；不写入本地库。
+  - 已新增 `apps/sidecar-core/internal/service/macro`，通过东方财富宏观数据接口抓取并清洗 GDP、CPI、PPI、PMI。
+  - 已新增 `apps/sidecar-core/internal/service/calendar`，支持财联社日历公开接口和九阳公社日历凭据注入接口。
+  - 已新增 `apps/sidecar-core/internal/service/hotspot`，支持雪球热股凭据注入接口。
+  - 需要 Cookie、token 或 API Key 的渠道通过 `ChannelCredential` 注入；缺少凭据时返回 Provider 错误，不使用硬编码 Cookie/token，也不使用 chromedp 获取登录态。
+  - 单测覆盖财联社快讯、Sina 直播快讯、腾讯全球指数、财联社市场涨跌统计、东财互联互通十大成交、东财条件选股、东财个股资金流榜单、东财个股历史资金流、东财 GDP、财联社日历、九阳日历凭据校验和雪球热股 Cookie 校验。
+- 剩余边界：
+  - 当前只迁移抓取和清洗，不迁移原项目中的 DB 写入、定时任务、标签关联、Markdown 业务拼装或页面入口；市场涨跌统计不迁移 `market_statistic` 入库、今日/近 N 日趋势查询；`stock_data_api.go` 中的自选股、交易日志、Wails 方法和 AI Tool 包装不迁移。
+  - 研报、公告、龙虎榜、资金流等与 `fundamental`、`fundflow`、`eastmoneyai` 已有职责重叠的能力，不在该预研包重复实现。
+  - 各渠道的数据授权、频率限制、Cookie/token 管理、可分发边界和真实外网样例仍需单独验收。
+
+### P3 补充：基本面 / F10 Provider 抽象
+
+- 状态：service 层已新增，尚未接入 API、Rust command、SQLite 缓存、前端页面或分析任务上下文。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/service/fundamental`，定义基本面 `Provider`、`ProviderStatus`、`ReportKind`、`Dataset`、`Column`、`Row` 和脱敏 `ProviderError`。
+  - 已新增 `EastMoneyF10Provider`，通过东方财富 HSF10 direct HTTP JSON 接口获取最新财务、季度财务、机构预测、估值百分位、融资融券、大宗交易、户均持股趋势、龙虎榜和营业部买卖明细等报告。
+  - 已新增 `RenderMarkdown`，把结构化 `Dataset` 渲染成 AI 上下文可用的 Markdown，隐藏技术字段并格式化金额、股数、百分比、日期。
+  - 单测覆盖 Provider 状态合规元信息、东财 F10 请求参数和解析、Markdown 字段隐藏/格式化、未支持市场拒绝。
+- 剩余边界：
+  - 未接入首版 API、Rust command、缓存表、Prompt 上下文或 UI。
+  - 东方财富 F10 公开网页接口的数据授权、频率限制、可分发边界和真实外网样例仍需单独验收。
+
+### P3 补充：基金 Provider 预研
+
+- 状态：service 层已新增，尚未接入 API、Rust command、SQLite 缓存、前端页面或分析任务上下文。
+- 当前进展：
+  - 已新增 `apps/sidecar-core/internal/service/fund`，定义基金 `Provider`、`ProviderStatus`、搜索、基础资料、历史净值、排行、十大持仓模型和脱敏 `ProviderError`。
+  - 已新增 `EastMoneyProvider`，通过东方财富公开网页接口抓取并清洗基金搜索、基金基础资料、历史净值、基金排行和十大持仓。
+  - 迁移范围只包含抓取和清洗，不迁移原项目中的关注基金 CRUD、数据库写入、批量刷新、场内基金 K 线二次封装、持仓股票补行情或页面入口。
+  - 单测覆盖搜索响应清洗、基础资料页面解析、历史净值数值转换、基金排行伪 JS 解析、十大持仓 HTML 解析和非法基金代码拒绝。
+- 剩余边界：
+  - 基金能力不属于当前首版用户可见范围，未接入生产默认入口。
+  - 东方财富基金公开网页接口的数据授权、频率限制、可分发边界和真实外网样例仍需单独验收。
 
 ### T19 Dashboard summary 和 provider status
 
@@ -1540,9 +1586,13 @@ Windows：启动、本地凭据 vault、通知、托盘、sidecar、NSIS/MSI、�
 
 继续开发前需要先解决以下非代码或跨层依赖：
 
-- T13 / T18：需要确认真实合规 Market / News Provider 的数据源、授权方式、
-  频率限制和可分发边界。确认前只能保留 `unconfigured` 安全状态，不能接入
-  假行情、假 K 线或假新闻。
+- T13 / T18：Market Provider 已新增新浪、腾讯和东财公开网页接口的 service 层代码路径，
+  但生产入口仍保持 `UnconfiguredProvider`，需要先确认数据源授权方式、频率限制、
+  可分发边界和真实外网样例验收；News Provider 仍需确认真实数据源。
+  确认前不能接入假行情、假 K 线或假新闻，也不能把未验收数据源切到生产默认入口。
+- 基本面 / F10：已新增 service 层 Provider 抽象和东财 HSF10 代码路径，但仍需
+  确认数据授权、频率限制、可分发边界，并完成 API/Rust/cache/Prompt 接入设计
+  后才能进入首版用户可见能力。
 - T31-T38：均为页面闭环任务；后端和 Rust command 已提供基础能力的任务，
   不能因为页面未完成而标记为整体完成。
 - T39：真正托盘菜单、系统通知和开机自启需要确认 Tauri feature、plugin

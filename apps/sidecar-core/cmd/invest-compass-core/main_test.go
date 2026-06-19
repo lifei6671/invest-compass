@@ -138,8 +138,8 @@ func TestBuildActionsConfigInjectsProductionAIConfigTester(t *testing.T) {
 	}
 }
 
-// TestBuildActionsConfigInjectsExplicitProviderStatus 验证生产配置显式注入数据源状态，不把未配置误判成漏注入。
-func TestBuildActionsConfigInjectsExplicitProviderStatus(t *testing.T) {
+// TestBuildActionsConfigKeepsMarketProviderUnconfiguredUntilComplianceReady 验证生产配置在授权验收前保持行情 Provider 安全未配置状态。
+func TestBuildActionsConfigKeepsMarketProviderUnconfiguredUntilComplianceReady(t *testing.T) {
 	store := newMainTestStore(t)
 	logSource := logexportservice.NewMemorySource(nil, 10)
 	config := buildActionsConfig("test-token", store, logSource, func() {})

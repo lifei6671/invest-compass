@@ -106,6 +106,146 @@ func TestVolumeMAChangeDrawdownAndVolatility(t *testing.T) {
 	assertClose(t, volatility, 10)
 }
 
+// TestChipDistributionCalculatesCostProfile 验证筹码分布基于 K 线成交量生成可归一化的成本分布。
+func TestChipDistributionCalculatesCostProfile(t *testing.T) {
+	klines := []ChipKLine{
+		{Open: 9.8, High: 10.2, Low: 9.6, Close: 10.0, Volume: 1000, Amount: 10000, TurnoverRate: 5},
+		{Open: 10.1, High: 11.2, Low: 10.0, Close: 11.0, Volume: 3000, Amount: 31800, TurnoverRate: 8},
+		{Open: 10.8, High: 12.0, Low: 10.5, Close: 11.5, Volume: 2000, Amount: 22600, TurnoverRate: 6},
+	}
+
+	distribution, err := ChipDistribution(klines, ChipDistributionOptions{BinCount: 12})
+	if err != nil {
+		t.Fatalf("ChipDistribution returned error: %v", err)
+	}
+
+	if distribution.SampleSize != len(klines) {
+		t.Fatalf("expected sample size %d, got %d", len(klines), distribution.SampleSize)
+	}
+	if distribution.BinCount != 12 || len(distribution.Items) != 12 {
+		t.Fatalf("expected 12 bins, got count=%d items=%d", distribution.BinCount, len(distribution.Items))
+	}
+	assertClose(t, distribution.CurrentPrice, 11.5)
+	if distribution.AverageCost < distribution.MinPrice || distribution.AverageCost > distribution.MaxPrice {
+		t.Fatalf("average cost %.4f out of price range %.4f-%.4f", distribution.AverageCost, distribution.MinPrice, distribution.MaxPrice)
+	}
+	if distribution.ProfitRatio <= 0 || distribution.ProfitRatio > 1 {
+		t.Fatalf("unexpected profit ratio %.6f", distribution.ProfitRatio)
+	}
+
+	var ratioSum float64
+	for _, item := range distribution.Items {
+		ratioSum += item.Ratio
+	}
+	assertClose(t, ratioSum, 1)
+
+	top := distribution.TopN(2)
+	if len(top) != 2 {
+		t.Fatalf("expected two top bins, got %d", len(top))
+	}
+	if top[0].Ratio < top[1].Ratio {
+		t.Fatalf("top bins are not sorted by ratio desc: %#v", top)
+	}
+}
+
+// TestChipDistributionUsesLatestValidPrice 验证尾部占位坏数据不会把当前价和获利比例置零。
+func TestChipDistributionUsesLatestValidPrice(t *testing.T) {
+	klines := []ChipKLine{
+		{Open: 9.8, High: 10.2, Low: 9.6, Close: 10.0, Volume: 1000},
+		{Open: 10.1, High: 11.2, Low: 10.0, Close: 11.0, Volume: 2000},
+		{Open: 0, High: 0, Low: 0, Close: 0, Volume: 0},
+	}
+
+	distribution, err := ChipDistribution(klines, ChipDistributionOptions{BinCount: 10})
+	if err != nil {
+		t.Fatalf("ChipDistribution returned error: %v", err)
+	}
+
+	assertClose(t, distribution.CurrentPrice, 11.0)
+	if distribution.ProfitRatio <= 0 {
+		t.Fatalf("expected positive profit ratio, got %.6f", distribution.ProfitRatio)
+	}
+}
+
+// TestChipCostCenterUsesOHLCWhenAmountMissing 验证缺少成交额时成本中枢仍使用完整 OHLC，而不是忽略开盘价。
+func TestChipCostCenterUsesOHLCWhenAmountMissing(t *testing.T) {
+	kline := ChipKLine{Open: 9, High: 12, Low: 8, Close: 11, Volume: 1000}
+
+	center := chipCostCenter(kline, 8, 12)
+
+	assertClose(t, center, 10)
+}
+
+// TestChipDistributionRejectsInvalidInput 验证筹码分布对非法输入快速失败，不生成误导性图表数据。
+func TestChipDistributionRejectsInvalidInput(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func() error
+		code xerr.Code
+	}{
+		{
+			name: "empty klines",
+			run: func() error {
+				_, err := ChipDistribution(nil, ChipDistributionOptions{})
+				return err
+			},
+			code: xerr.IndicatorInsufficientData,
+		},
+		{
+			name: "invalid bin count",
+			run: func() error {
+				_, err := ChipDistribution([]ChipKLine{{High: 10, Low: 9, Close: 9.5, Volume: 100}}, ChipDistributionOptions{BinCount: -1})
+				return err
+			},
+			code: xerr.IndicatorInvalidInput,
+		},
+		{
+			name: "invalid price range",
+			run: func() error {
+				_, err := ChipDistribution([]ChipKLine{{High: 0, Low: 0, Close: 0, Volume: 100}}, ChipDistributionOptions{})
+				return err
+			},
+			code: xerr.IndicatorInvalidInput,
+		},
+		{
+			name: "mixed invalid kline with volume",
+			run: func() error {
+				_, err := ChipDistribution([]ChipKLine{
+					{High: 10, Low: 9, Close: 9.5, Volume: 100},
+					{High: 0, Low: 9, Close: 9.5, Volume: 100},
+				}, ChipDistributionOptions{})
+				return err
+			},
+			code: xerr.IndicatorInvalidInput,
+		},
+		{
+			name: "high less than low",
+			run: func() error {
+				_, err := ChipDistribution([]ChipKLine{{High: 8, Low: 9, Close: 8.5, Volume: 100}}, ChipDistributionOptions{})
+				return err
+			},
+			code: xerr.IndicatorInvalidInput,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.run()
+			if err == nil {
+				t.Fatal("expected error")
+			}
+
+			var indicatorError *xerr.Error
+			if !errors.As(err, &indicatorError) {
+				t.Fatalf("expected xerr.Error, got %T", err)
+			}
+			if indicatorError.Code != tt.code {
+				t.Fatalf("expected error code %q, got %q", tt.code, indicatorError.Code)
+			}
+		})
+	}
+}
+
 // TestIndicatorsReturnStableErrors 验证数据不足或参数非法时返回稳定错误码。
 func TestIndicatorsReturnStableErrors(t *testing.T) {
 	tests := []struct {

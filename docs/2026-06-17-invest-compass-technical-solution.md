@@ -486,14 +486,16 @@ A股：CN:SZ:300750
 ```go
 type MarketProvider interface {
     Name() string
-    Search(keyword string) ([]StockBasic, error)
-    Quote(symbol Symbol) (*Quote, error)
-    Kline(req KlineRequest) ([]KlineBar, error)
-    Minute(req MinuteRequest) ([]MinuteBar, error)
+    Status(ctx context.Context) ProviderStatus
+    Search(ctx context.Context, keyword string) ([]StockBasic, error)
+    Quote(ctx context.Context, symbol stock.Symbol) (Quote, error)
+    Kline(ctx context.Context, request KlineRequest) ([]KlineBar, error)
 }
 ```
 
 首版至少实现一个合规可用的数据 Provider，同时保留可扩展接口。数据源必须明确来源、授权边界和访问频率限制。后续可以接入付费数据源或用户自己的数据源。
+
+当前实现已新增组合 Provider `sina-tencent-market`：`SinaSource/SinaProvider` 只负责新浪结构化搜索和实时行情，`TencentSource/TencentProvider` 只负责腾讯结构化 K 线，`EastMoneySource/EastMoneyProvider` 只负责东方财富 `push2his` K 线兜底，`CompositeMarketProvider` 对外组合成完整 `MarketProvider`。K 线请求优先使用腾讯源；腾讯返回错误或空结果时再尝试东财源，不引入 chromedp 或本地浏览器 Cookie 抓取。Provider 状态明确声明来源、授权边界、访问频率和当前支持市场。当前 service 层仅声明支持 `CN` A 股，并拒绝转债、基金、B 股等非 A 股代码；`HK` / `US` 不伪装可用，后续需要接入单独 Provider 或扩展当前 Provider 后再开放。数据源授权、频率限制、可分发边界、真实外网样例和跨平台开发环境验收完成前，生产 `main.go` 仍保持未配置 Provider 安全状态。
 
 ### 5.2.4 news 模块
 
@@ -525,7 +527,78 @@ type NewsItem struct {
 }
 ```
 
-### 5.2.5 indicator 模块
+当前已新增 `CailianpressProvider` 和 `SinaLiveProvider` 的 service 层抓取清洗实现，分别清洗财联社电报和新浪财经直播快讯，输出统一 `news.Item`。该实现不写数据库、不注册 API、不修改 Rust command；生产入口仍受真实数据源授权、频率限制、可分发边界和样例验收约束。
+
+### 5.2.4.1 市场资讯扩展 Provider 预研
+
+`market_news_api.go` 中并非新闻本身的能力已按职责拆成小包预留：
+
+```text
+internal/service/marketinfo  腾讯全球指数、财联社市场涨跌统计、东财互联互通十大成交、东财条件选股
+internal/service/macro       东方财富 GDP/CPI/PPI/PMI
+internal/service/calendar    财联社日历、九阳公社日历
+internal/service/hotspot     雪球热股
+internal/service/fundflow    东方财富概念资金流、个股资金流榜单、个股历史资金流
+```
+
+需要 Cookie、token 或 API Key 的渠道通过 Provider config 注入 `ChannelCredential`，后续可由设置页读取本地 vault 引用后传入；service 层不得硬编码第三方 Cookie/token，也不得用 chromedp 自动绕过渠道登录态。缺少凭据时 Provider 必须返回可观测错误，不能静默返回假数据。
+
+当前预研实现只迁移抓取和清洗，不接入 Go API、Rust command、SQLite 缓存、前端页面或分析任务上下文。财联社市场涨跌统计只输出当前快照和派生情绪指标，不迁移原项目中的定时采集、`market_statistic` 入库、今日/近 N 日趋势查询。`stock_data_api.go` 中的东财个股资金流榜单、个股历史资金流、沪深港通/港股通十大成交和条件选股已拆成独立 Provider；不迁移原文件中的自选股、交易日志、Wails 方法、AI Tool Markdown 包装或 DB 写入。研报、公告、龙虎榜、资金流等与 `fundamental`、`fundflow`、`eastmoneyai` 已有职责重叠的能力，不在 `marketinfo` 预研包重复实现。
+
+### 5.2.5 fundamental 模块
+
+负责股票基本面和 F10 数据。
+
+首版当前已新增 Go service 层抽象，但尚未接入 Go API、Rust command、SQLite 缓存或分析任务上下文。该模块不得和行情 `MarketProvider` 混用；行情 Provider 只负责搜索、quote、K 线，基本面 Provider 单独承载财务、估值、机构预测、融资融券、大宗交易、股东趋势、龙虎榜等数据。
+
+当前实现已新增 `apps/sidecar-core/internal/service/fundamental`：
+
+```go
+type Provider interface {
+    Name() string
+    Status(ctx context.Context) ProviderStatus
+    Fetch(ctx context.Context, request Request) (Dataset, error)
+}
+```
+
+当前默认实现为 `EastMoneyF10Provider`，通过东方财富 HSF10 `datacenter.eastmoney.com/securities/api/data/v1/get` direct HTTP JSON 接口获取结构化数据，不迁移 chromedp、本地浏览器 Cookie 或散落 URL 拼接逻辑。远端查询由 `ReportKind` 规格表统一生成，输出为 `Dataset`，再由 `RenderMarkdown` 渲染为 AI 上下文可用的 Markdown。
+
+当前已建模的报告类型：
+
+```text
+latest_finance
+quarter_finance
+org_forecast
+forecast_summary
+valuation_percentile
+margin_trading
+block_trade
+holder_trend
+billboard
+operating_department
+```
+
+后续若接入通达信 F10、付费基本面数据或本地缓存，只需要新增 Provider 或缓存编排层，不应修改行情 Provider 契约。
+
+### 5.2.6 fund 模块
+
+负责基金公开数据源的抓取和清洗预研。
+
+当前已新增 `apps/sidecar-core/internal/service/fund`，仅作为后续基金研究能力的 service 层 Provider 预留，不接入首版 Go API、Rust command、SQLite 缓存、前端页面或分析任务上下文。该模块不得承载关注基金 CRUD、批量刷新、本地持久化或场内基金 K 线二次封装，避免重复行情 Provider 和业务 service 的职责。
+
+当前默认实现为 `EastMoneyProvider`，通过东方财富公开网页接口获取并清洗：
+
+```text
+基金搜索
+基金基础资料
+历史净值
+基金排行
+基金十大持仓
+```
+
+该 Provider 只迁移抓取和清洗能力，不迁移原项目中的数据库写入、关注基金管理、定时批量刷新、持仓股票补行情和 Wails 页面入口。东方财富基金公开接口的数据授权、频率限制、可分发边界和真实外网样例完成验收前，不得把基金能力接入生产默认入口或 UI。
+
+### 5.2.7 indicator 模块
 
 负责技术指标计算。
 
@@ -553,7 +626,7 @@ BOLL
 4. 指标参数可配置。
 ```
 
-### 5.2.6 ai 模块
+### 5.2.7 ai 模块
 
 负责 AI Provider、模型配置、Prompt 构建、AI 调用、流式输出。
 
@@ -1229,7 +1302,7 @@ POST /api/market/quote
 }
 ```
 
-Go core 先读取 10-60 秒 quote 短缓存；缓存未命中时才调用 `MarketProvider.Quote`，成功后写入 `quotes`。
+Go core 先读取 10-60 秒 quote 短缓存；缓存未命中时才调用 `MarketProvider.Quote`，成功后写入 `quotes`。当前真实 Provider 对 `CN` A 股返回结构化行情快照；暂不支持的市场必须返回 Provider 错误，不能用空数据或假数据代替。
 
 ### 8.4 获取 K线
 
@@ -1250,7 +1323,7 @@ POST /api/market/kline
 
 `period` 首版只允许 `day`、`week`、`month`；`adjust` 首版只允许 `none`、`qfq`、`hfq`；`limit` 必须为 1-500。Rust `market_kline` 必须在转发前做同样校验，非法参数不得进入 Go core。
 
-Go core 先读取 `symbol + period + adjust` 对应的 K 线缓存；缓存足量时不重复调用 Provider。返回数组必须按 `trade_date` 升序排列，Provider 返回后按交易日写入 `klines`。
+Go core 先读取 `symbol + period + adjust` 对应的 K 线缓存；缓存足量时不重复调用 Provider。返回数组必须按 `trade_date` 升序排列，Provider 返回后按交易日写入 `klines`。当前组合 Provider 的 K 线链路为腾讯优先、东方财富 direct HTTP 兜底；不依赖浏览器自动化获取 Cookie。
 
 ### 8.5 获取技术指标
 
