@@ -11,8 +11,16 @@ use tauri::Manager;
 /// 启动 Tauri 桌面壳，注册白名单命令并按配置启动 Go sidecar。
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(CoreState::empty())
         .setup(|app| {
+            app.handle()
+                .plugin(tauri_plugin_autostart::init(
+                    tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                    None,
+                ))
+                .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
             let binary_path = sidecar::runtime_core_binary_path();
             let workspace_path = app.path().app_data_dir()?;
             if binary_path.exists() {
@@ -32,6 +40,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::core::core_start,
             commands::core::core_health,
+            commands::autostart::autostart_get,
+            commands::autostart::autostart_set,
             commands::settings::settings_get,
             commands::settings::settings_set,
             commands::settings::workspace_get,
@@ -44,6 +54,7 @@ pub fn run() {
             commands::market::market_indicators,
             commands::news::news_list,
             commands::news::news_market,
+            commands::external::open_external_url,
             commands::dashboard::dashboard_summary,
             commands::providers::providers_status,
             commands::prompt::prompt_templates_list,
@@ -64,6 +75,19 @@ pub fn run() {
             commands::reports::report_list,
             commands::reports::report_get,
             commands::reports::report_delete,
+            commands::scheduler::scheduler_job_types,
+            commands::scheduler::scheduler_jobs_backfill,
+            commands::scheduler::scheduler_jobs_list,
+            commands::scheduler::scheduler_jobs_get,
+            commands::scheduler::scheduler_jobs_run_now,
+            commands::scheduler::scheduler_jobs_save,
+            commands::scheduler::scheduler_jobs_set_enabled,
+            commands::scheduler::scheduler_jobs_delete,
+            commands::scheduler::scheduler_runs_list,
+            commands::scheduler::scheduler_runs_get,
+            commands::scheduler::scheduler_runs_trigger,
+            commands::scheduler::scheduler_refresh_symbol,
+            commands::scheduler::scheduler_status,
             commands::logs::export_logs,
             commands::update::check_update,
             commands::watchlist::watchlist_list,

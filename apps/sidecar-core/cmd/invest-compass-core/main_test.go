@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/server"
 	logexportservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/logexport"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
+	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
 )
 
 // TestValidateListenHostOnlyAllowsLoopback 验证 sidecar 只能监听本机回环地址。
@@ -128,12 +130,17 @@ func TestRecoverRunningTasksOnStartupPersistsTerminalState(t *testing.T) {
 func TestBuildActionsConfigInjectsProductionAIConfigTester(t *testing.T) {
 	store := newMainTestStore(t)
 	logSource := logexportservice.NewMemorySource(nil, 10)
-	config := buildActionsConfig("test-token", store, logSource, func() {})
+	queue := schedulerservice.NewExecutionQueue()
+	schedulerService, err := schedulerservice.NewService(schedulerservice.Config{Store: store, Queue: queue})
+	if err != nil {
+		t.Fatalf("new scheduler service: %v", err)
+	}
+	config := buildActionsConfig("test-token", store, queue, schedulerService, logSource, func() {})
 
 	if config.AIConfigTester == nil {
 		t.Fatal("production actions config must inject AI config tester")
 	}
-	if config.AIConfigStore == nil || config.AnalysisStore == nil || config.LogExportSource == nil {
+	if config.AIConfigStore == nil || config.AnalysisStore == nil || config.LogExportSource == nil || config.SchedulerQueue == nil || config.SchedulerService == nil {
 		t.Fatalf("production actions config missed required stores: %+v", config)
 	}
 }
@@ -142,7 +149,12 @@ func TestBuildActionsConfigInjectsProductionAIConfigTester(t *testing.T) {
 func TestBuildActionsConfigKeepsMarketProviderUnconfiguredUntilComplianceReady(t *testing.T) {
 	store := newMainTestStore(t)
 	logSource := logexportservice.NewMemorySource(nil, 10)
-	config := buildActionsConfig("test-token", store, logSource, func() {})
+	queue := schedulerservice.NewExecutionQueue()
+	schedulerService, err := schedulerservice.NewService(schedulerservice.Config{Store: store, Queue: queue})
+	if err != nil {
+		t.Fatalf("new scheduler service: %v", err)
+	}
+	config := buildActionsConfig("test-token", store, queue, schedulerService, logSource, func() {})
 
 	if config.MarketProvider == nil || config.NewsProvider == nil {
 		t.Fatalf("production config must inject explicit provider implementations: %+v", config)
@@ -159,6 +171,90 @@ func TestBuildActionsConfigKeepsMarketProviderUnconfiguredUntilComplianceReady(t
 	}
 	if newsStatus.Status(context.Background()).Available {
 		t.Fatal("unconfigured news provider must not report available")
+	}
+}
+
+// TestNewProductionSchedulerRestoreCreatesMissedTodayRun 验证生产 scheduler 组装会在启动恢复阶段补偿当天错过的窗口。
+func TestNewProductionSchedulerRestoreCreatesMissedTodayRun(t *testing.T) {
+	ctx := context.Background()
+	store := newMainTestStore(t)
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+
+	job := model.SchedulerJob{
+		Name:           "A 股开盘行情刷新",
+		CronType:       schedulerservice.CronTypeCNAShareQuoteRefresh,
+		CronExpr:       "30 9 * * 1-5",
+		Enabled:        true,
+		Market:         "CN",
+		Timezone:       "Asia/Shanghai",
+		TradeWindow:    "trading_time",
+		ScopeJSON:      `{"symbols":["CN:SH:600519"]}`,
+		ParamsJSON:     `{}`,
+		CatchupEnabled: true,
+		CatchupMaxDays: 5,
+		TimeoutSeconds: 120,
+	}
+	if err := store.SaveSchedulerJob(ctx, &job); err != nil {
+		t.Fatalf("save scheduler job: %v", err)
+	}
+
+	queue, schedulerService, err := newProductionScheduler(store, func() time.Time {
+		return time.Date(2026, 6, 19, 10, 0, 0, 0, location)
+	})
+	if err != nil {
+		t.Fatalf("new production scheduler: %v", err)
+	}
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = schedulerService.Shutdown(shutdownCtx)
+	})
+
+	if err := schedulerService.Restore(ctx); err != nil {
+		t.Fatalf("restore scheduler: %v", err)
+	}
+
+	runs, err := store.ListSchedulerRuns(ctx, job.ID, 10)
+	if err != nil {
+		t.Fatalf("list scheduler runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one missed_today run, got %+v", runs)
+	}
+	run := runs[0]
+	if run.TriggerType != schedulerservice.TriggerMissedToday || run.Status != schedulerservice.RunStatusQueued || run.Source != "startup_restore" {
+		t.Fatalf("unexpected startup compensation run: %+v", run)
+	}
+	if run.TargetDate != "2026-06-19" || run.ScopeKey != "CN:SH:600519" || run.CronType != schedulerservice.CronTypeCNAShareQuoteRefresh {
+		t.Fatalf("unexpected missed_today scope/date/type: %+v", run)
+	}
+	snapshot := queue.Snapshot()
+	if len(snapshot) != 1 || snapshot[0].RunKey != run.RunKey {
+		t.Fatalf("expected missed_today run to enter production queue, got %+v", snapshot)
+	}
+}
+
+// TestShutdownLifecycleStopsSchedulerBeforeServer 验证关闭请求会先停调度器，再通知 HTTP server 退出。
+func TestShutdownLifecycleStopsSchedulerBeforeServer(t *testing.T) {
+	var calls []string
+	lifecycle := newShutdownLifecycle(
+		func(context.Context) error {
+			calls = append(calls, "scheduler")
+			return nil
+		},
+		func() {
+			calls = append(calls, "server")
+		},
+	)
+
+	lifecycle.requestShutdown()
+	lifecycle.stopScheduler()
+
+	if got := strings.Join(calls, ","); got != "scheduler,server" {
+		t.Fatalf("expected scheduler to stop before server shutdown and only once, got %s", got)
 	}
 }
 

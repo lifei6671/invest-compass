@@ -136,6 +136,9 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 			&model.Task{},
 			&model.TaskEvent{},
 			&model.Setting{},
+			&model.SchedulerJob{},
+			&model.SchedulerRun{},
+			&model.IngestionWatermark{},
 		)
 	})
 	if err != nil {

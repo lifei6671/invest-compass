@@ -153,6 +153,9 @@ func reportsToSummaries(reports []report.Report) []ReportSummary {
 
 // limitTasks 截断最近任务列表。
 func limitTasks(tasks []task.Task, limit int) []task.Task {
+	if tasks == nil {
+		return []task.Task{}
+	}
 	if len(tasks) <= limit {
 		return tasks
 	}
@@ -170,6 +173,9 @@ func sortNews(items []news.Item) []news.Item {
 
 // limitNews 截断市场新闻列表。
 func limitNews(items []news.Item, limit int) []news.Item {
+	if items == nil {
+		return []news.Item{}
+	}
 	if len(items) <= limit {
 		return items
 	}

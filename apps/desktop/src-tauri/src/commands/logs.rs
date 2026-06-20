@@ -29,7 +29,7 @@ pub struct ExportLogsResult {
 
 /// 生成已脱敏日志导出包，并写入调用方明确指定的本地目录。
 #[tauri::command]
-pub async fn export_logs(
+pub fn export_logs(
     state: State<'_, CoreState>,
     target_dir: String,
 ) -> Result<ExportLogsResult, String> {

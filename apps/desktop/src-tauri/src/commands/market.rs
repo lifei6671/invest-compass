@@ -33,7 +33,7 @@ struct MarketIndicatorsRequest {
 
 /// 搜索股票基础信息，固定转发到 Go core `/api/stocks/search`。
 #[tauri::command]
-pub async fn stock_search(
+pub fn stock_search(
     state: State<'_, CoreState>,
     keyword: String,
 ) -> Result<serde_json::Value, String> {
@@ -46,7 +46,7 @@ pub async fn stock_search(
 
 /// 获取股票行情快照，固定转发到 Go core `/api/market/quote`。
 #[tauri::command]
-pub async fn market_quote(
+pub fn market_quote(
     state: State<'_, CoreState>,
     symbol: String,
 ) -> Result<serde_json::Value, String> {
@@ -58,7 +58,7 @@ pub async fn market_quote(
 
 /// 获取股票 K 线，固定转发到 Go core `/api/market/kline`。
 #[tauri::command]
-pub async fn market_kline(
+pub fn market_kline(
     state: State<'_, CoreState>,
     symbol: String,
     period: String,
@@ -82,7 +82,7 @@ pub async fn market_kline(
 
 /// 获取股票技术指标，固定转发到 Go core `/api/market/indicators`。
 #[tauri::command]
-pub async fn market_indicators(
+pub fn market_indicators(
     state: State<'_, CoreState>,
     symbol: String,
     period: String,

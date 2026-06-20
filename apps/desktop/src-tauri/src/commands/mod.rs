@@ -1,12 +1,15 @@
 pub mod ai_config;
+pub mod autostart;
 pub mod core;
 pub mod dashboard;
+pub mod external;
 pub mod logs;
 pub mod market;
 pub mod news;
 pub mod prompt;
 pub mod providers;
 pub mod reports;
+pub mod scheduler;
 pub mod settings;
 pub mod tasks;
 pub mod update;

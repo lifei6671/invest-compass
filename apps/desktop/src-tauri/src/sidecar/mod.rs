@@ -301,28 +301,28 @@ pub fn core_binary_file_name() -> &'static str {
     } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         core_binary_file_name_for_target("x86_64-pc-windows-msvc")
     } else if cfg!(windows) {
-        "invest-compass-core.exe"
+        "invest-compas-core.exe"
     } else {
-        "invest-compass-core"
+        "invest-compas-core"
     }
 }
 
 /// 按 target triple 返回 Tauri sidecar 二进制文件名。
 pub fn core_binary_file_name_for_target(target: &str) -> &'static str {
     match target {
-        "aarch64-apple-darwin" => "invest-compass-core-aarch64-apple-darwin",
-        "x86_64-apple-darwin" => "invest-compass-core-x86_64-apple-darwin",
-        "x86_64-pc-windows-msvc" => "invest-compass-core-x86_64-pc-windows-msvc.exe",
-        _ => "invest-compass-core",
+        "aarch64-apple-darwin" => "invest-compas-core-aarch64-apple-darwin",
+        "x86_64-apple-darwin" => "invest-compas-core-x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc" => "invest-compas-core-x86_64-pc-windows-msvc.exe",
+        _ => "invest-compas-core",
     }
 }
 
 /// 返回发布包内 Tauri externalBin 的运行期文件名。
 pub fn bundled_core_binary_file_name() -> &'static str {
     if cfg!(windows) {
-        "invest-compass-core.exe"
+        "invest-compas-core.exe"
     } else {
-        "invest-compass-core"
+        "invest-compas-core"
     }
 }
 
@@ -805,15 +805,15 @@ mod tests {
     fn core_binary_file_name_for_target_uses_tauri_sidecar_triples() {
         assert_eq!(
             core_binary_file_name_for_target("aarch64-apple-darwin"),
-            "invest-compass-core-aarch64-apple-darwin"
+            "invest-compas-core-aarch64-apple-darwin"
         );
         assert_eq!(
             core_binary_file_name_for_target("x86_64-apple-darwin"),
-            "invest-compass-core-x86_64-apple-darwin"
+            "invest-compas-core-x86_64-apple-darwin"
         );
         assert_eq!(
             core_binary_file_name_for_target("x86_64-pc-windows-msvc"),
-            "invest-compass-core-x86_64-pc-windows-msvc.exe"
+            "invest-compas-core-x86_64-pc-windows-msvc.exe"
         );
     }
 

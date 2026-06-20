@@ -36,9 +36,7 @@ struct PromptTemplateDeleteRequest {
 
 /// 读取 Prompt 模板列表，固定转发到 Go core `/api/prompt-templates/list`。
 #[tauri::command]
-pub async fn prompt_templates_list(
-    state: State<'_, CoreState>,
-) -> Result<serde_json::Value, String> {
+pub fn prompt_templates_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
     client
         .post_api("/api/prompt-templates/list", &PromptTemplateListRequest {})
@@ -47,7 +45,7 @@ pub async fn prompt_templates_list(
 
 /// 读取单个 Prompt 模板，固定转发到 Go core `/api/prompt-templates/get`。
 #[tauri::command]
-pub async fn prompt_templates_get(
+pub fn prompt_templates_get(
     state: State<'_, CoreState>,
     id: i64,
 ) -> Result<serde_json::Value, String> {
@@ -63,7 +61,7 @@ pub async fn prompt_templates_get(
 
 /// 创建 Prompt 模板，固定转发到 Go core `/api/prompt-templates/create`。
 #[tauri::command]
-pub async fn prompt_templates_create(
+pub fn prompt_templates_create(
     state: State<'_, CoreState>,
     payload: PromptTemplateCreatePayload,
 ) -> Result<serde_json::Value, String> {
@@ -75,7 +73,7 @@ pub async fn prompt_templates_create(
 
 /// 更新 Prompt 模板，固定转发到 Go core `/api/prompt-templates/update`。
 #[tauri::command]
-pub async fn prompt_templates_update(
+pub fn prompt_templates_update(
     state: State<'_, CoreState>,
     payload: PromptTemplateUpdatePayload,
 ) -> Result<serde_json::Value, String> {
@@ -88,7 +86,7 @@ pub async fn prompt_templates_update(
 
 /// 删除 Prompt 模板，固定转发到 Go core `/api/prompt-templates/delete`。
 #[tauri::command]
-pub async fn prompt_templates_delete(
+pub fn prompt_templates_delete(
     state: State<'_, CoreState>,
     id: i64,
 ) -> Result<serde_json::Value, String> {

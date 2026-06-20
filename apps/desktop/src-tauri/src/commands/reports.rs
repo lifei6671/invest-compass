@@ -12,7 +12,7 @@ struct ReportIDRequest {
 
 /// 读取报告历史列表，固定转发到 Go core `/api/reports/list`。
 #[tauri::command]
-pub async fn report_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub fn report_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
     client
         .post_api("/api/reports/list", &ReportListRequest {})
@@ -21,7 +21,7 @@ pub async fn report_list(state: State<'_, CoreState>) -> Result<serde_json::Valu
 
 /// 读取报告详情，固定转发到 Go core `/api/reports/get`。
 #[tauri::command]
-pub async fn report_get(state: State<'_, CoreState>, id: i64) -> Result<serde_json::Value, String> {
+pub fn report_get(state: State<'_, CoreState>, id: i64) -> Result<serde_json::Value, String> {
     validate_report_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
     client
@@ -31,10 +31,7 @@ pub async fn report_get(state: State<'_, CoreState>, id: i64) -> Result<serde_js
 
 /// 删除报告，固定转发到 Go core `/api/reports/delete`。
 #[tauri::command]
-pub async fn report_delete(
-    state: State<'_, CoreState>,
-    id: i64,
-) -> Result<serde_json::Value, String> {
+pub fn report_delete(state: State<'_, CoreState>, id: i64) -> Result<serde_json::Value, String> {
     validate_report_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
     client

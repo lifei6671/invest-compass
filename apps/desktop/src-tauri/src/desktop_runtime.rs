@@ -1,11 +1,15 @@
 use crate::sidecar::{CoreClient, CoreState};
 use serde::{Deserialize, Serialize};
 use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewWindow, Window,
     WindowEvent,
 };
 
 const MAIN_WINDOW_LABEL: &str = "main";
+const TRAY_OPEN_WORKBENCH_ID: &str = "open-workbench";
+const TRAY_QUIT_APP_ID: &str = "quit-app";
 const CLOSE_TO_TRAY_SETTING_KEY: &str = "window.close_to_tray";
 const WINDOW_X_SETTING_KEY: &str = "window.main.x";
 const WINDOW_Y_SETTING_KEY: &str = "window.main.y";
@@ -49,9 +53,40 @@ struct WindowState {
     height: u32,
 }
 
-/// 安装桌面运行期能力；当前恢复窗口状态，不启用需要额外 capability 的托盘能力。
+/// 安装桌面运行期能力，确保关闭隐藏前先存在可恢复主窗口的托盘入口。
 pub fn install_desktop_runtime(app: &mut App) -> tauri::Result<()> {
+    install_tray_menu(app)?;
     restore_main_window_state(app);
+    Ok(())
+}
+
+/// 安装首版托盘菜单；菜单只承担恢复主窗口和退出应用，避免引入未闭环入口。
+fn install_tray_menu(app: &mut App) -> tauri::Result<()> {
+    let open_item = MenuItem::with_id(
+        app,
+        TRAY_OPEN_WORKBENCH_ID,
+        "打开工作台",
+        true,
+        None::<&str>,
+    )?;
+    let quit_item = MenuItem::with_id(app, TRAY_QUIT_APP_ID, "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+    let mut builder = TrayIconBuilder::new()
+        .tooltip("投研罗盘")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| handle_tray_menu_event(app, event.id().as_ref()))
+        .on_tray_icon_event(|tray, event| {
+            if tray_event_should_restore_window(&event) {
+                show_main_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+
+    builder.build(app)?;
     Ok(())
 }
 
@@ -113,6 +148,37 @@ fn persist_main_window_state(window: &Window) {
 fn apply_window_state(window: &WebviewWindow, state: WindowState) {
     let _ = window.set_size(Size::Physical(PhysicalSize::new(state.width, state.height)));
     let _ = window.set_position(Position::Physical(PhysicalPosition::new(state.x, state.y)));
+}
+
+/// 处理托盘菜单动作；退出路径交给 Tauri run event 统一停止 sidecar。
+fn handle_tray_menu_event(app: &AppHandle, item_id: &str) {
+    match item_id {
+        TRAY_OPEN_WORKBENCH_ID => show_main_window(app),
+        TRAY_QUIT_APP_ID => app.exit(0),
+        _ => {}
+    }
+}
+
+/// 判断托盘点击是否应恢复主窗口；只处理左键释放，避免按下和右键菜单重复触发。
+fn tray_event_should_restore_window(event: &TrayIconEvent) -> bool {
+    matches!(
+        event,
+        TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        }
+    )
+}
+
+/// 显示并聚焦主窗口，用于托盘点击和“打开工作台”菜单项。
+fn show_main_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        return;
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
 }
 
 /// 从 Go core settings 读取主窗口状态。
@@ -271,7 +337,7 @@ fn stop_core_sidecar(app: &AppHandle) {
 
 /// 标记当前二进制是否已经安装真实托盘恢复入口。
 fn desktop_tray_available() -> bool {
-    false
+    true
 }
 
 #[cfg(test)]
@@ -320,6 +386,19 @@ mod tests {
     fn should_stop_core_on_close_when_window_will_exit() {
         assert!(!should_stop_core_on_close(true));
         assert!(should_stop_core_on_close(false));
+    }
+
+    #[test]
+    /// 验证真实托盘启用后，关闭到托盘设置具备可恢复入口。
+    fn desktop_tray_available_after_tray_installation_is_enabled() {
+        assert!(desktop_tray_available());
+    }
+
+    #[test]
+    /// 验证托盘菜单只暴露首版已闭环动作，避免出现未实现页面入口。
+    fn tray_menu_ids_use_first_version_actions() {
+        assert_eq!(TRAY_OPEN_WORKBENCH_ID, "open-workbench");
+        assert_eq!(TRAY_QUIT_APP_ID, "quit-app");
     }
 
     #[test]

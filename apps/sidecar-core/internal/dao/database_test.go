@@ -65,6 +65,9 @@ func TestMigrateCreatesInitialSchema(t *testing.T) {
 		"tasks",
 		"task_events",
 		"settings",
+		"scheduler_jobs",
+		"scheduler_runs",
+		"ingestion_watermarks",
 	}
 	for _, table := range expectedTables {
 		if !db.Migrator().HasTable(table) {
@@ -77,6 +80,12 @@ func TestMigrateCreatesInitialSchema(t *testing.T) {
 		assertColumns(t, db, table, "deleted_at")
 	}
 	assertColumns(t, db, "ai_configs", "api_key_ref", "masked_api_key", "has_api_key")
+	assertColumns(t, db, "scheduler_jobs", "cron_type", "catchup_enabled", "catchup_max_days", "deleted_at")
+	assertColumns(t, db, "scheduler_runs", "cron_type", "data_type", "period", "params_json", "run_key", "trigger_type", "target_date", "scope_key")
+	assertColumns(t, db, "ingestion_watermarks", "data_type", "scope_key", "provider", "period", "last_trade_date")
+	if db.Migrator().HasColumn("scheduler_jobs", "type") {
+		t.Fatal("scheduler_jobs must use cron_type column instead of reserved type column")
+	}
 }
 
 // TestMigrateIsIdempotent 验证重复迁移不会破坏已有数据库。
@@ -126,6 +135,69 @@ func TestBackupBeforeMigrationCopiesExistingSQLiteFile(t *testing.T) {
 	}
 	if string(content) != "user database" {
 		t.Fatalf("unexpected backup content: %q", string(content))
+	}
+}
+
+// TestBackupBeforeMigrationBackupCanBeRestoredAndMigrated 验证迁移前备份可以作为恢复点重新打开并保留用户数据。
+func TestBackupBeforeMigrationBackupCanBeRestoredAndMigrated(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "invest-compass.sqlite3")
+	db, err := Open(ctx, Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open sqlite file: %v", err)
+	}
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate sqlite file: %v", err)
+	}
+	if err := db.Exec(
+		`INSERT INTO settings(key, value, created_at, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		"workspace.default_path",
+		"/Users/demo/InvestCompass",
+	).Error; err != nil {
+		t.Fatalf("insert user setting before backup: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("resolve sqlite db handle: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close sqlite before backup: %v", err)
+	}
+
+	result, err := BackupBeforeMigration(ctx, BackupConfig{
+		Path:      dbPath,
+		BackupDir: filepath.Join(tempDir, "backups"),
+		Now:       time.Date(2026, 6, 18, 8, 9, 10, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("backup sqlite before restore rehearsal: %v", err)
+	}
+	if !result.Created || len(result.Files) != 1 {
+		t.Fatalf("expected one sqlite backup file, got %+v", result)
+	}
+
+	backupContent, err := os.ReadFile(result.Files[0])
+	if err != nil {
+		t.Fatalf("read sqlite backup file: %v", err)
+	}
+	restoredPath := filepath.Join(tempDir, "restored.sqlite3")
+	if err := os.WriteFile(restoredPath, backupContent, 0o600); err != nil {
+		t.Fatalf("write restored sqlite file: %v", err)
+	}
+	restoredDB, err := Open(ctx, Config{Path: restoredPath})
+	if err != nil {
+		t.Fatalf("open restored sqlite file: %v", err)
+	}
+	if err := Migrate(ctx, restoredDB); err != nil {
+		t.Fatalf("migrate restored sqlite file: %v", err)
+	}
+	var restoredValue string
+	if err := restoredDB.Raw(`SELECT value FROM settings WHERE key = ?`, "workspace.default_path").Scan(&restoredValue).Error; err != nil {
+		t.Fatalf("read restored user setting: %v", err)
+	}
+	if restoredValue != "/Users/demo/InvestCompass" {
+		t.Fatalf("expected restored user setting to survive backup restore, got %q", restoredValue)
 	}
 }
 
@@ -212,6 +284,22 @@ func TestInitialSchemaEnforcesCoreUniqueConstraints(t *testing.T) {
 	}
 	if err := db.Exec(insertKline, "US:AAPL", "day", "none", "2026-06-18").Error; err == nil {
 		t.Fatal("expected duplicate kline key to fail")
+	}
+
+	insertSchedulerRun := `INSERT INTO scheduler_runs(job_id, cron_type, data_type, period, run_key, trigger_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+	if err := db.Exec(insertSchedulerRun, 1, "cn_a_share_quote_refresh", "quote", "", "job-1:2026-06-19:missed_today", "missed_today", "queued").Error; err != nil {
+		t.Fatalf("insert first scheduler run: %v", err)
+	}
+	if err := db.Exec(insertSchedulerRun, 1, "cn_a_share_quote_refresh", "quote", "", "job-1:2026-06-19:missed_today", "missed_today", "queued").Error; err == nil {
+		t.Fatal("expected duplicate scheduler run_key to fail")
+	}
+
+	insertWatermark := `INSERT INTO ingestion_watermarks(data_type, scope_key, provider, period, created_at, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+	if err := db.Exec(insertWatermark, "quote", "CN:SH:600519", "sina_tencent", "").Error; err != nil {
+		t.Fatalf("insert first ingestion watermark: %v", err)
+	}
+	if err := db.Exec(insertWatermark, "quote", "CN:SH:600519", "sina_tencent", "").Error; err == nil {
+		t.Fatal("expected duplicate ingestion watermark key to fail")
 	}
 }
 

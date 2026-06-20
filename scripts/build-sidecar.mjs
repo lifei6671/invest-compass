@@ -9,8 +9,8 @@ export const supportedTargets = new Map([
     {
       goos: "darwin",
       goarch: "arm64",
-      fileName: "invest-compass-core-aarch64-apple-darwin",
-      compatName: "invest-compass-core",
+      fileName: "invest-compas-core-aarch64-apple-darwin",
+      compatName: "invest-compas-core",
     },
   ],
   [
@@ -18,8 +18,8 @@ export const supportedTargets = new Map([
     {
       goos: "darwin",
       goarch: "amd64",
-      fileName: "invest-compass-core-x86_64-apple-darwin",
-      compatName: "invest-compass-core",
+      fileName: "invest-compas-core-x86_64-apple-darwin",
+      compatName: "invest-compas-core",
     },
   ],
   [
@@ -27,8 +27,8 @@ export const supportedTargets = new Map([
     {
       goos: "windows",
       goarch: "amd64",
-      fileName: "invest-compass-core-x86_64-pc-windows-msvc.exe",
-      compatName: "invest-compass-core.exe",
+      fileName: "invest-compas-core-x86_64-pc-windows-msvc.exe",
+      compatName: "invest-compas-core.exe",
     },
   ],
 ]);
@@ -61,12 +61,39 @@ export function selectBuildTargets(argv, platform = process.platform, arch = pro
 }
 
 export function buildGoCommand(target, outputPath) {
-  const args = ["build"];
+  const args = ["build", "-mod=readonly"];
   if (target.goos === "windows") {
     args.push("-ldflags", "-H windowsgui");
   }
   args.push("-o", outputPath, "./cmd/invest-compass-core");
   return { command: "go", args };
+}
+
+export function buildGoEnvironment(target, baseEnv = process.env) {
+  return {
+    ...baseEnv,
+    GOOS: target.goos,
+    GOARCH: target.goarch,
+    CGO_ENABLED: "1",
+  };
+}
+
+export function assertSidecarBundleNames(externalBin) {
+  if (!Array.isArray(externalBin) || externalBin.length !== 1) {
+    throw new Error("tauri externalBin must declare exactly one sidecar binary base");
+  }
+  const bundleBaseName = externalBin[0]?.split("/").pop();
+  if (!bundleBaseName) {
+    throw new Error("tauri externalBin sidecar base name is empty");
+  }
+  for (const [triple, target] of supportedTargets) {
+    const expectedFileName = `${bundleBaseName}-${triple}${target.goos === "windows" ? ".exe" : ""}`;
+    if (target.fileName !== expectedFileName) {
+      throw new Error(
+        `sidecar target ${triple} file name ${target.fileName} must match ${expectedFileName}`,
+      );
+    }
+  }
 }
 
 function readTargetArg(argv) {
@@ -94,11 +121,7 @@ function buildSidecar(target) {
 
   const result = spawnSync(command.command, command.args, {
     cwd: sidecarDir,
-    env: {
-      ...process.env,
-      GOOS: target.goos,
-      GOARCH: target.goarch,
-    },
+    env: buildGoEnvironment(target),
     stdio: "inherit",
   });
 

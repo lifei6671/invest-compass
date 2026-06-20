@@ -65,7 +65,7 @@ pub struct CacheCleanPayload {
 
 /// 读取非敏感 settings，固定转发到 Go core `/api/settings/get`。
 #[tauri::command]
-pub async fn settings_get(
+pub fn settings_get(
     state: State<'_, CoreState>,
     keys: Vec<String>,
 ) -> Result<serde_json::Value, String> {
@@ -77,7 +77,7 @@ pub async fn settings_get(
 
 /// 保存非敏感 settings，固定转发到 Go core `/api/settings/set`。
 #[tauri::command]
-pub async fn settings_set(
+pub fn settings_set(
     state: State<'_, CoreState>,
     payload: SettingsSetPayload,
 ) -> Result<serde_json::Value, String> {
@@ -103,7 +103,7 @@ pub async fn settings_set(
 
 /// 读取工作区路径，固定转发到 Go core `/api/workspace/get`。
 #[tauri::command]
-pub async fn workspace_get(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub fn workspace_get(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
     client
         .post_api("/api/workspace/get", &WorkspaceGetRequest {})
@@ -112,7 +112,7 @@ pub async fn workspace_get(state: State<'_, CoreState>) -> Result<serde_json::Va
 
 /// 保存用户选择的工作区路径，固定转发到 Go core `/api/workspace/set`。
 #[tauri::command]
-pub async fn workspace_set(
+pub fn workspace_set(
     state: State<'_, CoreState>,
     payload: WorkspaceSetPayload,
 ) -> Result<serde_json::Value, String> {
@@ -125,7 +125,7 @@ pub async fn workspace_set(
 
 /// 读取临时缓存统计，固定转发到 Go core `/api/cache/stats`。
 #[tauri::command]
-pub async fn cache_stats(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub fn cache_stats(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
     client
         .post_api("/api/cache/stats", &CacheStatsRequest {})
@@ -134,7 +134,7 @@ pub async fn cache_stats(state: State<'_, CoreState>) -> Result<serde_json::Valu
 
 /// 清理临时缓存目标，固定转发到 Go core `/api/cache/clean`。
 #[tauri::command]
-pub async fn cache_clean(
+pub fn cache_clean(
     state: State<'_, CoreState>,
     payload: CacheCleanPayload,
 ) -> Result<serde_json::Value, String> {

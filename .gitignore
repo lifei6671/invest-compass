@@ -37,4 +37,5 @@ apps/desktop/dist/
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/binaries/invest-compass-core*
+apps/desktop/src-tauri/binaries/invest-compas-core*
 !apps/desktop/src-tauri/binaries/.gitkeep

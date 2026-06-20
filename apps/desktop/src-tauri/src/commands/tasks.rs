@@ -72,7 +72,7 @@ pub struct AnalysisTaskSubscribeResult {
 
 /// 创建分析任务，固定读取本地 vault 后转发到 Go core `/api/analysis/tasks`。
 #[tauri::command]
-pub async fn analysis_task_create(
+pub fn analysis_task_create(
     state: State<'_, CoreState>,
     payload: AnalysisTaskCreatePayload,
 ) -> Result<serde_json::Value, String> {
@@ -89,7 +89,7 @@ pub async fn analysis_task_create(
 
 /// 取消分析任务，固定转发到 Go core `/api/tasks/cancel`。
 #[tauri::command]
-pub async fn analysis_task_cancel(
+pub fn analysis_task_cancel(
     state: State<'_, CoreState>,
     task_id: String,
 ) -> Result<serde_json::Value, String> {
@@ -102,7 +102,7 @@ pub async fn analysis_task_cancel(
 
 /// 订阅分析任务事件，固定读取 Go core SSE 后逐帧通过 Tauri event 分发。
 #[tauri::command]
-pub async fn analysis_task_subscribe(
+pub fn analysis_task_subscribe(
     window: Window,
     state: State<'_, CoreState>,
     task_id: String,
@@ -138,10 +138,7 @@ pub async fn analysis_task_subscribe(
 
 /// 读取任务历史列表，固定转发到 Go core `/api/tasks/list`。
 #[tauri::command]
-pub async fn task_list(
-    state: State<'_, CoreState>,
-    limit: i32,
-) -> Result<serde_json::Value, String> {
+pub fn task_list(state: State<'_, CoreState>, limit: i32) -> Result<serde_json::Value, String> {
     validate_task_list_limit(limit)?;
     let client = state.client().map_err(|error| error.to_string())?;
     client
@@ -151,10 +148,7 @@ pub async fn task_list(
 
 /// 读取任务详情，固定转发到 Go core `/api/tasks/get`。
 #[tauri::command]
-pub async fn task_get(
-    state: State<'_, CoreState>,
-    task_id: String,
-) -> Result<serde_json::Value, String> {
+pub fn task_get(state: State<'_, CoreState>, task_id: String) -> Result<serde_json::Value, String> {
     validate_task_id(&task_id)?;
     let client = state.client().map_err(|error| error.to_string())?;
     client
@@ -164,7 +158,7 @@ pub async fn task_get(
 
 /// 增量读取任务事件，固定转发到 Go core `/api/tasks/events`。
 #[tauri::command]
-pub async fn task_events(
+pub fn task_events(
     state: State<'_, CoreState>,
     task_id: String,
     after_event_id: i64,

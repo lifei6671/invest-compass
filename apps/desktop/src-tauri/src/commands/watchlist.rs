@@ -28,7 +28,7 @@ struct WatchlistDeleteRequest {
 
 /// 读取自选股列表，固定转发到 Go core `/api/watchlist/list`。
 #[tauri::command]
-pub async fn watchlist_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub fn watchlist_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
     client
         .post_api("/api/watchlist/list", &WatchlistListRequest {})
@@ -37,7 +37,7 @@ pub async fn watchlist_list(state: State<'_, CoreState>) -> Result<serde_json::V
 
 /// 创建自选股，固定转发到 Go core `/api/watchlist/create`。
 #[tauri::command]
-pub async fn watchlist_create(
+pub fn watchlist_create(
     state: State<'_, CoreState>,
     payload: WatchlistCreatePayload,
 ) -> Result<serde_json::Value, String> {
@@ -49,7 +49,7 @@ pub async fn watchlist_create(
 
 /// 更新自选股元数据，固定转发到 Go core `/api/watchlist/update`。
 #[tauri::command]
-pub async fn watchlist_update(
+pub fn watchlist_update(
     state: State<'_, CoreState>,
     payload: WatchlistUpdatePayload,
 ) -> Result<serde_json::Value, String> {
@@ -62,10 +62,7 @@ pub async fn watchlist_update(
 
 /// 删除自选股，固定转发到 Go core `/api/watchlist/delete`。
 #[tauri::command]
-pub async fn watchlist_delete(
-    state: State<'_, CoreState>,
-    id: i64,
-) -> Result<serde_json::Value, String> {
+pub fn watchlist_delete(state: State<'_, CoreState>, id: i64) -> Result<serde_json::Value, String> {
     validate_watchlist_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
     client

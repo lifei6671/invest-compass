@@ -78,6 +78,28 @@ func TestRedactTextKeepsJSONPayloadValid(t *testing.T) {
 	}
 }
 
+// TestRedactTextMasksQuotedJSONValuesWithDelimiters 验证 JSON 字符串字段值包含逗号时仍完整脱敏。
+func TestRedactTextMasksQuotedJSONValuesWithDelimiters(t *testing.T) {
+	input := `{"Authorization":"Bearer placeholder-json-secret","api_key":"sk,placeholder-json-key","proxy_password":"proxy,secret"}`
+
+	redacted := RedactText(input)
+
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(redacted), &payload); err != nil {
+		t.Fatalf("redacted JSON should remain valid, got %q: %v", redacted, err)
+	}
+	for _, secret := range []string{"placeholder-json-secret", "placeholder-json-key", "proxy,secret"} {
+		if strings.Contains(redacted, secret) {
+			t.Fatalf("redacted JSON leaked %q: %s", secret, redacted)
+		}
+	}
+	for _, key := range []string{"Authorization", "api_key", "proxy_password"} {
+		if payload[key] != RedactedValue {
+			t.Fatalf("expected %s to be redacted, got %#v in %s", key, payload[key], redacted)
+		}
+	}
+}
+
 // TestRedactErrorMasksSecretInError 验证错误对象进入日志前也会被脱敏。
 func TestRedactErrorMasksSecretInError(t *testing.T) {
 	err := errors.New("provider failed with Authorization: Bearer placeholder-error-secret")

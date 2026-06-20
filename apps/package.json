@@ -8,12 +8,21 @@
     "build": "pnpm sidecar:build && pnpm -r --if-present build",
     "test": "pnpm -r --if-present test && pnpm scripts:test && pnpm sidecar:test",
     "check": "pnpm -r --if-present check && pnpm sidecar:test && pnpm desktop:check",
+    "acceptance:check": "pnpm test && pnpm check && pnpm desktop:test && pnpm format:check",
+    "release:check:local": "pnpm acceptance:check && pnpm sqlite:upgrade-rehearsal && pnpm sidecar:check-targets && pnpm build && pnpm --filter @invest-compass/desktop exec tauri build --bundles app && pnpm package:verify -- --platform=darwin --target=aarch64-apple-darwin \"desktop/src-tauri/target/release/bundle/macos/投研罗盘.app\" && pnpm sidecar:smoke && git -C .. diff --check",
     "format:check": "pnpm format:check:go && pnpm format:check:rust",
     "format:check:go": "test -z \"$(gofmt -l sidecar-core)\"",
     "format:check:rust": "cargo fmt --manifest-path desktop/src-tauri/Cargo.toml -- --check",
     "sidecar:build": "node ../scripts/build-sidecar.mjs",
+    "sidecar:verify-targets": "node ../scripts/verify-sidecar-targets.mjs",
+    "sidecar:check-targets": "pnpm sidecar:build -- --all-targets && pnpm sidecar:verify-targets",
+    "package:verify": "node ../scripts/verify-desktop-package.mjs",
+    "provider:smoke": "node ../scripts/provider-smoke.mjs",
+    "sidecar:smoke": "node ../scripts/verify-sidecar-runtime.mjs -- --platform=darwin --target=aarch64-apple-darwin \"desktop/src-tauri/target/release/bundle/macos/投研罗盘.app\"",
     "scripts:test": "node --test ../scripts/*.test.mjs",
-    "sidecar:test": "cd sidecar-core && go test ./...",
-    "desktop:check": "cargo check --manifest-path desktop/src-tauri/Cargo.toml"
+    "sqlite:upgrade-rehearsal": "cd sidecar-core && go test -mod=readonly ./internal/dao -run TestBackupBeforeMigrationBackupCanBeRestoredAndMigrated -count=1",
+    "sidecar:test": "cd sidecar-core && go test -mod=readonly ./...",
+    "desktop:check": "cargo check --manifest-path desktop/src-tauri/Cargo.toml",
+    "desktop:test": "cargo test --manifest-path desktop/src-tauri/Cargo.toml"
   }
 }

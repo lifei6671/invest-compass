@@ -439,6 +439,200 @@ func (store *Store) GetSettings(ctx context.Context, keys []string) ([]model.Set
 	return settings, err
 }
 
+// SaveSchedulerJob 创建或更新桌面可管理的调度任务配置。
+func (store *Store) SaveSchedulerJob(ctx context.Context, job *model.SchedulerJob) error {
+	if job == nil {
+		return fmt.Errorf("dao scheduler job is required")
+	}
+	return store.db.WithContext(ctx).Save(job).Error
+}
+
+// ListSchedulerJobs 返回未软删除的调度任务，供桌面管理页展示。
+func (store *Store) ListSchedulerJobs(ctx context.Context) ([]model.SchedulerJob, error) {
+	var jobs []model.SchedulerJob
+	err := store.db.WithContext(ctx).
+		Order("updated_at DESC").
+		Order("id ASC").
+		Find(&jobs).Error
+	return jobs, err
+}
+
+// GetSchedulerJob 按 ID 返回未软删除的调度任务配置，缺失时返回 ok=false。
+func (store *Store) GetSchedulerJob(ctx context.Context, id int64) (model.SchedulerJob, bool, error) {
+	var job model.SchedulerJob
+	err := store.db.WithContext(ctx).
+		Where("id = ? AND deleted_at IS NULL", id).
+		First(&job).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.SchedulerJob{}, false, nil
+	}
+	if err != nil {
+		return model.SchedulerJob{}, false, err
+	}
+	return job, true, nil
+}
+
+// ListEnabledSchedulerJobs 返回启动时需要恢复到调度器中的启用任务。
+func (store *Store) ListEnabledSchedulerJobs(ctx context.Context) ([]model.SchedulerJob, error) {
+	var jobs []model.SchedulerJob
+	err := store.db.WithContext(ctx).
+		Where("enabled = ?", true).
+		Order("id ASC").
+		Find(&jobs).Error
+	return jobs, err
+}
+
+// SetSchedulerJobEnabled 切换调度任务启停状态，保留任务配置和历史执行记录。
+func (store *Store) SetSchedulerJobEnabled(ctx context.Context, id int64, enabled bool) error {
+	return store.db.WithContext(ctx).
+		Model(&model.SchedulerJob{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Updates(map[string]any{"enabled": enabled}).Error
+}
+
+// SoftDeleteSchedulerJob 软删除调度任务配置，历史执行记录仍可用于审计。
+func (store *Store) SoftDeleteSchedulerJob(ctx context.Context, id int64) error {
+	return store.db.WithContext(ctx).Delete(&model.SchedulerJob{}, id).Error
+}
+
+// CreateSchedulerRun 创建一次调度执行记录，run_key 唯一约束用于防止重复入队。
+func (store *Store) CreateSchedulerRun(ctx context.Context, run *model.SchedulerRun) error {
+	if run == nil {
+		return fmt.Errorf("dao scheduler run is required")
+	}
+	return store.db.WithContext(ctx).Create(run).Error
+}
+
+// GetSchedulerRunByRunKey 按 run_key 返回调度执行记录，用于启动补偿前做显式幂等判断。
+func (store *Store) GetSchedulerRunByRunKey(ctx context.Context, runKey string) (model.SchedulerRun, bool, error) {
+	var run model.SchedulerRun
+	err := store.db.WithContext(ctx).Where("run_key = ?", runKey).First(&run).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.SchedulerRun{}, false, nil
+	}
+	if err != nil {
+		return model.SchedulerRun{}, false, err
+	}
+	return run, true, nil
+}
+
+// UpdateSchedulerRun 更新调度执行状态、统计和错误信息。
+func (store *Store) UpdateSchedulerRun(ctx context.Context, run *model.SchedulerRun) error {
+	if run == nil {
+		return fmt.Errorf("dao scheduler run is required")
+	}
+	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(run).Error; err != nil {
+			return err
+		}
+		if run.JobID <= 0 {
+			return nil
+		}
+		lastRunAt := run.FinishedAt
+		if lastRunAt == nil {
+			lastRunAt = run.StartedAt
+		}
+		if lastRunAt == nil {
+			now := time.Now().UTC()
+			lastRunAt = &now
+		}
+		lastError := run.ErrorMessage
+		if lastError == "" {
+			lastError = run.SkippedReason
+		}
+		return tx.Model(&model.SchedulerJob{}).
+			Where("id = ?", run.JobID).
+			Updates(map[string]any{
+				"last_run_at": lastRunAt,
+				"last_status": run.Status,
+				"last_error":  lastError,
+			}).Error
+	})
+}
+
+// ListSchedulerRunsByStatuses 返回指定状态集合的执行记录，供队列恢复和运行中任务扫描使用。
+func (store *Store) ListSchedulerRunsByStatuses(ctx context.Context, statuses []string) ([]model.SchedulerRun, error) {
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+	var runs []model.SchedulerRun
+	err := store.db.WithContext(ctx).
+		Where("status IN ?", statuses).
+		Order("created_at ASC").
+		Order("id ASC").
+		Find(&runs).Error
+	return runs, err
+}
+
+// ListSchedulerRuns 返回调度执行记录，jobID 为 0 时返回全部任务记录。
+func (store *Store) ListSchedulerRuns(ctx context.Context, jobID int64, limit int) ([]model.SchedulerRun, error) {
+	query := store.db.WithContext(ctx).
+		Order("created_at DESC").
+		Order("id DESC")
+	if jobID > 0 {
+		query = query.Where("job_id = ?", jobID)
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	var runs []model.SchedulerRun
+	if err := query.Find(&runs).Error; err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
+// GetSchedulerRun 按 ID 返回单条调度执行记录，缺失时返回 ok=false。
+func (store *Store) GetSchedulerRun(ctx context.Context, id int64) (model.SchedulerRun, bool, error) {
+	var run model.SchedulerRun
+	err := store.db.WithContext(ctx).Where("id = ?", id).First(&run).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.SchedulerRun{}, false, nil
+	}
+	if err != nil {
+		return model.SchedulerRun{}, false, err
+	}
+	return run, true, nil
+}
+
+// UpsertIngestionWatermark 按数据类型、范围、Provider 和周期幂等更新抓取水位。
+func (store *Store) UpsertIngestionWatermark(ctx context.Context, watermark *model.IngestionWatermark) error {
+	if watermark == nil {
+		return fmt.Errorf("dao ingestion watermark is required")
+	}
+	return store.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "data_type"},
+				{Name: "scope_key"},
+				{Name: "provider"},
+				{Name: "period"},
+			},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"last_success_at",
+				"last_trade_date",
+				"cursor_json",
+				"updated_at",
+			}),
+		}).
+		Create(watermark).Error
+}
+
+// GetIngestionWatermark 读取指定抓取范围的水位，缺失时返回 ok=false。
+func (store *Store) GetIngestionWatermark(ctx context.Context, dataType string, scopeKey string, provider string, period string) (model.IngestionWatermark, bool, error) {
+	var watermark model.IngestionWatermark
+	err := store.db.WithContext(ctx).
+		Where("data_type = ? AND scope_key = ? AND provider = ? AND period = ?", dataType, scopeKey, provider, period).
+		First(&watermark).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.IngestionWatermark{}, false, nil
+	}
+	if err != nil {
+		return model.IngestionWatermark{}, false, err
+	}
+	return watermark, true, nil
+}
+
 // CleanCache 只清理临时缓存表，忽略报告和配置等受保护目标。
 func (store *Store) CleanCache(ctx context.Context, targets []settings.CacheTarget) error {
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

@@ -92,6 +92,27 @@ func TestSummaryJSONDoesNotExposeUnsupportedMVPFields(t *testing.T) {
 	}
 }
 
+// TestSummaryJSONUsesEmptyArrays 验证 Dashboard 空态列表字段输出 []，避免前端空态渲染崩溃。
+func TestSummaryJSONUsesEmptyArrays(t *testing.T) {
+	summary := BuildSummary(Input{})
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("marshal summary: %v", err)
+	}
+	payload := string(encoded)
+
+	for _, expected := range []string{
+		`"recent_reports":[]`,
+		`"recent_tasks":[]`,
+		`"market_news":[]`,
+		`"provider_statuses":[]`,
+	} {
+		if !strings.Contains(payload, expected) {
+			t.Fatalf("summary must encode empty array %s: %s", expected, payload)
+		}
+	}
+}
+
 // TestSummaryJSONDoesNotExposeReportInputSnapshot 验证 Dashboard 不回显报告输入快照中的一次性持仓。
 func TestSummaryJSONDoesNotExposeReportInputSnapshot(t *testing.T) {
 	summary := BuildSummary(Input{

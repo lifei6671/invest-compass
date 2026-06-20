@@ -7,7 +7,7 @@
 中文名：投研罗盘
 英文名：Invest Compass
 仓库名：`invest-compass`
-核心服务名：`invest-compass-core`
+核心服务名：`invest-compas-core`
 桌面端名：`invest-compass-desktop`
 应用标识：`com.lifei6671.investcompass`
 
@@ -265,6 +265,7 @@ market_kline(symbol, period, adjust, limit)
 market_indicators(symbol, period, adjust, limit, indicators)
 news_list(symbol, limit)
 news_market(market, limit)
+open_external_url(url)
 watchlist_list()
 watchlist_create(payload)
 watchlist_update(id, payload)
@@ -288,6 +289,19 @@ report_get(id)
 report_delete(id)
 dashboard_summary()
 providers_status()
+scheduler_job_types()
+scheduler_jobs_list()
+scheduler_jobs_get(id)
+scheduler_jobs_save(payload)
+scheduler_jobs_set_enabled(id, enabled)
+scheduler_jobs_delete(id)
+scheduler_jobs_run_now(payload)
+scheduler_jobs_backfill(payload)
+scheduler_runs_list(job_id, limit)
+scheduler_runs_get(id)
+scheduler_runs_trigger(payload)
+scheduler_refresh_symbol(payload)
+scheduler_status()
 settings_get(keys)
 settings_set(payload)
 workspace_get()
@@ -299,8 +313,8 @@ provider_status()
 open_workspace()
 select_directory()
 show_notification(title, body)
-set_autostart(enabled)
-get_autostart()
+autostart_set(enabled)
+autostart_get()
 check_update()
 license_status()
 ```
@@ -325,16 +339,37 @@ Rust 层不提供 `core_request(method, path, body)` 这类任意路径代理。
 
 日志导出 API 只生成已二次脱敏的导出包，不直接写入用户目录。真实文件写入必须由 Rust 在用户选择的授权目录内完成。Rust `export_logs(target_dir)` 必须先校验 `target_dir` 是已存在目录，非法目录不得触发 Go core 导出请求；写入时必须拒绝带目录分隔符或路径穿越的文件名，不得覆盖目标目录中已有同名文件，Unix/macOS 下导出文件权限必须为 `0600`，并返回实际写入的 `file_path` 和 `file_name`。
 
+调度相关 command 必须固定映射：
+
+- `scheduler_job_types()` -> `POST /api/scheduler/job-types`
+- `scheduler_jobs_list()` -> `POST /api/scheduler/jobs/list`
+- `scheduler_jobs_get(id)` -> `POST /api/scheduler/jobs/get`
+- `scheduler_jobs_save(payload)` -> `POST /api/scheduler/jobs/save`
+- `scheduler_jobs_set_enabled(id, enabled)` -> `POST /api/scheduler/jobs/set-enabled`
+- `scheduler_jobs_delete(id)` -> `POST /api/scheduler/jobs/delete`
+- `scheduler_jobs_run_now(payload)` -> `POST /api/scheduler/jobs/run-now`
+- `scheduler_jobs_backfill(payload)` -> `POST /api/scheduler/jobs/backfill`
+- `scheduler_runs_list(job_id, limit)` -> `POST /api/scheduler/runs/list`
+- `scheduler_runs_get(id)` -> `POST /api/scheduler/runs/get`
+- `scheduler_runs_trigger(payload)` -> `POST /api/scheduler/runs/trigger`
+- `scheduler_refresh_symbol(payload)` -> `POST /api/scheduler/refresh-symbol`
+- `scheduler_status()` -> `POST /api/scheduler/status`
+
+调度 command 只负责固定路径转发、参数边界校验和错误透传，不直接依赖 `gocron`，也不直接访问 SQLite 调度表。
+
 Tauri v2 capability 原则：
 
 ```text
 1. 默认只给 main 窗口 `core:default`、`core:window:default`、`core:event:default`。
-2. 文件、通知、剪贴板、shell、updater 等插件权限必须按功能单独声明。
-3. 文件访问 scope 只允许应用数据目录、用户选择的工作区和日志导出目标。
-4. `ai_config_save`、`export_logs`、`check_update`、`set_autostart` 等敏感 command 只能由 main/settings 窗口调用。
-5. 禁止远程 URL 获得本地 command 权限。
-6. CSP 默认使用 `default-src 'self'`，外部链接只允许 HTTPS 且通过系统浏览器打开。
-7. macOS 和 Windows capability 文件使用同一最小权限基线，平台特有权限单独拆分。
+2. 日志导出目录选择只允许 `dialog:allow-open`，不得因为目录选择开放 `dialog:default`、保存文件或消息弹窗权限。
+3. 关闭到托盘必须先启用 Tauri `tray-icon` feature，并由 Rust 运行期安装真实托盘恢复入口；不得只暴露设置项。
+4. 任务终态通知只允许 `notification:allow-is-permission-granted`、`notification:allow-request-permission`、`notification:allow-notify`，不得使用 `notification:default` 或批量通知权限。
+5. 文件访问 scope 只允许应用数据目录、用户选择的工作区和日志导出目标。
+6. `ai_config_save`、`export_logs`、`check_update`、`autostart_set` 等敏感 command 只能由 main/settings 窗口调用。
+7. 开机自启必须通过官方 `tauri-plugin-autostart` 和 Rust 白名单 command 调用，前端不得直接开放 `autostart:*` 插件权限。
+8. 禁止远程 URL 获得本地 command 权限。
+9. CSP 默认使用 `default-src 'self'`，外部链接只允许 HTTPS 且通过系统浏览器打开。
+10. macOS 和 Windows capability 文件使用同一最小权限基线，平台特有权限单独拆分。
 ```
 
 ### Sidecar 启动流程
@@ -344,7 +379,7 @@ Tauri v2 capability 原则：
 2. 读取应用数据目录。
 3. 随机生成 core token。
 4. 分配本地随机端口。
-5. 启动 invest-compass-core sidecar。
+5. 启动 invest-compas-core sidecar。
 6. 传入参数：
    --host=127.0.0.1
    --port=0 或指定随机端口
@@ -831,9 +866,44 @@ Go sidecar 生产启动时，在 `dao.Open` 和 `dao.Migrate` 前执行迁移前
 缓存大小上限
 ```
 
-Rust 桌面运行期启动时从 Go core settings 读取主窗口状态并恢复位置和尺寸；关闭主窗口时写回当前外层窗口位置和尺寸。恢复只接受完整且尺寸合理的数据，缺字段、非法数字或过小尺寸时保留 Tauri 默认窗口状态。
+Rust 桌面运行期启动时从 Go core settings 读取主窗口状态并恢复位置和尺寸；关闭主窗口时写回当前外层窗口位置和尺寸。恢复只接受完整且尺寸合理的数据，缺字段、非法数字或过小尺寸时保留 Tauri 默认窗口状态。关闭到托盘必须同时满足 `window.close_to_tray=true` 和真实托盘恢复入口已安装；托盘菜单首版只提供打开工作台和退出应用，避免暴露未闭环桌面入口。
 
-### 5.2.12 license 模块
+开机自启由 Rust 层初始化官方 `tauri-plugin-autostart`，并只通过 `autostart_get` / `autostart_set` 两个白名单命令暴露布尔状态。前端设置页不得直接调用 autostart guest API，也不得在 Tauri capability 中开放 `autostart:*` 插件权限。
+
+### 5.2.12 scheduler 模块
+
+负责桌面本地数据刷新调度、启动补偿、手动补偿和单股刷新队列。
+
+首批调度专题的权威方案和实施清单分别是：
+
+- `docs/2026-06-19-invest-compass-scheduler-design.md`
+- `docs/2026-06-19-invest-compass-scheduler-implementation-checklist.md`
+
+模块边界：
+
+```text
+1. 只允许 internal/service/scheduler 直接依赖 github.com/go-co-op/gocron/v2。
+2. gocron 只负责定时触发和基础并发保护。
+3. ExecutionQueue 负责业务优先级、scope 去重、run 落库和 worker 执行。
+4. CatchupPlanner 负责 startup catchup、missed_today 和历史 catchup_gap 规划。
+5. handler、Provider、dao、Rust command 和前端不得直接依赖 gocron。
+```
+
+首批只实现数据刷新、启动补偿、手动补偿、单股刷新和桌面管理接口。`analysis_report_schedule`、资金流刷新和独立市场快照专题保持后续范围，不进入首版 UI。
+
+调度恢复规则：
+
+```text
+1. sidecar 启动后恢复遗留 queued/running scheduler_runs。
+2. 已启用 scheduler_jobs 注册到 gocron。
+3. 交易日启动时检查今天已经错过但仍有价值的计划窗口，生成 trigger_type=missed_today 的 run。
+4. Provider 和 watermark 明确时再规划历史 catchup_gap。
+5. 所有 scheduled、manual、missed_today、catchup_gap 和 user_request run 都进入统一 ExecutionQueue。
+```
+
+例如 A 股 09:30 自选股行情刷新任务已经过期，用户 10:00 才启动软件，Go core 会在启动恢复阶段生成当天的 `missed_today` run，并通过稳定 `run_key` 避免重复补偿。
+
+### 5.2.13 license 模块
 
 首版不实现商业授权闭环，只在设置和关于页面展示 `FREE` 状态占位。授权激活、授权服务、离线宽限、设备迁移放到商业化阶段。
 
@@ -1196,6 +1266,18 @@ CREATE TABLE settings (
     updated_at DATETIME
 );
 ```
+
+### 7.12 scheduler 调度表
+
+调度专题新增三张本地 SQLite 表：
+
+```text
+scheduler_jobs：保存长期任务配置，任务类型字段使用 cron_type。
+scheduler_runs：保存每次 scheduled、manual、missed_today、catchup_gap 和 user_request 执行记录。
+ingestion_watermarks：保存 data_type + scope_key + provider + period 的最近成功抓取边界。
+```
+
+调度表只允许 `internal/service/scheduler` 通过 dao/model 边界访问；其他 service、Provider、Rust command 和前端不得直接引用调度表名或调度模型。完整字段、索引和 run_key 幂等规则以 `docs/2026-06-19-invest-compass-scheduler-design.md` 为准。
 
 ---
 
@@ -1641,6 +1723,26 @@ POST /api/providers/status
 这些接口同样只供 Rust 白名单 command 调用。其中 `providers_status()` 固定映射到 `POST /api/providers/status`；`workspace_set(payload)` 必须在 Rust 边界拒绝空路径和相对路径；`logs/export` 必须先脱敏 API Key、代理密码、持仓输入和授权信息。
 `POST /api/logs/export` 从 Go core 运行期内存 `slog` 快照生成已二次脱敏的导出包，必须保留 `request_id`、`trace_id`，任务链路日志存在时必须继续保留 `task_id` 方便排障；Go core 不直接写入用户目录。Rust `export_logs(target_dir)` 在调用该 API 前先校验目标目录存在，避免无效目标触发日志包生成；写入导出文件时必须使用不覆盖已有文件的方式，防止用户目录中同名文件被替换；Unix/macOS 下必须使用当前用户私有读写权限创建导出文件。
 
+### 8.13 调度管理
+
+```http
+POST /api/scheduler/job-types
+POST /api/scheduler/jobs/list
+POST /api/scheduler/jobs/get
+POST /api/scheduler/jobs/save
+POST /api/scheduler/jobs/set-enabled
+POST /api/scheduler/jobs/delete
+POST /api/scheduler/jobs/run-now
+POST /api/scheduler/jobs/backfill
+POST /api/scheduler/runs/list
+POST /api/scheduler/runs/get
+POST /api/scheduler/runs/trigger
+POST /api/scheduler/refresh-symbol
+POST /api/scheduler/status
+```
+
+调度 API 只供 Rust 白名单 command 调用。`jobs/save`、`runs/trigger` 和 `refresh-symbol` 必须校验 `cron_type`、market、trade_window、scope、日期范围和 symbol 数量；手动补偿单次最多 30 个 symbol、30 个自然日范围，并只为交易日生成补偿 run。`refresh-symbol` 不创建长期 `scheduler_jobs`，只生成 `trigger_type=user_request` 的一次性 run 并复用统一执行队列。
+
 ---
 
 ## 9. AI 分析设计
@@ -1923,7 +2025,7 @@ macOS Universal，可选
 4. `scripts/build-sidecar.mjs` 默认构建当前平台 sidecar，也必须支持 `--target=<triple>` 和 `--all-targets` 选择首版三类目标。
 5. desktop 与 core 必须带 protocolVersion，启动时校验兼容性。
 6. Windows sidecar 必须使用 GUI subsystem 构建，避免桌面应用启动 sidecar 时弹出控制台窗口。
-7. 发布包运行时优先解析主程序同目录的 `invest-compass-core` / `invest-compass-core.exe`；环境变量覆盖仅用于本地调试，源码目录 `src-tauri/binaries` 只作为开发 fallback。
+7. 发布包运行时优先解析主程序同目录的 `invest-compas-core` / `invest-compas-core.exe`；环境变量覆盖仅用于本地调试，源码目录 `src-tauri/binaries` 只作为开发 fallback。
 8. 应用级退出事件必须显式停止 Go sidecar，不能依赖进程退出后的 Drop 清理。
 9. 打包前必须实际生成 Apple Silicon、macOS Intel 和 Windows x64 三类 sidecar 产物；安装包启动验收仍必须在目标平台完成。
 10. macOS 发布需要 Developer ID 签名和 notarization。
@@ -1934,9 +2036,9 @@ macOS Universal，可选
 sidecar 命名：
 
 ```text
-invest-compass-core-aarch64-apple-darwin
-invest-compass-core-x86_64-apple-darwin
-invest-compass-core-x86_64-pc-windows-msvc.exe
+invest-compas-core-aarch64-apple-darwin
+invest-compas-core-x86_64-apple-darwin
+invest-compas-core-x86_64-pc-windows-msvc.exe
 ```
 
 ---

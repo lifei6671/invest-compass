@@ -6,6 +6,10 @@ const tauriConfig = JSON.parse(
   await readFile(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"),
 );
 const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
+const frontendPackageJson = JSON.parse(
+  await readFile(new URL("../../frontend/package.json", import.meta.url), "utf8"),
+);
+const cargoToml = await readFile(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
 const mainCapability = JSON.parse(
   await readFile(
     new URL("../src-tauri/capabilities/default.json", import.meta.url),
@@ -13,6 +17,10 @@ const mainCapability = JSON.parse(
   ),
 );
 const libSource = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+const desktopRuntimeSource = await readFile(
+  new URL("../src-tauri/src/desktop_runtime.rs", import.meta.url),
+  "utf8",
+);
 const commandSources = await readCommandSources(
   new URL("../src-tauri/src/commands/", import.meta.url),
 );
@@ -39,10 +47,11 @@ const goDaoSources = await readSourceFiles(
   [new URL("../../sidecar-core/internal/dao/", import.meta.url)],
   (fileName) => fileName.endsWith(".go") && !fileName.endsWith("_test.go"),
 );
-const goServiceSources = await readSourceFiles(
+const goServiceSourceEntries = await readSourceFileEntries(
   [new URL("../../sidecar-core/internal/service/", import.meta.url)],
   (fileName) => fileName.endsWith(".go") && !fileName.endsWith("_test.go"),
 );
+const goServiceSources = goServiceSourceEntries.map((entry) => entry.source);
 
 test("Tauri 主窗口显式绑定 main capability", () => {
   assert.deepEqual(
@@ -57,21 +66,45 @@ test("Tauri 主窗口显式绑定 main capability", () => {
   );
 });
 
-test("main capability 只包含首版需要的 core 权限", () => {
+test("main capability 只包含首版需要的 core、日志目录选择和任务通知权限", () => {
   assert.deepEqual(mainCapability.windows, ["main"]);
   assert.deepEqual(mainCapability.permissions, [
     "core:default",
     "core:window:default",
     "core:event:default",
+    "dialog:allow-open",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
   ]);
+
+  const dialogPermissions = mainCapability.permissions.filter((permission) =>
+    permission.startsWith("dialog:"),
+  );
+  assert.deepEqual(
+    dialogPermissions,
+    ["dialog:allow-open"],
+    "设置页只需要原生目录选择，不应开放保存或消息弹窗权限",
+  );
+
+  const notificationPermissions = mainCapability.permissions.filter((permission) =>
+    permission.startsWith("notification:"),
+  );
+  assert.deepEqual(
+    notificationPermissions,
+    [
+      "notification:allow-is-permission-granted",
+      "notification:allow-request-permission",
+      "notification:allow-notify",
+    ],
+    "任务通知只需要检查权限、请求权限和发送通知，不能开放批量或默认全量通知权限",
+  );
 
   const forbiddenPluginPrefixes = [
     "clipboard-manager:",
-    "dialog:",
     "fs:",
     "global-shortcut:",
     "http:",
-    "notification:",
     "shell:",
     "store:",
     "updater:",
@@ -84,6 +117,52 @@ test("main capability 只包含首版需要的 core 权限", () => {
       `未启用的插件权限不能进入默认 capability: ${permission}`,
     );
   }
+
+  assert.equal(
+    mainCapability.permissions.includes("notification:default"),
+    false,
+    "默认 capability 不能使用 notification:default，避免扩大桌面通知能力面",
+  );
+});
+
+test("Tauri 通知插件必须完整接入并保持最小权限", () => {
+  assert.match(
+    frontendPackageJson.dependencies?.["@tauri-apps/plugin-notification"],
+    /^\^2\./,
+    "前端必须通过官方 notification 插件发送任务终态通知",
+  );
+  assert.match(
+    cargoToml,
+    /tauri-plugin-notification\s*=\s*"2"/,
+    "Rust 侧必须初始化官方 notification 插件，不能只在前端调用不存在的能力",
+  );
+  assert.match(
+    libSource,
+    /\.plugin\(tauri_plugin_notification::init\(\)\)/,
+    "Tauri Builder 必须注册 notification 插件",
+  );
+});
+
+test("开机自启只能通过 Rust 白名单命令调用官方插件", () => {
+  assert.match(
+    cargoToml,
+    /tauri-plugin-autostart\s*=\s*"2\.\d+\.\d+"/,
+    "Rust 侧必须接入官方 autostart 插件，不能自研平台启动项写入逻辑",
+  );
+  assert.match(
+    libSource,
+    /tauri_plugin_autostart::init\(\s*tauri_plugin_autostart::MacosLauncher::LaunchAgent,\s*None,\s*\)/s,
+    "Tauri Builder 必须初始化 autostart 插件并使用 macOS LaunchAgent",
+  );
+
+  const commands = parseTauriCommandNames(commandSources);
+  assert.equal(commands.includes("autostart_get"), true, "必须提供读取开机自启状态的白名单命令");
+  assert.equal(commands.includes("autostart_set"), true, "必须提供设置开机自启状态的白名单命令");
+  assert.equal(
+    mainCapability.permissions.some((permission) => permission.startsWith("autostart:")),
+    false,
+    "前端不直接调用 autostart guest API，因此默认 capability 不能开放 autostart 插件权限",
+  );
 });
 
 test("CSP 不允许任意远程脚本或弱化脚本执行策略", () => {
@@ -97,10 +176,25 @@ test("CSP 不允许任意远程脚本或弱化脚本执行策略", () => {
   assert.doesNotMatch(csp, /default-src[^;]*https?:/);
 });
 
+test("桌面运行期必须提供真实托盘恢复入口", () => {
+  assert.match(
+    cargoToml,
+    /tauri\s*=\s*\{[^\n]*features\s*=\s*\[[^\]]*"tray-icon"/,
+    "关闭到托盘依赖 Tauri tray-icon feature，不能只在代码里假定托盘可用",
+  );
+  assert.match(
+    desktopRuntimeSource,
+    /TrayIconBuilder::new\(\)/,
+    "desktop_runtime 必须创建真实托盘图标，避免关闭后无恢复入口",
+  );
+  assert.match(desktopRuntimeSource, /"open-workbench"/, "托盘菜单必须包含打开工作台入口");
+  assert.match(desktopRuntimeSource, /"quit-app"/, "托盘菜单必须包含退出应用入口");
+});
+
 test("Tauri externalBin 必须随包声明 Go sidecar", () => {
   assert.deepEqual(
     tauriConfig.bundle?.externalBin,
-    ["binaries/invest-compass-core"],
+    ["binaries/invest-compas-core"],
     "externalBin 必须使用 Tauri sidecar 基名，实际文件由构建脚本补 target triple 后缀",
   );
   assert.match(
@@ -364,6 +458,52 @@ test("日志导出 Rust command 必须固定映射到 Go API", () => {
   );
 });
 
+test("Scheduler Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    [
+      "scheduler_job_types",
+      "scheduler_jobs_backfill",
+      "scheduler_jobs_delete",
+      "scheduler_jobs_get",
+      "scheduler_jobs_list",
+      "scheduler_jobs_run_now",
+      "scheduler_jobs_save",
+      "scheduler_jobs_set_enabled",
+      "scheduler_refresh_symbol",
+      "scheduler_runs_get",
+      "scheduler_runs_list",
+      "scheduler_runs_trigger",
+      "scheduler_status",
+    ].filter((command) => !commands.includes(command)),
+    [],
+    "scheduler command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of [
+    "/api/scheduler/job-types",
+    "/api/scheduler/jobs/backfill",
+    "/api/scheduler/jobs/get",
+    "/api/scheduler/jobs/list",
+    "/api/scheduler/jobs/run-now",
+    "/api/scheduler/jobs/save",
+    "/api/scheduler/jobs/set-enabled",
+    "/api/scheduler/jobs/delete",
+    "/api/scheduler/refresh-symbol",
+    "/api/scheduler/runs/get",
+    "/api/scheduler/runs/list",
+    "/api/scheduler/runs/trigger",
+    "/api/scheduler/status",
+  ]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `scheduler command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
 test("Rust command 安全扫描能识别任意 method/path/body 代理", () => {
   const unsafeSource = `
     #[tauri::command]
@@ -381,6 +521,10 @@ test("前端和共享契约禁止暴露 Go core、runtime token 或内部密钥�
 
 test("前端生产源码禁止 mock 数据伪装真实能力", () => {
   assert.deepEqual(findRendererMockDataUsage(rendererBoundarySources), []);
+});
+
+test("前端生产源码禁止首版未闭环入口文案", () => {
+  assert.deepEqual(findRendererNonMVPEntryUsage(rendererBoundarySources), []);
 });
 
 test("前端和共享契约禁止绕过 typed invoke service 直接取数", () => {
@@ -496,6 +640,24 @@ test("Go service 层禁止定义通用错误码和错误结构", async () => {
   assert.deepEqual(findGoServiceErrorDefinitionLeaks(goServiceSources), []);
 });
 
+test("Go gocron 调度库只能由 scheduler service 使用", () => {
+  const leaks = goServiceSourceEntries
+    .filter((entry) => entry.source.includes("github.com/go-co-op/gocron/v2"))
+    .filter((entry) => !entry.path.includes("/internal/service/scheduler/"))
+    .map((entry) => entry.path);
+
+  assert.deepEqual(leaks, []);
+});
+
+test("Go Provider service 不能直接写调度表或调度模型", () => {
+  const leaks = goServiceSourceEntries
+    .filter((entry) => !entry.path.includes("/internal/service/scheduler/"))
+    .filter((entry) => /\bScheduler(Job|Run)\b|\bIngestionWatermark\b|scheduler_jobs|scheduler_runs|ingestion_watermarks/.test(entry.source))
+    .map((entry) => entry.path);
+
+  assert.deepEqual(leaks, []);
+});
+
 test("前端安全扫描能识别直连 Go core 和内部密钥字段", () => {
   const unsafeSource = `
     const resolved_api_key = "secret";
@@ -561,21 +723,42 @@ test("前端 mock 数据扫描能识别伪造投研数据入口", () => {
   ]);
 });
 
+test("前端未闭环入口扫描能识别非首版入口", () => {
+  const unsafeSource = `
+    <nav>
+      <a>策略观察</a>
+      <button>授权激活</button>
+      <button>资金流</button>
+    </nav>
+  `;
+
+  assert.deepEqual(findRendererNonMVPEntryUsage([unsafeSource]), [
+    "renderer source 包含首版未闭环入口：策略观察",
+    "renderer source 包含首版未闭环入口：授权激活",
+    "renderer source 包含首版未闭环入口：资金流",
+  ]);
+});
+
 async function readCommandSources(directoryUrl) {
   return readSourceFiles([directoryUrl], (fileName) => fileName.endsWith(".rs"));
 }
 
 async function readSourceFiles(directoryUrls, includeFile = () => true) {
-  const sources = [];
-
-  for (const directoryUrl of directoryUrls) {
-    sources.push(...(await readSourceFilesFromDirectory(directoryUrl, includeFile)));
-  }
-
-  return sources;
+  const entries = await readSourceFileEntries(directoryUrls, includeFile);
+  return entries.map((entry) => entry.source);
 }
 
-async function readSourceFilesFromDirectory(directoryUrl, includeFile) {
+async function readSourceFileEntries(directoryUrls, includeFile = () => true) {
+  const entries = [];
+
+  for (const directoryUrl of directoryUrls) {
+    entries.push(...(await readSourceFileEntriesFromDirectory(directoryUrl, includeFile)));
+  }
+
+  return entries;
+}
+
+async function readSourceFileEntriesFromDirectory(directoryUrl, includeFile) {
   const entries = await readdir(directoryUrl, { withFileTypes: true });
   const sources = [];
 
@@ -583,10 +766,10 @@ async function readSourceFilesFromDirectory(directoryUrl, includeFile) {
     const entryUrl = new URL(entry.name, directoryUrl);
     if (entry.isDirectory()) {
       sources.push(
-        ...(await readSourceFilesFromDirectory(new URL(`${entry.name}/`, directoryUrl), includeFile)),
+        ...(await readSourceFileEntriesFromDirectory(new URL(`${entry.name}/`, directoryUrl), includeFile)),
       );
     } else if (includeFile(entry.name, entryUrl)) {
-      sources.push(await readFile(entryUrl, "utf8"));
+      sources.push({ path: entryUrl.pathname, source: await readFile(entryUrl, "utf8") });
     }
   }
 
@@ -827,4 +1010,24 @@ function findRendererMockDataUsage(sources) {
     }
     return [...messages];
   });
+}
+
+function findRendererNonMVPEntryUsage(sources) {
+  const forbiddenLabels = [
+    "策略观察",
+    "授权激活",
+    "公告",
+    "研报",
+    "资金流",
+    "券商账户",
+    "自动下单",
+    "云同步",
+    "移动端",
+  ];
+
+  return sources.flatMap((source) =>
+    forbiddenLabels
+      .filter((label) => source.includes(label))
+      .map((label) => `renderer source 包含首版未闭环入口：${label}`),
+  );
 }

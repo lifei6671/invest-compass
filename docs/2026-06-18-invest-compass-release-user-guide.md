@@ -29,7 +29,8 @@
 - Prompt 模板和合规输出约束。
 - 单个个股 AI 分析任务。
 - 任务事件、报告保存、报告历史和任务历史。
-- 设置中心基础能力，包括工作区、代理、缓存、通知、开机自启和检查更新入口。
+- 设置中心基础能力，包括工作区、代理、缓存、数据源状态、检查更新和日志导出入口。
+- 数据刷新任务调度，包括交易日定时刷新、启动补偿、手动补偿和单股刷新入口。
 
 以上能力以当前实施清单为准：`docs/2026-06-17-invest-compass-implementation-checklist.md`。
 
@@ -40,8 +41,8 @@
 发布前必须确认：
 
 - 构建输入目录包含当前 target triple 对应的 Go sidecar 文件。
-- macOS 发布包运行时包含 `invest-compass-core`。
-- Windows x64 发布包运行时包含 `invest-compass-core.exe`。
+- macOS 发布包运行时包含 `invest-compas-core`。
+- Windows x64 发布包运行时包含 `invest-compas-core.exe`。
 - Tauri 配置只声明首版需要的权限。
 - Go sidecar 只监听 `127.0.0.1`。
 - runtime token 不出现在 argv、env、日志、配置文件或数据库中。
@@ -106,27 +107,122 @@ AI 报告必须保留：
 - 数据源是否可用。
 - sidecar 是否正常启动。
 
-## 7. 发布检查
+## 7. 设置中心
+
+设置中心用于管理本地运行参数，不承载交易、授权激活或自动升级能力。
+
+当前设置能力包括：
+
+- 保存工作区路径。
+- 保存不含用户名和密码的代理 URL。
+- 将代理密码写入 Rust 本地文件 vault，前端和 Go core 只使用凭据引用。
+- 查看缓存占用并清理允许的缓存目标。
+- 查看数据源状态和不可用原因。
+- 开关 AI 分析任务成功/失败后的系统通知；通知权限拒绝或系统通知失败不会改变任务状态。
+- 开关系统开机自动启动；该能力仍需在目标 macOS / Windows 安装环境做真实验收。
+- 检查更新并展示版本提示。
+- 导出已二次脱敏的日志包。
+- 查看当前 `FREE` 状态和投研风险提示。
+
+检查更新配置：
+
+- `update.manifest_url` 必须使用 HTTPS，并命中允许域名。
+- `update.allowed_hosts` 使用逗号分隔的域名列表。
+- manifest 内下载链接和发布说明链接也必须命中 allowlist。
+- 首版只提示版本，不下载、不安装、不静默升级。
+
+日志导出边界：
+
+- 目标目录不能为空，且必须是用户指定的本地目录。
+- Go core 只生成已脱敏日志包，不直接写入用户目录。
+- Rust 写入导出文件时会拒绝路径穿越文件名和同名覆盖。
+
+## 8. 数据刷新调度
+
+任务调度用于刷新本地研究数据，不代表交易信号，也不会连接券商账户或自动下单。
+
+当前调度能力包括：
+
+- 查看调度任务总数、启用任务、排队中、运行中和失败记录。
+- 创建、编辑、启用、停用、删除长期数据刷新任务。
+- 对已有任务立即执行一次。
+- 在有边界的日期范围内发起手动补偿抓取。
+- 当用户晚于交易日调度窗口启动软件时，由 Go core 计算需要补偿的 `missed_today` run；例如 A 股 09:30 已开盘，用户 10:00 才启动应用，会补一次今天已经错过且仍有价值的刷新窗口。
+- 手动刷新某只股票的行情、K 线、新闻或全部数据，并复用统一执行队列。
+
+使用边界：
+
+- 单次手动补偿最多 30 个 symbol、30 个自然日。
+- 非交易日不会生成交易日补偿 run。
+- 单股刷新当前在任务调度页、股票详情页和自选股行内提供真实入口。
+- Provider 未授权、频率限制或网络错误会导致 run 失败，失败原因以脱敏摘要展示。
+
+## 9. 发布检查
 
 发布前至少运行：
 
 ```bash
-pnpm --dir apps format:check
-pnpm --dir apps check
-pnpm --dir apps test
+pnpm --dir apps acceptance:check
+pnpm --dir apps sqlite:upgrade-rehearsal
+pnpm --dir apps sidecar:check-targets
 pnpm --dir apps build
-(cd apps/sidecar-core && go test ./...)
-cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 git diff --check
 ```
+
+`acceptance:check` 会复跑本地测试、类型/编译检查、Rust 桌面单元测试和格式检查；它不会触网，也不会替代真实 Provider smoke、包结构复核或 macOS / Windows 人工验收。
+
+`sqlite:upgrade-rehearsal` 会用临时 SQLite 创建用户数据、执行迁移前备份、恢复备份、再次迁移，并确认已有 settings 数据仍可读取；它用于发布前自动化演练，不替代真实安装包升级已有用户 profile 的手工验收。
+
+本机 Apple Silicon 发布候选可使用聚合命令复跑本地验收、SQLite 升级演练、三类 sidecar target 校验、构建、生成 `.app`、复核包结构并检查 diff 空白：
+
+```bash
+pnpm --dir apps release:check:local
+```
+
+`release:check:local` 只覆盖当前仓库本机 macOS Apple Silicon 发布候选自动化检查，会校验三类 sidecar target 产物，并对包内 Go core 执行 stdin token 握手、`/internal/health` 和 `/internal/shutdown` smoke；它不触发联网 Provider smoke，也不替代 macOS Intel、Windows 或桌面能力人工验收。
+
+跨平台打包前，可先重复生成并校验三类首版 sidecar target 产物：
+
+```bash
+pnpm --dir apps sidecar:check-targets
+```
+
+该命令会构建并复核 Apple Silicon、macOS Intel 和 Windows x64 sidecar，校验文件存在性、非 symlink、非空、macOS 执行位、Mach-O / PE 架构，以及 Windows GUI subsystem。它只证明 target sidecar 产物本身符合打包输入要求，不替代 macOS Intel 或 Windows 安装包真实启动验收。
+
+真实 Provider 授权和频率限制确认完成后，可执行外网 smoke：
+
+```bash
+pnpm --dir apps provider:smoke -- --allow-network --confirm-provider-terms
+```
+
+不带参数的 `pnpm --dir apps provider:smoke` 只输出 dry-run 计划，不访问网络。联网 smoke 只证明样例端点当次可访问，不等同于授权、可分发边界或生产可用性已经通过。
+
+生成桌面包后，可先用包结构脚本确认主程序和 Go sidecar 是否随包存在且非空：
+
+```bash
+pnpm --dir apps package:verify -- --platform=darwin --target=aarch64-apple-darwin "desktop/src-tauri/target/release/bundle/macos/投研罗盘.app"
+pnpm --dir apps package:verify -- --platform=darwin --target=x86_64-apple-darwin "path/to/intel/投研罗盘.app"
+pnpm --dir apps package:verify -- --platform=win32 --target=x86_64-pc-windows-msvc "path/to/unpacked/windows/package"
+```
+
+macOS 参数必须指向 `.app` 包目录，并会检查包名是否匹配 Tauri `productName`、包根是目录、包根、`Contents` / `Contents/MacOS` 关键目录、声明图标时的 `Contents/Resources` 目录、`Info.plist` 和包内二进制不是 symlink、包内主程序和 Go sidecar 是否具备执行位、`Info.plist` 的 `CFBundleExecutable` 是否指向主程序、`CFBundlePackageType` 是否为 `APPL`、`CFBundleDisplayName` / `CFBundleName` 是否匹配 Tauri `productName`、`CFBundleIdentifier` / `CFBundleShortVersionString` / `CFBundleVersion` 是否与 Tauri 配置一致，以及 `CFBundleIconFile` 声明的图标资源是否为 `Contents/Resources` 直接子文件；Windows 参数指向解包后的安装目录。传入 `--target` 时，脚本还会校验包内主程序和 sidecar 的二进制架构是否匹配目标平台；Windows target 校验还会拒绝 console subsystem 的 PE 文件，避免 sidecar 打包后弹出控制台窗口。该脚本只检查包结构和基础文件有效性，不替代真实目标平台启动、凭据、通知、托盘和开机自启验收。
+
+Apple Silicon `.app` 生成后，也可以单独验证包内 Go core runtime：
+
+```bash
+pnpm --dir apps sidecar:smoke
+```
+
+该命令会启动包内 `invest-compas-core`，完成 stdin token 握手、健康检查和内部 shutdown；它不打开桌面 UI，也不替代完整桌面验收。
 
 跨平台发布还需要人工确认：
 
 - macOS Apple Silicon 启动、sidecar、本地 vault、通知、托盘和打包产物。
 - macOS Intel 启动、sidecar、本地 vault、通知、托盘和打包产物。
 - Windows x64 启动、sidecar、本地 vault、通知、托盘和安装包。
+- 开机自启已接入设置入口和 Rust 白名单命令，但仍需按平台能力单独验收，未验收前不能写成目标平台已通过。
 
-## 8. 已知未闭环项
+## 10. 已知未闭环项
 
 以下事项不能在文档或 UI 中写成已完成：
 
@@ -137,8 +233,10 @@ git diff --check
 - 移动端。
 - 持仓数据独立落库。
 - 非首版数据源，如公告、研报、资金流专用数据源。
+- 开机自启。
+- 调度专题中的真实 Provider 授权、频率限制验收和跨平台休眠恢复 / 退出恢复验收。
 
-## 9. 反馈材料
+## 11. 反馈材料
 
 反馈问题时建议提供：
 

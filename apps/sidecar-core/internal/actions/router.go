@@ -19,6 +19,7 @@ import (
 	promptaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/prompt"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/providers"
 	reportaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/reports"
+	scheduleraction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/scheduler"
 	settingsaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/settings"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/stocks"
 	taskaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/tasks"
@@ -28,6 +29,7 @@ import (
 	dashboardservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/dashboard"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
+	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
 )
 
@@ -56,6 +58,9 @@ type Config struct {
 	CacheStatsProvider    cache.StatsProvider
 	CacheCleaner          cache.Cleaner
 	SettingsStore         settingsaction.Store
+	SchedulerStore        scheduleraction.Store
+	SchedulerQueue        schedulerservice.Queue
+	SchedulerService      scheduleraction.Service
 	LogExportSource       logexportaction.Source
 	UpdateManifestURL     string
 	UpdateAllowedHosts    []string
@@ -150,6 +155,12 @@ func Routes(config Config) []httpx.Route {
 	routes = append(routes, settingsaction.Routes(settingsaction.Config{
 		Security: security,
 		Store:    config.SettingsStore,
+	})...)
+	routes = append(routes, scheduleraction.Routes(scheduleraction.Config{
+		Security: security,
+		Store:    config.SchedulerStore,
+		Queue:    config.SchedulerQueue,
+		Service:  config.SchedulerService,
 	})...)
 	routes = append(routes, logexportaction.Routes(logexportaction.Config{
 		Security: security,

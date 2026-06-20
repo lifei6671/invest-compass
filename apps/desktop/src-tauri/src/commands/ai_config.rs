@@ -322,7 +322,7 @@ impl LocalCredentialVault {
 
 /// 读取 AI 配置列表，固定转发到 Go core `/api/ai/configs/list`。
 #[tauri::command]
-pub async fn ai_config_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub fn ai_config_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
     client
         .post_api("/api/ai/configs/list", &AIConfigListRequest {})
@@ -331,7 +331,7 @@ pub async fn ai_config_list(state: State<'_, CoreState>) -> Result<serde_json::V
 
 /// 保存 AI 配置元数据，固定转发到 Go core `/api/ai/configs/save`。
 #[tauri::command]
-pub async fn ai_config_save(
+pub fn ai_config_save(
     state: State<'_, CoreState>,
     payload: AIConfigSavePayload,
 ) -> Result<serde_json::Value, String> {
@@ -356,7 +356,7 @@ pub async fn ai_config_save(
 
 /// 测试 AI 配置连通性，固定读取本地 vault 后转发到 Go core `/api/ai/configs/test`。
 #[tauri::command]
-pub async fn ai_config_test(
+pub fn ai_config_test(
     state: State<'_, CoreState>,
     payload: AIConfigTestPayload,
 ) -> Result<serde_json::Value, String> {
@@ -384,7 +384,7 @@ pub async fn ai_config_test(
 
 /// 删除 AI 配置元数据和可选本地 vault 密钥，固定转发到 Go core `/api/ai/configs/delete`。
 #[tauri::command]
-pub async fn ai_config_delete(
+pub fn ai_config_delete(
     state: State<'_, CoreState>,
     payload: AIConfigDeletePayload,
 ) -> Result<serde_json::Value, String> {

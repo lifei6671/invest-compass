@@ -549,6 +549,153 @@ func TestStoreCacheUsagesReadsTemporaryCacheData(t *testing.T) {
 	requireMissingCacheUsage(t, usages, settings.CacheTargetConfig)
 }
 
+// TestSchedulerRepositoryPersistsJobsRunsAndWatermarks 验证调度任务、执行记录和抓取水位的最小持久化契约。
+func TestSchedulerRepositoryPersistsJobsRunsAndWatermarks(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	nextRunAt := time.Date(2026, 6, 19, 9, 30, 0, 0, time.Local)
+
+	job := model.SchedulerJob{
+		Name:           "A 股开盘行情刷新",
+		CronType:       "cn_a_share_quote_refresh",
+		CronExpr:       "30 9 * * 1-5",
+		Enabled:        true,
+		Market:         "CN",
+		Timezone:       "Asia/Shanghai",
+		TradeWindow:    "open",
+		ScopeJSON:      `{"symbols":["CN:SH:600519"]}`,
+		ParamsJSON:     `{"period":"1m"}`,
+		CatchupEnabled: true,
+		CatchupMaxDays: 5,
+		TimeoutSeconds: 120,
+		NextRunAt:      &nextRunAt,
+	}
+	if err := store.SaveSchedulerJob(ctx, &job); err != nil {
+		t.Fatalf("save scheduler job: %v", err)
+	}
+
+	jobs, err := store.ListSchedulerJobs(ctx)
+	if err != nil {
+		t.Fatalf("list scheduler jobs: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].CronType != "cn_a_share_quote_refresh" || !jobs[0].Enabled {
+		t.Fatalf("unexpected scheduler jobs: %+v", jobs)
+	}
+	gotJob, ok, err := store.GetSchedulerJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("get scheduler job: %v", err)
+	}
+	if !ok || gotJob.ID != job.ID || gotJob.CronType != job.CronType {
+		t.Fatalf("unexpected scheduler job detail: ok=%v job=%+v", ok, gotJob)
+	}
+	enabledJobs, err := store.ListEnabledSchedulerJobs(ctx)
+	if err != nil {
+		t.Fatalf("list enabled scheduler jobs: %v", err)
+	}
+	if len(enabledJobs) != 1 {
+		t.Fatalf("expected one enabled scheduler job, got %+v", enabledJobs)
+	}
+	if err := store.SetSchedulerJobEnabled(ctx, job.ID, false); err != nil {
+		t.Fatalf("disable scheduler job: %v", err)
+	}
+	enabledJobs, err = store.ListEnabledSchedulerJobs(ctx)
+	if err != nil {
+		t.Fatalf("list enabled scheduler jobs after disable: %v", err)
+	}
+	if len(enabledJobs) != 0 {
+		t.Fatalf("expected disabled scheduler job to be excluded, got %+v", enabledJobs)
+	}
+
+	run := model.SchedulerRun{
+		JobID:       job.ID,
+		CronType:    "cn_a_share_quote_refresh",
+		DataType:    "quote",
+		Period:      "",
+		RunKey:      "job-1:2026-06-19:missed_today",
+		TriggerType: "missed_today",
+		Status:      "queued",
+		Priority:    50,
+		Source:      "startup_restore",
+		TargetDate:  "2026-06-19",
+		ScopeKey:    "CN:SH:600519",
+	}
+	if err := store.CreateSchedulerRun(ctx, &run); err != nil {
+		t.Fatalf("create scheduler run: %v", err)
+	}
+	if err := store.CreateSchedulerRun(ctx, &model.SchedulerRun{JobID: job.ID, CronType: "cn_a_share_quote_refresh", DataType: "quote", RunKey: run.RunKey, TriggerType: "missed_today", Status: "queued"}); err == nil {
+		t.Fatal("expected duplicate scheduler run_key to fail")
+	}
+	startedAt := time.Date(2026, 6, 19, 10, 0, 0, 0, time.Local)
+	run.Status = "running"
+	run.StartedAt = &startedAt
+	if err := store.UpdateSchedulerRun(ctx, &run); err != nil {
+		t.Fatalf("update scheduler run: %v", err)
+	}
+	gotJob, ok, err = store.GetSchedulerJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("get scheduler job after run update: %v", err)
+	}
+	if !ok || gotJob.LastStatus != "running" || gotJob.LastError != "" || gotJob.LastRunAt == nil {
+		t.Fatalf("expected scheduler job recent state to follow run update, ok=%v job=%+v", ok, gotJob)
+	}
+	runningRuns, err := store.ListSchedulerRunsByStatuses(ctx, []string{"running"})
+	if err != nil {
+		t.Fatalf("list running scheduler runs: %v", err)
+	}
+	if len(runningRuns) != 1 || runningRuns[0].RunKey != run.RunKey || runningRuns[0].TriggerType != "missed_today" {
+		t.Fatalf("unexpected running scheduler runs: %+v", runningRuns)
+	}
+	allRuns, err := store.ListSchedulerRuns(ctx, job.ID, 10)
+	if err != nil {
+		t.Fatalf("list scheduler runs: %v", err)
+	}
+	if len(allRuns) != 1 || allRuns[0].RunKey != run.RunKey {
+		t.Fatalf("unexpected scheduler runs: %+v", allRuns)
+	}
+	gotRun, ok, err := store.GetSchedulerRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get scheduler run: %v", err)
+	}
+	if !ok || gotRun.ID != run.ID || gotRun.RunKey != run.RunKey {
+		t.Fatalf("unexpected scheduler run detail: ok=%v run=%+v", ok, gotRun)
+	}
+
+	watermark := model.IngestionWatermark{
+		DataType:      "quote",
+		ScopeKey:      "CN:SH:600519",
+		Provider:      "sina_tencent",
+		Period:        "",
+		LastSuccessAt: &startedAt,
+		LastTradeDate: "2026-06-19",
+		CursorJSON:    `{"last_quote_time":"2026-06-19T10:00:00+08:00"}`,
+	}
+	if err := store.UpsertIngestionWatermark(ctx, &watermark); err != nil {
+		t.Fatalf("upsert ingestion watermark: %v", err)
+	}
+	watermark.LastTradeDate = "2026-06-20"
+	if err := store.UpsertIngestionWatermark(ctx, &watermark); err != nil {
+		t.Fatalf("update ingestion watermark: %v", err)
+	}
+	gotWatermark, ok, err := store.GetIngestionWatermark(ctx, "quote", "CN:SH:600519", "sina_tencent", "")
+	if err != nil {
+		t.Fatalf("get ingestion watermark: %v", err)
+	}
+	if !ok || gotWatermark.LastTradeDate != "2026-06-20" {
+		t.Fatalf("unexpected ingestion watermark: ok=%v watermark=%+v", ok, gotWatermark)
+	}
+
+	if err := store.SoftDeleteSchedulerJob(ctx, job.ID); err != nil {
+		t.Fatalf("soft delete scheduler job: %v", err)
+	}
+	jobs, err = store.ListSchedulerJobs(ctx)
+	if err != nil {
+		t.Fatalf("list scheduler jobs after delete: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("expected soft deleted scheduler job to be hidden, got %+v", jobs)
+	}
+}
+
 // newTestStore 创建已迁移的内存数据库，供 DAO repository 测试使用。
 func newTestStore(t *testing.T) *Store {
 	t.Helper()

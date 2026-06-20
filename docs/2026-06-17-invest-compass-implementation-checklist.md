@@ -19,7 +19,7 @@
 - API Key 和代理密码保存到 Rust 管理的本地文件 vault，SQLite 只保存引用标识和脱敏状态。
 - 个股 AI 分析任务支持进度/流式事件、取消、失败原因、报告保存。
 - 报告历史、任务历史、事件回放和 RUNNING 任务恢复规则可用。
-- 设置中心覆盖工作区、代理、通知、缓存、开机自启、检查更新入口。
+- 设置中心覆盖工作区、代理、缓存、数据源状态、任务通知、开机自启、检查更新和日志导出入口；托盘、通知、开机自启和跨平台桌面行为仍归 T39/T44 验收。
 - macOS 和 Windows 均完成基础启动、凭据、sidecar、打包验证。
 
 ### 1.2 明确不做
@@ -69,6 +69,16 @@ P7 跨平台桌面能力、打包、发布验收
 - `[~]` 进行中
 - `[x]` 已完成并通过验证
 - `[!]` 阻塞或需要人工确认
+
+---
+
+## 3.1 专题实施清单
+
+当前总 checklist 只承载首版主链路和 Review Gate。专题能力使用独立清单推进，避免把大量子任务平铺到主文档导致状态不可维护。
+
+- 数据刷新调度专题：`docs/2026-06-19-invest-compass-scheduler-implementation-checklist.md`
+  - 范围：`github.com/go-co-op/gocron/v2` 调度服务、`scheduler_jobs` / `scheduler_runs` / `ingestion_watermarks`、启动补偿、手动补偿、单股刷新和桌面管理接口。
+  - 停止线：`analysis_report_schedule`、资金流刷新、独立市场快照专题和跨平台人工验收不随调度 MVP 自动完成。
 
 ---
 
@@ -211,7 +221,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 当前进展：
   - 已实现 Rust sidecar token、stdin 握手、ready JSON 解析、protocolVersion 兼容性校验、health/shutdown client 和 `core_health` 白名单 command。
   - 已补 Go `/internal/shutdown`，合法 token 才能触发关闭回调。
-  - 已补 `pnpm sidecar:build`，默认产物为 `apps/desktop/src-tauri/binaries/invest-compass-core`。
+  - 已补 `pnpm sidecar:build`，默认产物为 `apps/desktop/src-tauri/binaries/invest-compas-core`。
   - 已验证项目内 sidecar 二进制 stdin 握手、health、非 POST 拒绝和 shutdown 后进程退出。
   - Go server 优雅关闭失败会返回错误，Rust 侧仍保留 `/internal/shutdown` 失败后 kill 子进程的兜底清理。
 
@@ -297,7 +307,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 已验证空库迁移成功、重复迁移幂等、active watchlist symbol 唯一约束和 K 线复合唯一约束。
   - 已新增 `dao.BackupBeforeMigration`，sidecar 生产启动会在 `dao.Open` 和 `dao.Migrate` 前备份已有 SQLite 文件到工作区 `backups/` 目录。
   - 迁移前备份会跳过首次启动缺失库和内存库，复制已有主库文件并拒绝覆盖同名备份，避免破坏用户可恢复点。
-  - 单测覆盖已有库备份、缺失库/内存库跳过、同名备份拒绝覆盖，以及生产启动路径在迁移前触发备份。
+  - 单测覆盖已有库备份、缺失库/内存库跳过、同名备份拒绝覆盖、备份文件恢复后重新打开并迁移仍保留用户 settings 数据，以及生产启动路径在迁移前触发备份。
   - 已保留 `apps/sidecar-core/migrations/` 目录，用于后续发布后版本化迁移扩展。
 
 ### T09 GORM dao 和事务层
@@ -456,6 +466,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增 `sina-tencent-market` 真实组合 Provider：`SinaSource/SinaProvider` 只负责新浪 suggest/实时行情，`TencentSource/TencentProvider` 只负责腾讯结构化 K 线，`EastMoneySource/EastMoneyProvider` 只负责东方财富 `push2his` K 线兜底，`CompositeMarketProvider` 对外组合成完整 `MarketProvider`；授权和样例验收完成前，生产 `main.go` 仍保持 `UnconfiguredProvider` 安全状态。
   - K 线 Provider 链路为腾讯优先、东财 direct HTTP 兜底；不迁移 chromedp Cookie 抓取逻辑，也不依赖本地浏览器路径。
   - Provider 单测覆盖新浪搜索解析、GB18030 解码、A 股实时行情字段映射、非股票六位代码拒绝、腾讯 K 线解析、不复权参数映射、东财 push2his K 线解析、拆分后的新浪/腾讯/东财职责边界、组合 Provider 委派和东财兜底、异常字段快速失败、状态元信息和未支持市场拒绝。
+  - 已新增 `scripts/provider-smoke.mjs`，默认 dry-run 不访问网络；只有执行方显式传入 `--allow-network --confirm-provider-terms` 后，才对新浪 suggest/quote、腾讯 K 线和东财 K 线样例端点做 live smoke 检查；live smoke 会校验端点特征响应体，避免把错误页或空壳 200 当成 Provider 样例通过。
   - 当前 Provider 仅声明支持 `CN` A 股；`HK` / `US`、数据源授权复核、真实外网样例查询和跨平台开发环境验收完成前，T13 仍保持 `[~]`，不能标记为 `[x]`。
 
 ### T14 股票搜索和基础信息 API
@@ -518,7 +529,7 @@ P7 跨平台桌面能力、打包、发布验收
   - Rust `watchlist_update` 和 `watchlist_delete` 已在转发前校验 `id > 0`，非法请求不进入 Go core。
   - 已新增 Rust 白名单 command：`watchlist_list`、`watchlist_create`、`watchlist_update`、`watchlist_delete`，每个 command 固定映射到对应 Go API，禁止通用 path 代理。
   - API 单测覆盖创建、更新、列表、删除隐藏和重复 active symbol 稳定错误；Rust 安全测试覆盖 command 注册、固定 path 和非正数 ID 早失败。
-  - 自选股页面真实交互仍归 T32，不阻塞本 CRUD/API 基线退出。
+  - 自选股页面真实交互已由 T32 接入并覆盖搜索、添加、更新、删除和行内刷新，不再阻塞本 CRUD/API 基线退出。
 
 ### T16 行情、K线和缓存
 
@@ -622,6 +633,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增 Rust 白名单 command：`news_list`、`news_market`，固定映射到 `POST /api/news/list` 和 `POST /api/news/market`，禁止通用 path 代理。
   - 单测覆盖重复新闻不重复入库、列表按发布时间排序、新闻 URL 输出前 scheme 校验、个股新闻 API 写入缓存、市场新闻缓存命中不重复请求 Provider、Rust command 固定 path 和 Rust command 非法 `limit` 早失败。
   - 已新增 `CailianpressProvider` 和 `SinaLiveProvider` 的 service 层抓取清洗实现，分别清洗财联社电报和新浪财经直播快讯为统一 `news.Item`；尚未注入生产入口。
+  - `scripts/provider-smoke.mjs` 已纳入新浪财经直播快讯样例端点；默认 dry-run 不访问网络，联网检查需要显式确认 Provider 条款、授权和频率限制边界。
   - 受真实合规新闻 Provider 数据源授权约束，Provider 注入、Dashboard/资讯中心/分析上下文真实新闻数据闭环完成后再标记为 `[x]`。
 
 ### P3 补充：市场资讯扩展 Provider 预研
@@ -697,7 +709,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 单测覆盖 dashboard summary API 的自选涨跌分布、敏感错误脱敏、不返回非 MVP 字段、未配置 Market/News Provider 状态，以及从真实 SQLite DAO 汇总自选股行情、报告、任务、市场新闻和 Provider 状态。
   - 已新增 Rust 白名单 command：`dashboard_summary`、`providers_status`，固定映射到 `POST /api/dashboard/summary` 和 `POST /api/providers/status`，禁止通用 path 代理。
   - Rust 安全测试覆盖 Dashboard 和 Provider 状态 command 注册和固定 path。
-  - 受真实 Market/News Provider 数据源授权和 Dashboard 前端页面接入约束，完成后再标记为 `[x]`。
+  - Dashboard 前端页面已由 T31 接入并覆盖正常、空数据和 Provider 异常状态；受真实 Market/News Provider 数据源授权约束，完成后再标记为 `[x]`。
 
 ---
 
@@ -739,7 +751,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T21 AI 配置 API 和 Rust 内部密钥注入
 
-- 状态：`[~]`
+- 状态：`[x]`
 - 依赖：T09、T20
 - 交付物：
   - `/api/ai/configs/list`
@@ -777,7 +789,8 @@ P7 跨平台桌面能力、打包、发布验收
   - `apps/sidecar-core/cmd/invest-compass-core` 单测覆盖生产 actions config 必须注入 AI config tester、核心 store 和日志导出源。
   - `apps/desktop/test/security-config.test.mjs` 覆盖 AI 配置 Rust command 注册和固定 path。
   - 已移除平台凭据服务强依赖，`ai_config_save` 改为使用 Rust 本地文件 vault 保存一次性 API Key；新建配置尚无数据库 ID 时会生成唯一 `api_key_ref`，避免同 provider 的多个新配置互相覆盖密钥；更新 key 时会先校验旧引用，清理被替换的旧 vault 引用，并在清理失败时回滚新写入文件。
-  - T20、T22、T26 的后端/Rust 依赖已接入；模型配置页面真实交互仍归 T34，不阻塞本 API 和内部密钥注入基线。
+  - 前端 `/ai-settings` 已接入 `ai_config_list`、`ai_config_save`、`ai_config_delete` 和 `ai_config_test`，保存后只展示脱敏字段并清空明文输入，测试失败错误会二次脱敏。
+  - T21 开发闭环已完成；真实外部 Provider 连通性和跨平台桌面凭据验收继续归 T34/T44 收口。
 
 ### T22 OpenAI-compatible Provider
 
@@ -840,7 +853,7 @@ P7 跨平台桌面能力、打包、发布验收
   - Rust `prompt_templates_get`、`prompt_templates_update` 和 `prompt_templates_delete` 已在转发前校验 `id > 0`，非法请求不进入 Go core。
   - 已新增 Rust 白名单 command：`prompt_templates_list`、`prompt_templates_get`、`prompt_templates_create`、`prompt_templates_update`、`prompt_templates_delete`，固定映射到对应 Go API，禁止通用 path 代理。
   - 单测覆盖 CRUD、未支持变量保存失败、内置模板更新/删除拒绝、软删除隐藏、Rust command 固定 path 和非正数模板 ID 早失败。
-  - Prompt 模板页面真实交互仍归 T34，不阻塞本 CRUD/API 基线退出。
+  - Prompt 模板页面真实交互已由 T34 接入并覆盖未支持变量拒绝保存，不再阻塞本 CRUD/API 基线退出。
 
 ### T24 Prompt 构建和合规输出约束
 
@@ -943,11 +956,11 @@ P7 跨平台桌面能力、打包、发布验收
   - DAO 已新增 `GetPromptTemplate`，避免分析执行器绕过 dao 层或复用 action 层查询逻辑。
   - `apps/sidecar-core/internal/service/analysis` 单测覆盖成功执行、AI Prompt 上下文、报告保存、报告输入快照保留一次性持仓但不含密钥、缺数据失败和取消错误不覆盖任务状态。
   - `apps/sidecar-core/internal/actions` 单测覆盖取消 API 对运行中 executor context 的传播。
-  - 后端/Rust 任务创建、取消、Provider 调用、报告保存和取消传播已接入；受真实 Market/News Provider 数据源授权以及前端启动/取消触发约束，完整主链路完成后再标记为 `[x]`。
+  - 后端/Rust 任务创建、取消、Provider 调用、报告保存和取消传播已接入，前端 `/analysis` 也已覆盖启动和取消触发；受真实 Market/News Provider 数据源授权、外部模型连通和跨平台桌面验收约束，完整主链路完成后再标记为 `[x]`。
 
 ### T27 SSE 事件和 Rust 转发
 
-- 状态：`[~]`
+- 状态：`[x]`
 - 依赖：T25、T26
 - 交付物：
   - `/api/tasks/events/stream`
@@ -980,7 +993,8 @@ P7 跨平台桌面能力、打包、发布验收
   - Rust SSE 解析已兼容 LF 和 CRLF 帧边界，并保留多行 `data:` 合并解析，避免不同 HTTP 栈换行风格导致任务事件转发失败。
   - Rust 订阅和事件回放 command 会在转发前拒绝空 `task_id`，并继续拒绝负数 `after_event_id`。
   - `apps/sidecar-core/internal/actions` 单测覆盖 SSE 历史补拉脱敏和等待新增终态事件；`apps/desktop/src-tauri` 单测覆盖 Rust SSE 多行 `data:` 和 CRLF 帧边界解析。
-  - 受 T26/T30 后续接入约束，前端真实进度展示接入后再标记为 `[x]`。
+  - 前端 `/analysis` 和 `/tasks` 已接入 `analysis_task_subscribe` 与 `task_events`，会先回放持久化事件再订阅新增事件，并展示流式 chunk、终态和失败原因。
+  - T27 开发闭环已完成；真实桌面长连接体验和跨平台事件转发验收归 T44 收口。
 
 ### T28 报告保存、查询、删除
 
@@ -1048,7 +1062,7 @@ P7 跨平台桌面能力、打包、发布验收
   - Rust `task_list`、`task_events` 和 `analysis_task_subscribe` 已在转发 Go core 前复用同样边界校验，非法参数不进入 sidecar。
   - 已新增 Rust 白名单 command：`task_list`、`task_get`、`task_events`，固定映射到对应 Go API，禁止通用 path 代理。
   - 单测覆盖人为制造 RUNNING 任务后的启动恢复、任务列表/详情 API、任务列表非法 `limit` 拒绝、负数事件游标拒绝、事件增量回放、事件脱敏、Rust command 固定 path 和 Rust command 入参早失败。
-  - 任务历史真实页面仍归 T36，不阻塞本任务查询和恢复基线退出。
+  - 任务历史真实页面已由 T36 接入并覆盖任务列表、详情、事件回放和详情订阅，不再阻塞本任务查询和恢复基线退出。
 
 ---
 
@@ -1083,7 +1097,7 @@ P7 跨平台桌面能力、打包、发布验收
 
 ### T31 Dashboard 页面
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：T19、T30
 - 交付物：
   - 总览页。
@@ -1095,10 +1109,16 @@ P7 跨平台桌面能力、打包、发布验收
   - 页面不出现策略、公告、研报、资金流入口。
 - 退出条件：
   - 首页可以反映真实首版数据状态。
+- 当前进展：
+  - 已将首页从单一 `core_health` 启动检查扩展为 `core_health` + `dashboard_summary` 并行读取，所有数据仍通过 typed invoke service 调用 Rust 白名单 command。
+  - 已展示自选股涨跌平分布、今日热点、最近报告、最近任务、数据源状态和风险提示，不引入策略、公告、研报、资金流等首版未闭环入口。
+  - 已覆盖正常数据、无数据和 Provider 异常三类首屏状态；Provider 不可用时展示明确状态和错误原因，不使用假数据兜底。
+  - `apps/frontend/src/services/coreClient.test.ts` 覆盖 `dashboardSummary()` 固定调用 `dashboard_summary`。
+  - `apps/frontend/src/app/App.test.tsx` 覆盖 Dashboard 首屏真实总览展示、空状态和 Provider 异常状态。
 
 ### T32 自选股页面
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：T14、T15、T16、T30
 - 交付物：
   - 自选股列表、搜索、添加、删除、标签、备注、刷新、排序。
@@ -1112,10 +1132,18 @@ P7 跨平台桌面能力、打包、发布验收
   - 重复添加显示明确错误。
 - 退出条件：
   - 用户可以完成自选股基础管理。
+- 当前进展：
+  - 已新增前端 typed service：`stockSearch()`、`marketQuote()`、`watchlistList()`、`watchlistCreate()`、`watchlistUpdate()`、`watchlistDelete()`，均固定调用 Rust 白名单 command，不接触 Go core 地址或 token。
+  - 已新增 `/watchlist` 页面和主导航入口，页面读取 `watchlist_list` 后按每个 symbol 调用 `market_quote` 展示真实行情；行情失败时展示错误，不填充假价格。
+  - 已支持搜索股票、添加自选、编辑排序/标签/备注、刷新列表和软删除自选；删除后仍可从搜索结果重新添加。
+  - 自选股行内已提供单股 quote 刷新入口，调用 `scheduler_refresh_symbol` 并提交 `data_type=quote`，成功后重新读取该 symbol 的行情缓存。
+  - 已覆盖重复添加时展示后端业务错误，避免把失败吞掉或显示成功态。
+  - `apps/frontend/src/services/coreClient.test.ts` 覆盖自选股、股票搜索和行情 command 契约。
+  - `apps/frontend/src/app/App.test.tsx` 覆盖自选股列表行情、行内单股刷新、搜索添加、更新、删除后重加和重复添加错误展示。
 
 ### T33 个股详情和 K线图页面
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T16、T17、T18、T30
 - 交付物：
   - 个股详情页。
@@ -1131,10 +1159,19 @@ P7 跨平台桌面能力、打包、发布验收
   - 外链只允许 HTTPS。
 - 退出条件：
   - 用户可查看股票行情、K 线、技术指标和相关新闻。
+- 当前进展：
+  - 已新增前端 typed service：`marketKline()`、`marketIndicators()`、`newsList()`，均固定调用 Rust 白名单 command，不接触 Go core 地址或 token。
+  - 已新增 `/stocks/:symbol` 个股详情路由，并从自选股 symbol 进入详情页。
+  - 页面已读取真实 `market_quote`、`market_kline`、`market_indicators` 和 `news_list` 数据，展示行情摘要、Lightweight Charts K 线、K 线表格摘要、技术指标摘要和相关新闻。
+  - period/adjust 切换会重新读取 K 线和指标，切换时保留旧数据直到新请求返回，避免控件消失。
+  - K 线、技术指标和新闻不足时展示明确空状态。
+  - 新闻列表已过滤为 HTTPS URL，并通过 Rust `open_external_url` 白名单 command 打开系统浏览器；真实跨平台桌面打开仍待 T44 验收，因此 T33 仍保持 `[~]`。
+  - `apps/frontend/src/services/coreClient.test.ts` 覆盖 K 线、指标和新闻 command 契约。
+  - `apps/frontend/src/app/App.test.tsx` 覆盖详情页数据展示、period/adjust 切换、HTTPS 新闻过滤和空状态。
 
 ### T34 模型配置和 Prompt 模板页面
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T21、T22、T23、T30
 - 交付物：
   - 模型配置页。
@@ -1149,10 +1186,19 @@ P7 跨平台桌面能力、打包、发布验收
   - 未支持变量无法保存。
 - 退出条件：
   - 用户可以配置模型和模板，并完成连通性测试。
+- 当前进展：
+  - 已新增前端 typed service：`aiConfigList()`、`aiConfigSave()`、`aiConfigTest()`、`aiConfigDelete()` 和 `promptTemplates*()`，均固定调用 Rust 白名单 command。
+  - 已新增 `/ai-settings` 页面，模型配置表单支持一次性 API Key 保存、脱敏字段展示、编辑、删除和连通性测试。
+  - API Key 明文只存在保存表单状态和 `ai_config_save` 一次性 payload 中，保存成功后表单会清空明文输入，列表只展示 `masked_api_key` / `has_api_key`。
+  - 连通性测试失败消息会在页面层二次脱敏，避免 Provider 错误文本把 Key 展示给用户。
+  - Prompt 模板页面只展示首版类型 `system`、`stock_full`、`technical`、`custom` 和变量白名单，未支持变量会在前端拒绝保存。
+  - `apps/frontend/src/services/coreClient.test.ts` 覆盖 AI 配置和 Prompt 模板 command 契约。
+  - `apps/frontend/src/app/App.test.tsx` 覆盖 API Key 保存后不回显明文、测试连接失败脱敏和未支持变量拒绝保存。
+  - 真实外部 Provider 连通性和跨平台桌面凭据验收仍待 T44 发布验收阶段完成。
 
 ### T35 AI 分析页面
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T26、T27、T30、T34
 - 交付物：
   - AI 分析页。
@@ -1169,10 +1215,21 @@ P7 跨平台桌面能力、打包、发布验收
   - 导出默认不包含完整输入快照。
 - 退出条件：
   - 个股 AI 分析闭环可真实使用。
+- 当前进度：
+  - 已新增 `/analysis` 页面，支持选择股票代码、分析类型、已保存 AI 模型和 Prompt 模板创建分析任务。
+  - 页面通过 typed invoke service 调用 `analysis_task_create`，只传 `api_key_ref`，不把运行期 Key 注入字段暴露给前端。
+  - 创建任务后会调用 `analysis_task_subscribe` 触发 Rust SSE 转发，并通过 `task_events` 读取持久化事件展示 `TASK_CHUNK` 和任务状态。
+  - `TASK_SUCCESS` 携带 `report_id` 时会调用 `report_get` 展示最终报告正文和风险摘要。
+  - 已支持停止生成按钮，取消后展示 `CANCELLED` 状态。
+  - 已支持在分析结果区复制 Markdown 和导出 Markdown，默认只使用报告公开字段，不包含完整 `input_snapshot`。
+  - 已支持在 `TASK_FAILED` 事件下直接展示脱敏后的失败原因。
+  - `apps/frontend/src/services/coreClient.test.ts` 覆盖分析任务、任务历史和报告 command 契约。
+  - `apps/frontend/src/app/App.test.tsx` 覆盖创建任务、订阅事件、展示报告、复制 Markdown、导出 Markdown、取消状态和失败原因展示。
+  - 真实 Market/News Provider 填充、外部 Provider 真实连通和跨平台桌面剪贴板/下载验收仍待 T44 阶段收口。
 
 ### T36 报告历史和任务历史页面
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：T28、T29、T30
 - 交付物：
   - 报告历史页。
@@ -1187,10 +1244,16 @@ P7 跨平台桌面能力、打包、发布验收
   - 重启 core 后历史页不会显示永久 RUNNING。
 - 退出条件：
   - 历史数据可追溯、可复查、可清理。
+- 当前进度：
+  - 已新增 `/reports` 页面，通过 typed invoke service 调用 `report_list`、`report_get`、`report_delete` 展示报告列表、报告详情和删除操作。
+  - 已新增 `/tasks` 页面，通过 typed invoke service 调用 `task_list`、`task_get`、`task_events` 展示任务列表、任务详情、失败原因和持久化事件回放。
+  - 任务详情打开时会先通过 `task_events(task_id, 0)` 补拉持久化事件，再以最新事件 ID 调用 `analysis_task_subscribe` 订阅新增事件，并用增量 `task_events` 合并展示新增事件。
+  - 报告详情已支持复制 Markdown 和导出 Markdown，默认只使用报告标题、股票代码、分析类型、生成时间、正文和风险摘要，不包含完整 `input_snapshot`。
+  - `apps/frontend/src/app/App.test.tsx` 覆盖报告列表/详情/复制 Markdown/导出 Markdown/删除、失败任务详情、事件回放和任务详情订阅新增事件。
 
 ### T37 设置中心
 
-- 状态：`[~]`
+- 状态：`[x]`
 - 依赖：T11、T20、T30
 - 交付物：
   - 基础设置、数据源设置、代理设置、通知设置、工作区设置、缓存管理、开机自启、检查更新、关于应用。
@@ -1211,11 +1274,19 @@ P7 跨平台桌面能力、打包、发布验收
   - 已实现关于页 FREE 授权占位模型，不提供激活入口或授权 URL。
   - 单测覆盖代理 URL 凭据拒绝、无凭据代理 URL 通过、缓存清理不包含报告/配置和 FREE 占位不暴露激活入口。
   - Rust settings command 已支持代理密码写入/删除本地 vault，并只把 `proxy_credential_ref` 转发给 Go core。
-  - 受 T11/T20/T30 依赖约束，真实设置页触发、通知、开机自启和跨平台桌面验收完成后再标记为 `[x]`。
+  - 已新增 `/settings` 页面，通过 typed invoke service 读取 settings、workspace、cache、provider status 和 autostart 状态，并支持保存代理设置、保存工作区、关闭到托盘开关、开机自动启动开关、清理允许的缓存目标、检查更新和导出脱敏日志。
+  - 设置页会在提交前拒绝带 username/password 的代理 URL，不把代理密码混进 URL。
+  - 设置页已支持读取和保存检查更新配置 `update.manifest_url` / `update.allowed_hosts`，并通过真实 `settings_set` 写入 settings。
+  - 设置页已支持读取和保存任务成功/失败通知开关 `notifications.task_terminal`，AI 分析终态通知会尊重该设置，缺省保持开启。
+  - 设置页日志导出会在空目标目录时早失败，不触发 `export_logs`；有效目录会 trim 后交给 Rust 白名单 command。
+  - 关于应用只展示 FREE 占位和投研风险提示，不提供激活入口。
+  - `apps/frontend/src/services/coreClient.test.ts` 覆盖 settings、workspace、cache、provider status、update 和 log export command 契约。
+  - `apps/frontend/src/app/App.test.tsx` 覆盖设置页读取真实 command、代理 URL 凭据拒绝、关闭到托盘开关保存、开机自动启动开关保存、任务成功/失败通知开关保存、检查更新配置保存、缓存清理、检查更新和日志导出目录校验。
+  - 开机自启已有设置页入口和 Rust 白名单 command 基线；真实 macOS / Windows 桌面验收继续归 T39/T44，不阻塞 T37 设置中心收口。
 
 ### T38 资讯中心页面
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：T18、T30
 - 交付物：
   - 资讯中心。
@@ -1228,6 +1299,13 @@ P7 跨平台桌面能力、打包、发布验收
   - 外链打开前做 HTTPS scheme 校验。
 - 退出条件：
   - 资讯中心只展示首版真实可用数据。
+- 当前进展：
+  - 已新增 `/news` 资讯中心页面，通过 typed invoke service 调用 `news_market` 读取 CN 市场新闻，并支持输入股票代码后调用 `news_list` 读取个股新闻。
+  - 页面只合并展示后端返回的市场新闻和个股新闻，不提供公告、研报、资金流等首版未闭环入口。
+  - 页面会过滤非 HTTPS URL，并支持按后端返回的 `tags` 做标签筛选；新闻列表、空状态和错误状态已有前端测试覆盖。
+  - `apps/frontend/src/services/coreClient.test.ts` 覆盖 `news_market` 固定 command 契约。
+  - `apps/frontend/src/app/App.test.tsx` 覆盖资讯中心导航、市场/个股新闻读取、非 HTTPS 新闻过滤、标签筛选、空状态和错误状态。
+  - 新闻外链已通过 Rust `open_external_url` 白名单 command 打开系统浏览器；真实 News Provider 授权和跨平台桌面打开验收仍待 T44 阶段收口，因此 T38 暂保持 `[~]`。
 
 ---
 
@@ -1255,9 +1333,14 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增 Rust 桌面运行期模块，接入主窗口关闭事件，并从 Go core settings 读取 `window.close_to_tray` 作为关闭到托盘开关。
   - 已接入主窗口状态恢复：启动时从 Go core settings 读取 `window.main.x`、`window.main.y`、`window.main.width`、`window.main.height`，关闭主窗口时写回当前外层窗口位置和尺寸。
   - 窗口状态恢复只接受完整且尺寸合理的数据，缺字段、非法数字或过小尺寸时保留 Tauri 默认窗口状态，避免启动时恢复到不可用窗口。
-  - 当前未启用 Tauri `tray-icon` feature 时，关闭事件不会隐藏窗口，避免出现没有托盘恢复入口的不可恢复状态。
-  - Rust 单测覆盖 `window.close_to_tray` 只接受明确 `true`、settings 响应读取 dedicated key、隐藏窗口必须同时满足托盘可用和用户设置开启，以及窗口状态 settings 的固定 key 和恢复边界。
-  - 真正托盘菜单、任务通知和开机自启仍需确认 Tauri feature/plugin 与 capability 配置后实现，并做 macOS / Windows 真实验收。
+  - 已启用 Tauri `tray-icon` feature，并在 Rust 桌面运行期安装真实托盘菜单；托盘左键点击或“打开工作台”菜单会恢复并聚焦主窗口，“退出”菜单走 Tauri 退出事件统一停止 sidecar。
+  - Rust 单测覆盖 `window.close_to_tray` 只接受明确 `true`、settings 响应读取 dedicated key、隐藏窗口必须同时满足托盘可用和用户设置开启、真实托盘恢复入口已启用，以及窗口状态 settings 的固定 key 和恢复边界。
+  - 前端设置页已重新暴露关闭到托盘开关，并通过 `settings_set` 保存 `window.close_to_tray`。
+  - `apps/desktop/test/security-config.test.mjs` 覆盖 `tray-icon` feature、`TrayIconBuilder` 和托盘菜单固定入口，避免重新退化为无恢复入口的半成品关闭行为。
+  - 已接入 Tauri notification 插件，main capability 只开放 `notification:allow-is-permission-granted`、`notification:allow-request-permission`、`notification:allow-notify`，不使用 `notification:default`。
+  - 前端 AI 分析页会在 `TASK_SUCCESS` / `TASK_FAILED` 终态事件后触发桌面通知，并受设置项 `notifications.task_terminal` 控制；通知权限拒绝或系统通知失败不会改变分析任务状态。
+  - 已接入官方 `tauri-plugin-autostart`，Rust 只暴露 `autostart_get` / `autostart_set` 两个白名单命令，前端设置页可读取和保存“开机自动启动”开关，默认 capability 不开放 `autostart:*` 直接插件权限。
+  - 托盘、通知和开机自启仍需 macOS / Windows 真实桌面验收。
 
 ### T40 日志导出和二次脱敏
 
@@ -1284,7 +1367,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增日志导出请求校验规则，缺少全局 `request_id` 或 `trace_id` 时返回稳定错误码；缺少 `task_id` 不会阻断启动、Provider、设置等非任务场景的日志导出。
   - 已新增 Go core 内存 `slog` 日志源，生产 `main.go` 会注入 `LogExportSource`，让 `/api/logs/export` 从运行期结构化日志快照生成导出包。
   - 内存日志源会保留原有 slog 输出链路，并在采集结构化敏感字段时先脱敏；导出包仍会再次执行二次脱敏。
-  - 单测覆盖导出前二次脱敏 Authorization、API Key、代理密码和用户一次性持仓输入、排障字段校验、导出包元数据稳定性，以及内存日志源采集结构化 slog 后不泄露敏感字段。
+  - 单测覆盖导出前二次脱敏 Authorization、API Key、代理密码和用户一次性持仓输入、quoted JSON 敏感字段值包含逗号时仍保持完整脱敏且 JSON 有效、排障字段校验、导出包元数据稳定性，以及内存日志源采集结构化 slog 后不泄露敏感字段。
   - 已新增 `apps/sidecar-core/internal/actions/logexport`，接入 `POST /api/logs/export`。
   - 日志导出 API 从注入的日志源生成导出包，Go core 不直接写入用户目录，避免任意路径写入风险。
   - API 返回内容已执行二次脱敏，保留 `request_id`、`trace_id`，并在任务链路日志存在时保留 `task_id` 排障字段。
@@ -1295,11 +1378,13 @@ P7 跨平台桌面能力、打包、发布验收
   - `apps/sidecar-core/internal/actions` 单测覆盖日志导出二次脱敏、排障字段保留和缺少排障字段拒绝。
   - `apps/desktop/src-tauri` 单测覆盖日志导出只写入目标目录、拒绝路径穿越文件名、拒绝覆盖已有同名文件和 Unix/macOS 私有文件权限。
   - `apps/desktop/test/security-config.test.mjs` 覆盖 `export_logs` command 注册和固定 path。
-  - 受 T37 依赖约束，导出目录选择和前端触发接入后再标记为 `[x]`。
+  - 设置中心已接入手动日志导出目录输入和 Tauri dialog 原生目录选择入口，空目录会在前端早失败，不触发 `export_logs`，有效目录会 trim 后传给 Rust 白名单 command 并展示返回文件路径。
+  - Tauri main capability 只开放 `dialog:allow-open`，不开放保存文件或消息弹窗权限。
+  - macOS / Windows 跨平台手工验收仍待完成；完成前 T40 保持 `[~]`。
 
 ### T41 检查更新入口
 
-- 状态：`[~]`
+- 状态：`[x]`
 - 依赖：T37
 - 交付物：
   - `check_update`
@@ -1330,7 +1415,8 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增 Rust 白名单 command `check_update`，固定映射到 `POST /api/update/check`，禁止通用 path 代理。
   - `apps/sidecar-core/internal/actions` 单测覆盖 HTTP manifest 拒绝、settings 配置来源、非 allowlist 链接拒绝、新版本提示结果、manifest 超限拒绝和 manifest 重定向拒绝。
   - `apps/desktop/test/security-config.test.mjs` 覆盖 `check_update` command 注册和固定 path。
-  - 受 T37 依赖约束，设置页入口和真实用户配置保存接入后再标记为 `[x]`。
+  - 设置页已接入检查更新入口，并读取、展示、保存 `update.manifest_url` 和 `update.allowed_hosts`，保存时会 trim 后通过真实 `settings_set` 写入 settings。
+  - 前端自动化覆盖更新配置从 settings 读取、编辑后保存，以及检查更新结果展示。
 
 ### T42 sidecar 二进制命名和打包
 
@@ -1356,18 +1442,24 @@ P7 跨平台桌面能力、打包、发布验收
   - 已覆盖 `aarch64-apple-darwin`、`x86_64-apple-darwin`、`x86_64-pc-windows-msvc` 的文件名。
   - 当前平台默认 core 二进制路径复用同一命名规则。
   - 单测覆盖三类首版目标平台文件名。
-  - 已在 `tauri.conf.json` 配置 `bundle.externalBin = ["binaries/invest-compass-core"]`，按 Tauri sidecar 基名声明随包二进制。
+  - 已在 `tauri.conf.json` 配置 `bundle.externalBin = ["binaries/invest-compas-core"]`，按 Tauri sidecar 基名声明随包二进制。
   - 已新增 `scripts/build-sidecar.mjs`，`pnpm --dir apps sidecar:build` 会按当前平台生成 target triple 文件名的 Go sidecar，并保留本地兼容副本。
   - `scripts/build-sidecar.mjs` 已支持 `--target=<triple>` 和 `--all-targets` 目标选择，覆盖 `aarch64-apple-darwin`、`x86_64-apple-darwin`、`x86_64-pc-windows-msvc` 三类首版 sidecar 命名。
   - 已实际生成三类首版 sidecar 产物：Apple Silicon 为 Mach-O arm64、macOS Intel 为 Mach-O x86_64、Windows x64 为 PE32+ x86-64。
   - Windows x64 sidecar 构建已使用 `-ldflags "-H windowsgui"`，产物为 GUI subsystem，降低桌面应用启动 sidecar 时弹出控制台窗口的风险。
+  - 已新增 `scripts/verify-sidecar-targets.mjs`、`pnpm --dir apps sidecar:verify-targets` 和 `pnpm --dir apps sidecar:check-targets`，可重复构建并复核三类首版 sidecar target 产物的存在性、非 symlink、非空、macOS 执行位、Mach-O / PE 架构和 Windows GUI subsystem。
   - 本机已通过 `pnpm --dir apps build` 生成 macOS Apple Silicon release 可执行文件，并通过 `tauri build --bundles app` 生成 `投研罗盘.app`。
-  - 已确认 `投研罗盘.app/Contents/MacOS/` 内同时包含 `invest-compass-desktop` 和 `invest-compass-core`，包内 sidecar 为 Mach-O arm64。
-  - 已用包内 `invest-compass-core` 执行 stdin 握手、ready JSON `protocolVersion=1` 和 `/internal/shutdown` 回环关闭验证；首次沙箱运行因本地监听权限失败，提权后验证通过。
-  - Rust 运行期已优先解析发布包内 `Contents/MacOS/invest-compass-core`，环境变量覆盖仅用于本地调试，源码目录 `src-tauri/binaries` 只作为开发 fallback。
-  - 本机 Apple Silicon 已真实启动 `投研罗盘.app`，进程参数确认 Go core 来自 `.app/Contents/MacOS/invest-compass-core`，退出应用后 `invest-compass-desktop` 和 `invest-compass-core` 均无残留进程。
+  - 已确认 `投研罗盘.app/Contents/MacOS/` 内同时包含 `invest-compass-desktop` 和 `invest-compas-core`，包内 sidecar 为 Mach-O arm64。
+  - 已用包内 `invest-compas-core` 执行 stdin 握手、ready JSON `protocolVersion=1` 和 `/internal/shutdown` 回环关闭验证；首次沙箱运行因本地监听权限失败，提权后验证通过。
+  - 已新增 `scripts/verify-sidecar-runtime.mjs` 和 `pnpm --dir apps sidecar:smoke`，可重复验证 Apple Silicon `.app` 包内 Go core 完成 stdin token 握手、`/internal/health` 和 `/internal/shutdown`，并已接入 `release:check:local`。
+  - Rust 运行期已优先解析发布包内 `Contents/MacOS/invest-compas-core`，环境变量覆盖仅用于本地调试，源码目录 `src-tauri/binaries` 只作为开发 fallback。
+  - 本机 Apple Silicon 已真实启动 `投研罗盘.app`，进程参数确认 Go core 来自 `.app/Contents/MacOS/invest-compas-core`，退出应用后 `invest-compass-desktop` 和 `invest-compas-core` 均无残留进程。
   - Go core ready JSON 已携带 `protocolVersion`，Rust sidecar ready 解析会拒绝不匹配版本，避免 desktop/core 二进制版本不兼容时继续启动。
-  - `pnpm --dir apps test` 已纳入 `scripts/build-sidecar.test.mjs`，覆盖默认当前平台、显式 target、all-targets 目标选择和 Windows GUI subsystem 构建参数，且测试 import 脚本不会触发真实构建。
+  - `pnpm --dir apps test` 已纳入 `scripts/build-sidecar.test.mjs`，覆盖默认当前平台、显式 target、all-targets 目标选择、Windows GUI subsystem 构建参数，以及三类首版 target sidecar 文件名必须匹配 Tauri `externalBin` 基名，且测试 import 脚本不会触发真实构建。
+  - 已新增 `scripts/verify-desktop-package.mjs`，用于在生成桌面包后检查 macOS `.app` 或 Windows 解包目录中主程序和 Go sidecar 是否同时存在且非空；该脚本只验证包结构和基础文件有效性，不替代真实目标平台启动验收。
+  - `scripts/verify-desktop-package.mjs` 已补充 macOS `.app` 包路径、包名与 Tauri `productName` 一致性、`Info.plist` 的 `CFBundleExecutable`、`CFBundlePackageType=APPL`、`CFBundleDisplayName` / `CFBundleName` 与 Tauri `productName` 一致性、`CFBundleIdentifier` / `CFBundleShortVersionString` / `CFBundleVersion` 与 Tauri 配置一致性、`CFBundleIconFile` 对应 `Contents/Resources` 直接子文件、`Contents/Resources` 非 symlink 和包内二进制执行位校验，避免把普通目录、错误应用名称、缺少可启动元数据、错误 bundle 类型、错误展示名、错误应用身份或版本、缺失声明资源、图标路径逃逸、依赖包外资源目录或不可执行二进制误判为可启动 app bundle；Windows 仍按解包目录验证。
+  - `scripts/verify-desktop-package.mjs` 已支持可选 `--target` 参数，可复核 `aarch64-apple-darwin`、`x86_64-apple-darwin` 和 `x86_64-pc-windows-msvc` 包内主程序与 sidecar 的二进制架构；Windows target 还会校验 PE subsystem 为 GUI，避免目标平台包混入错误架构或 console subsystem 产物。
+  - `scripts/verify-desktop-package.mjs` 会要求包根路径是目录，并拒绝包根路径、macOS `Contents` / `Contents/MacOS` 关键目录、声明图标时的 `Contents/Resources` 目录、`Info.plist`、包内主程序或 sidecar 使用 symlink 指向包外文件，避免把依赖外部文件的包误判为已随包。
   - `apps/desktop/test/security-config.test.mjs` 已覆盖 `externalBin` 配置和 `sidecar:build` 专用脚本。
   - macOS Intel 包和 Windows 包随包启动验收仍未完成。
 
@@ -1394,6 +1486,8 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增 `docs/2026-06-18-invest-compass-release-user-guide.md`，覆盖首版产品边界、安装启动、模型凭据、数据时效、基本使用流程、发布检查、已知未闭环项和反馈材料。
   - README 已新增首版发布与使用指南入口，并避免继续使用过期的早期仓库状态描述。
   - 文档明确“仅作研究辅助，不构成投资建议”，并说明数据来源、时效、AI 输出限制和敏感凭据存储边界。
+  - 用户手册已补充设置中心真实能力、检查更新 manifest / allowlist 配置边界，以及日志导出的前端校验和 Rust 写入边界。
+  - 已同步用户手册和验收报告中的调度/设置边界：任务成功/失败通知和开机自启已写入设置中心能力，但开机自启的真实 macOS / Windows 平台验收仍待 T39/T44 收口；不再把股票详情页单股刷新入口列为未闭环项。
   - 文档明确不写授权激活、真实自动更新下载、交易、云同步、移动端等未实现能力。
   - 后续仍需随 T13/T18/T39/T42/T44 等真实 Provider、桌面能力和跨平台验收结果继续更新。
 
@@ -1419,7 +1513,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 分析过程支持流式输出或进度展示。
   - 报告可以保存、查看、复制。
   - 任务失败后可以看到错误原因。
-  - 设置中心支持工作区、代理、通知、缓存。
+  - 设置中心支持工作区、代理、缓存、数据源状态、任务通知、检查更新和日志导出；托盘、开机自启和跨平台桌面行为不写成已完成入口。
   - 应用有明确风险提示。
   - 数据库升级不会丢失用户已有数据。
   - API Key 存入 Rust 本地文件 vault，配置查询不回显真实 Key。
@@ -1437,9 +1531,16 @@ P7 跨平台桌面能力、打包、发布验收
   - 验收报告已按技术方案第 19 章逐项映射当前状态，明确区分“部分通过”“未通过”和“未执行”。
   - 验收报告已记录 macOS / Windows 真实验收待办、已知风险、遗留项和复测入口。
   - 已新增前端生产源码 mock 数据扫描，作为“界面绝对不能 mock 数据”的自动化防线；完整 UI 验收仍需页面完成后逐屏执行。
+  - 已新增前端生产源码首版未闭环入口扫描，禁止策略观察、授权激活、公告、研报、资金流、券商账户、自动下单、云同步和移动端等入口文案进入 renderer 源码；真实桌面逐屏验收仍需 T44 收口。
+  - 已新增前端 `APP_NAV_ITEMS` / `APP_ROUTE_PATHS` 首版导航和路由白名单测试，避免未来把非 MVP 页面入口静默加入主导航或路由集合。
+  - 已新增 `pnpm --dir apps acceptance:check` 作为本地发布候选自动化基线入口，聚合 `test`、`check`、`desktop:test` 和 `format:check`；真实 Provider smoke、包结构复核和跨平台人工验收仍需单独执行。
+  - 已新增 `pnpm --dir apps release:check:local` 作为本机 Apple Silicon 发布候选聚合入口，串起 `acceptance:check`、SQLite 升级演练、三类 sidecar target 校验、构建、Tauri `.app` 打包、`package:verify`、`sidecar:smoke` 和 `git diff --check`；该命令不触发联网 Provider smoke，也不替代 macOS Intel / Windows 或桌面能力人工验收。
+  - Go 测试和 sidecar 构建命令已使用 `-mod=readonly`，避免发布候选检查期间静默改写 `go.mod` / `go.sum`。
+  - 已新增 `pnpm --dir apps sqlite:upgrade-rehearsal`，用于发布前重复演练 SQLite 迁移前备份、备份恢复、恢复库再次迁移和用户 settings 数据保留。
+  - 已新增 `pnpm --dir apps sidecar:check-targets`，可在进入跨平台打包前先重复生成并校验 Apple Silicon、macOS Intel 和 Windows x64 三类 sidecar target 产物。
 - 待完成：
   - 完成真实 macOS / Windows 桌面启动、sidecar、凭据、通知、托盘、打包验收。
-  - 完成 T13/T18/T21/T26/T27/T39-T42 等剩余依赖项后，重新执行完整验收。
+  - 完成 T13/T18/T21/T26/T27/T39-T42 等剩余依赖项后，重新执行 `acceptance:check`、发布候选打包验证和真实桌面验收。
   - 前端主链路完成后逐屏验证无 mock 数据、无首版未闭环入口。
 
 ---
@@ -1595,10 +1696,10 @@ Windows：启动、本地凭据 vault、通知、托盘、sidecar、NSIS/MSI、�
   后才能进入首版用户可见能力。
 - T31-T38：均为页面闭环任务；后端和 Rust command 已提供基础能力的任务，
   不能因为页面未完成而标记为整体完成。
-- T39：真正托盘菜单、系统通知和开机自启需要确认 Tauri feature、plugin
-  和 capability 配置。未确认前只能保留关闭到托盘防误隐藏和窗口状态恢复基线。
-- T40 / T41：后端和 Rust command 基线已接入；完整验收依赖设置页目录选择、
-  检查更新入口和用户触发链路。
+- T39：托盘菜单、关闭到托盘设置、窗口状态恢复、任务成功/失败通知和开机自启
+  已形成自动化基线；托盘、通知和开机自启仍需 macOS / Windows 真实桌面验收。
+- T40 / T41：后端、Rust command 和用户触发链路基线已接入；完整验收仍依赖
+  macOS / Windows 真实桌面手工验证。
 - T42 / T44：macOS Intel 和 Windows 随包启动、sidecar、本地 vault、托盘、
   通知和安装包验收需要目标平台真实环境。
 
@@ -1628,7 +1729,7 @@ Windows：启动、本地凭据 vault、通知、托盘、sidecar、NSIS/MSI、�
 - 自动化基线已通过：T20、T22、T23、T24 已完成，T21 后端/Rust 基线已完成。
 - API Key 和代理密码只在 Rust 本地文件 vault 和运行期内存中出现。
 - 配置查询、日志、错误、任务事件、报告快照不泄露真实 Key。
-- 未完全通过：模型配置页面真实保存、测试和删除交互仍归 T34。
+- 未完全通过：真实外部模型连通性和跨平台桌面凭据验收仍归 T34/T44。
 
 ### RG4：分析任务门禁
 
@@ -1636,11 +1737,11 @@ Windows：启动、本地凭据 vault、通知、托盘、sidecar、NSIS/MSI、�
 - 任务事件可回放，SSE 只由 Rust 转发。
 - sidecar 重启后 RUNNING 任务不会永久悬挂。
 - 报告按 task_id 幂等保存。
-- 未完全通过：分析页真实进度、流式输出和取消按钮交互仍归 T35，真实 Market/News Provider 数据填充仍受 T13/T18 约束。
+- 未完全通过：真实 Market/News Provider 数据填充、外部模型连通和跨平台桌面剪贴板/下载验收仍归 T13/T18/T35/T44。
 
 ### RG5：首版页面门禁
 
-- T30-T38 全部完成。
+- 自动化基线已覆盖 T30-T38 的主要页面主链路；T33/T34/T35/T38 仍受真实 Provider、外部模型连通和跨平台桌面行为验收约束。
 - 页面只展示首版真实可执行功能。
 - 不出现策略观察、授权激活、公告/研报/资金流等未闭环入口。
 

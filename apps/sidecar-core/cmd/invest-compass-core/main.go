@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions"
@@ -23,6 +24,7 @@ import (
 	logexportservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/logexport"
 	marketservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
+	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/sidecar"
 	taskservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/task"
 )
@@ -103,6 +105,18 @@ func main() {
 	logSource := logexportservice.NewMemorySource(slog.Default().Handler(), 500)
 	slog.SetDefault(slog.New(logSource))
 
+	schedulerQueue, schedulerService, err := newProductionScheduler(store, time.Now)
+	if err != nil {
+		slog.Error("初始化调度服务失败", "error", err)
+		os.Exit(1)
+	}
+	schedulerCtx, schedulerCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := schedulerService.Start(schedulerCtx); err != nil {
+		schedulerCancel()
+		slog.Error("启动调度服务失败", "error", err)
+		os.Exit(1)
+	}
+	schedulerCancel()
 	if err := json.NewEncoder(os.Stdout).Encode(sidecar.ReadyMessage{
 		Status:          "ready",
 		Port:            readyPort,
@@ -114,12 +128,14 @@ func main() {
 	}
 
 	shutdownRequested := make(chan struct{}, 1)
-	handler := actions.NewHandler(buildActionsConfig(handshake.Token, store, logSource, func() {
+	lifecycle := newShutdownLifecycle(schedulerService.Shutdown, func() {
 		select {
 		case shutdownRequested <- struct{}{}:
 		default:
 		}
-	}))
+	})
+	defer lifecycle.stopScheduler()
+	handler := actions.NewHandler(buildActionsConfig(handshake.Token, store, schedulerQueue, schedulerService, logSource, lifecycle.requestShutdown))
 
 	if err := server.Serve(listener, handler, shutdownRequested); err != nil {
 		slog.Error("本地 HTTP server 异常退出", "error", err)
@@ -127,8 +143,76 @@ func main() {
 	}
 }
 
+// newProductionScheduler 组装生产调度队列和 SchedulerService，确保启动恢复、手动触发和桌面管理使用同一执行队列。
+func newProductionScheduler(store *dao.Store, now func() time.Time) (*schedulerservice.ExecutionQueue, *schedulerservice.Service, error) {
+	schedulerQueue := schedulerservice.NewExecutionQueue()
+	schedulerService, err := schedulerservice.NewService(schedulerservice.Config{
+		Store: store,
+		Queue: schedulerQueue,
+		Now:   now,
+		Runners: map[string]schedulerservice.Runner{
+			schedulerservice.CronTypeCNAShareQuoteRefresh: schedulerservice.QuoteRefreshRunner{
+				Provider: marketservice.UnconfiguredProvider{},
+				Store:    store,
+			},
+			schedulerservice.CronTypeCNAShareKlineRefresh: schedulerservice.KlineRefreshRunner{
+				Provider: marketservice.UnconfiguredProvider{},
+				Store:    store,
+			},
+			schedulerservice.CronTypeMarketNewsRefresh: schedulerservice.NewsRefreshRunner{
+				Provider: newsservice.UnconfiguredProvider{},
+				Store:    store,
+			},
+			schedulerservice.CronTypeSymbolNewsRefresh: schedulerservice.NewsRefreshRunner{
+				Provider: newsservice.UnconfiguredProvider{},
+				Store:    store,
+			},
+		},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return schedulerQueue, schedulerService, nil
+}
+
+type shutdownLifecycle struct {
+	once                  sync.Once
+	shutdownScheduler     func(context.Context) error
+	requestServerShutdown func()
+}
+
+// newShutdownLifecycle 创建 sidecar 关闭协调器，保证 scheduler 在 HTTP server 退出前先停止。
+func newShutdownLifecycle(shutdownScheduler func(context.Context) error, requestServerShutdown func()) *shutdownLifecycle {
+	return &shutdownLifecycle{
+		shutdownScheduler:     shutdownScheduler,
+		requestServerShutdown: requestServerShutdown,
+	}
+}
+
+// requestShutdown 处理 Rust 发起的关闭请求：先停后台调度，再让 HTTP server 退出。
+func (lifecycle *shutdownLifecycle) requestShutdown() {
+	lifecycle.stopScheduler()
+	if lifecycle.requestServerShutdown != nil {
+		lifecycle.requestServerShutdown()
+	}
+}
+
+// stopScheduler 停止调度器并等待 worker 收尾；多次调用只执行一次。
+func (lifecycle *shutdownLifecycle) stopScheduler() {
+	lifecycle.once.Do(func() {
+		if lifecycle.shutdownScheduler == nil {
+			return
+		}
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := lifecycle.shutdownScheduler(shutdownCtx); err != nil {
+			slog.Error("关闭调度服务失败", "error", err)
+		}
+	})
+}
+
 // buildActionsConfig 组装生产 actions 依赖，避免 main 漏注入后端能力。
-func buildActionsConfig(token string, store *dao.Store, logSource *logexportservice.MemorySource, onShutdown func()) actions.Config {
+func buildActionsConfig(token string, store *dao.Store, schedulerQueue *schedulerservice.ExecutionQueue, schedulerService *schedulerservice.Service, logSource *logexportservice.MemorySource, onShutdown func()) actions.Config {
 	return actions.Config{
 		Version:             version,
 		Token:               token,
@@ -156,6 +240,9 @@ func buildActionsConfig(token string, store *dao.Store, logSource *logexportserv
 		ReportStore:           store,
 		DashboardStore:        store,
 		SettingsStore:         store,
+		SchedulerStore:        store,
+		SchedulerQueue:        schedulerQueue,
+		SchedulerService:      schedulerService,
 		LogExportSource:       logSource,
 		UpdateManifestFetcher: updatecheckaction.HTTPFetcher{},
 		OnShutdown: func() {

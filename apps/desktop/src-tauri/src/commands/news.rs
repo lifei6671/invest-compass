@@ -18,7 +18,7 @@ struct NewsMarketRequest {
 
 /// 获取个股新闻，固定转发到 Go core `/api/news/list`。
 #[tauri::command]
-pub async fn news_list(
+pub fn news_list(
     state: State<'_, CoreState>,
     symbol: String,
     limit: i32,
@@ -32,7 +32,7 @@ pub async fn news_list(
 
 /// 获取市场新闻，固定转发到 Go core `/api/news/market`。
 #[tauri::command]
-pub async fn news_market(
+pub fn news_market(
     state: State<'_, CoreState>,
     market: String,
     limit: i32,

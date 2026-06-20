@@ -173,3 +173,66 @@ type Setting struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+
+// SchedulerJob 是桌面可管理的调度任务配置，cron_type 对应调度注册表中的业务任务类型。
+type SchedulerJob struct {
+	ID             int64  `gorm:"primaryKey;autoIncrement"`
+	Name           string `gorm:"not null"`
+	CronType       string `gorm:"column:cron_type;not null;index"`
+	CronExpr       string `gorm:"not null"`
+	Enabled        bool   `gorm:"not null;default:false;index"`
+	Market         string `gorm:"not null;default:CN"`
+	Timezone       string `gorm:"not null;default:Asia/Shanghai"`
+	TradeWindow    string `gorm:"not null"`
+	ScopeJSON      string
+	ParamsJSON     string
+	CatchupEnabled bool `gorm:"not null;default:false"`
+	CatchupMaxDays int  `gorm:"not null;default:5"`
+	TimeoutSeconds int  `gorm:"not null;default:120"`
+	LastRunAt      *time.Time
+	NextRunAt      *time.Time
+	LastStatus     string
+	LastError      string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      gorm.DeletedAt
+}
+
+// SchedulerRun 是调度任务的一次执行记录，run_key 用于避免启动补偿和手动触发重复入队。
+type SchedulerRun struct {
+	ID            int64  `gorm:"primaryKey;autoIncrement"`
+	JobID         int64  `gorm:"not null;index"`
+	CronType      string `gorm:"column:cron_type;not null;default:'';index"`
+	DataType      string `gorm:"not null;default:'';index"`
+	Period        string `gorm:"not null;default:'';index"`
+	ParamsJSON    string
+	RunKey        string `gorm:"not null;uniqueIndex"`
+	TriggerType   string `gorm:"not null;index"`
+	Status        string `gorm:"not null;index"`
+	Priority      int    `gorm:"not null;default:0"`
+	Source        string
+	TargetDate    string
+	ScopeKey      string `gorm:"index"`
+	StartedAt     *time.Time
+	FinishedAt    *time.Time
+	FetchedCount  int
+	WrittenCount  int
+	SkippedReason string
+	ErrorMessage  string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// IngestionWatermark 记录每个数据范围的最后成功抓取位置，供补偿任务判定缺口。
+type IngestionWatermark struct {
+	ID            int64  `gorm:"primaryKey;autoIncrement"`
+	DataType      string `gorm:"not null;uniqueIndex:idx_ingestion_watermarks_scope,priority:1"`
+	ScopeKey      string `gorm:"not null;uniqueIndex:idx_ingestion_watermarks_scope,priority:2"`
+	Provider      string `gorm:"not null;uniqueIndex:idx_ingestion_watermarks_scope,priority:3"`
+	Period        string `gorm:"not null;default:'';uniqueIndex:idx_ingestion_watermarks_scope,priority:4"`
+	LastSuccessAt *time.Time
+	LastTradeDate string
+	CursorJSON    string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
