@@ -13,6 +13,7 @@ import (
 	aiservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/ai"
 	promptservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/prompt"
 	taskservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/task"
+	tasklogservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/tasklog"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/xerr"
 )
@@ -48,6 +49,7 @@ type Executor struct {
 	Store         ExecutionStore
 	NewChatClient ChatClientFactory
 	Now           func() time.Time
+	TaskLogWriter tasklogservice.StageWriter
 }
 
 // Execute 拉取已缓存上下文、调用 AI、保存报告并推进任务事件。
@@ -142,22 +144,51 @@ func (executor Executor) executeBody(ctx context.Context, taskID string, request
 		return model.AnalysisReport{}, "", err
 	}
 
-	quote, ok, err := executor.Store.LatestQuote(ctx, request.Symbol.String(), 0)
-	if err != nil {
+	aiConfig := aiConfigFromModel(aiConfigModel)
+	stageMeta := executor.stageMeta(taskID, request, aiConfig)
+
+	var quote model.Quote
+	var ok bool
+	if err := executor.runStage(ctx, stageMeta, tasklogservice.StageQuoteFetch, func(ctx context.Context) error {
+		var err error
+		quote, ok, err = executor.Store.LatestQuote(ctx, request.Symbol.String(), 0)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return &xerr.Error{Code: xerr.PromptMissingData, Message: "missing quote"}
+		}
+		return nil
+	}); err != nil {
 		return model.AnalysisReport{}, "", err
 	}
-	if !ok {
-		return model.AnalysisReport{}, "", &xerr.Error{Code: xerr.PromptMissingData, Message: "missing quote"}
-	}
-	klines, err := executor.Store.ListKlines(ctx, request.Symbol.String(), defaultKlinePeriod, defaultKlineAdjust, defaultKlineLimit)
-	if err != nil {
+
+	var klines []model.Kline
+	if err := executor.runStage(ctx, stageMeta, tasklogservice.StageKlineFetch, func(ctx context.Context) error {
+		var err error
+		klines, err = executor.Store.ListKlines(ctx, request.Symbol.String(), defaultKlinePeriod, defaultKlineAdjust, defaultKlineLimit)
+		if err != nil {
+			return err
+		}
+		if len(klines) == 0 {
+			return &xerr.Error{Code: xerr.PromptMissingData, Message: "missing klines"}
+		}
+		return nil
+	}); err != nil {
 		return model.AnalysisReport{}, "", err
-	}
-	if len(klines) == 0 {
-		return model.AnalysisReport{}, "", &xerr.Error{Code: xerr.PromptMissingData, Message: "missing klines"}
 	}
 	newsItems, err := executor.Store.ListNewsBySymbol(ctx, request.Symbol.String(), defaultNewsLimit, 0)
 	if err != nil {
+		return model.AnalysisReport{}, "", err
+	}
+	var indicators string
+	if err := executor.runStage(ctx, stageMeta, tasklogservice.StageCalcMACD, func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		indicators = indicatorSummary(klines)
+		return nil
+	}); err != nil {
 		return model.AnalysisReport{}, "", err
 	}
 
@@ -167,33 +198,52 @@ func (executor Executor) executeBody(ctx context.Context, taskID string, request
 		Market:           request.Symbol.Market,
 		Quote:            quoteSummary(quote),
 		KlineSummary:     klineSummary(klines),
-		Indicators:       indicatorSummary(klines),
+		Indicators:       indicators,
 		News:             newsSummary(newsItems),
 		AnalysisLanguage: "简体中文",
 		UserQuestion:     "请生成符合投研罗盘首版合规要求的个股分析报告。",
 		UserPosition:     userPositionSummary(request.UserPosition),
 	}
-	builtPrompt, err := buildPromptForAnalysis(request.AnalysisType, promptTemplate, promptInput)
-	if err != nil {
+	var builtPrompt promptservice.BuiltPrompt
+	if err := executor.runStage(ctx, stageMeta, tasklogservice.StagePromptBuild, func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var err error
+		builtPrompt, err = buildPromptForAnalysis(request.AnalysisType, promptTemplate, promptInput)
+		return err
+	}); err != nil {
 		return model.AnalysisReport{}, "", err
 	}
 
-	aiConfig := aiConfigFromModel(aiConfigModel)
 	client := executor.chatClient(aiConfig, resolvedAPIKey)
-	chatResponse, err := client.Chat(ctx, aiservice.ChatRequest{
-		Model:       aiConfig.ModelName,
-		Temperature: aiConfig.Temperature,
-		MaxTokens:   aiConfig.MaxTokens,
-		Messages: []aiservice.Message{
-			{Role: aiservice.RoleSystem, Content: builtPrompt.System},
-			{Role: aiservice.RoleUser, Content: builtPrompt.Context + "\n\n" + builtPrompt.User},
-		},
-	})
-	if err != nil {
+	var chatResponse aiservice.ChatResponse
+	if err := executor.runStage(ctx, stageMeta, tasklogservice.StageStreamStart, func(ctx context.Context) error {
+		var err error
+		chatResponse, err = client.Chat(ctx, aiservice.ChatRequest{
+			Model:       aiConfig.ModelName,
+			Temperature: aiConfig.Temperature,
+			MaxTokens:   aiConfig.MaxTokens,
+			Messages: []aiservice.Message{
+				{Role: aiservice.RoleSystem, Content: builtPrompt.System},
+				{Role: aiservice.RoleUser, Content: builtPrompt.Context + "\n\n" + builtPrompt.User},
+			},
+		})
+		return err
+	}); err != nil {
+		_ = executor.writeFailedStreamStage(ctx, stageMeta, err)
 		return model.AnalysisReport{}, "", err
 	}
 
 	content := strings.TrimSpace(chatResponse.Content)
+	if err := executor.runStage(ctx, stageMeta, tasklogservice.StageStreamChunk, func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return model.AnalysisReport{}, "", err
+	}
 	now := executor.now()
 	return model.AnalysisReport{
 		TaskID:           taskID,
@@ -208,6 +258,51 @@ func (executor Executor) executeBody(ctx context.Context, taskID string, request
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}, content, nil
+}
+
+// stageMeta 生成分析任务阶段日志的公共上下文，避免真实密钥和完整 Prompt 进入日志。
+func (executor Executor) stageMeta(taskID string, request ValidatedCreateRequest, aiConfig aiservice.Config) tasklogservice.StageMeta {
+	return tasklogservice.StageMeta{
+		TaskID:    taskID,
+		Module:    "analysis",
+		Provider:  aiConfig.Provider,
+		Model:     aiConfig.ModelName,
+		Symbol:    request.Symbol.String(),
+		Retryable: true,
+		Now:       executor.now,
+	}
+}
+
+// runStage 在生产环境写入阶段日志；未注入 writer 的单测路径保持原始执行语义。
+func (executor Executor) runStage(ctx context.Context, meta tasklogservice.StageMeta, stage string, fn func(context.Context) error) error {
+	if executor.TaskLogWriter == nil {
+		return fn(ctx)
+	}
+	return tasklogservice.RunStage(ctx, executor.TaskLogWriter, meta, stage, fn)
+}
+
+// writeFailedStreamStage 将 AI 调用失败进一步落到超时或失败阶段，方便日志抽屉按阶段排障。
+func (executor Executor) writeFailedStreamStage(ctx context.Context, meta tasklogservice.StageMeta, cause error) error {
+	if executor.TaskLogWriter == nil || cause == nil {
+		return nil
+	}
+	stage := tasklogservice.StageStreamFailed
+	if isTimeoutError(cause) {
+		stage = tasklogservice.StageStreamTimeout
+	}
+	writeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return tasklogservice.RunStage(writeCtx, executor.TaskLogWriter, meta, stage, func(context.Context) error {
+		return cause
+	})
+}
+
+func isTimeoutError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "timeout") || strings.Contains(lower, "timed out") || strings.Contains(lower, "超时")
 }
 
 // markFailed 将任务切换为 FAILED，并写入脱敏失败事件。

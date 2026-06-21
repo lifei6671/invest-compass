@@ -46,6 +46,7 @@ func TestExecutorCompletesTaskAndSavesReport(t *testing.T) {
 		{Title: "新品发布", Summary: "公司发布新产品", PublishedAt: time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)},
 	}
 	chat := &recordingChatClient{response: aiservice.ChatResponse{Content: "报告正文\n风险提示：市场波动。"}}
+	taskLogWriter := &recordingTaskLogWriter{}
 	executor := Executor{
 		Store: store,
 		NewChatClient: func(config aiservice.Config, resolvedAPIKey string) ChatClient {
@@ -60,6 +61,7 @@ func TestExecutorCompletesTaskAndSavesReport(t *testing.T) {
 		Now: func() time.Time {
 			return time.Date(2026, 6, 18, 11, 0, 0, 0, time.UTC)
 		},
+		TaskLogWriter: taskLogWriter,
 	}
 	validated := mustValidateCreateRequest(t, CreateRequest{
 		Symbol:           "US:AAPL",
@@ -100,6 +102,14 @@ func TestExecutorCompletesTaskAndSavesReport(t *testing.T) {
 		strings.Contains(store.report.InputSnapshot, "sk-runtime-secret") {
 		t.Fatalf("unexpected saved report: %+v", store.report)
 	}
+	assertTaskLogStages(t, taskLogWriter.entries, []string{
+		"quote_fetch",
+		"kline_fetch",
+		"calc_macd",
+		"prompt_build",
+		"stream_start",
+		"stream_chunk",
+	})
 }
 
 // TestExecutorMarksTaskFailedWhenRequiredDataMissing 验证缺少真实行情上下文时任务失败而不是伪造数据。
@@ -415,6 +425,44 @@ type recordingChatClient struct {
 func (client *recordingChatClient) Chat(_ context.Context, request aiservice.ChatRequest) (aiservice.ChatResponse, error) {
 	client.requests = append(client.requests, request)
 	return client.response, client.err
+}
+
+type recordingTaskLogWriter struct {
+	entries []model.TaskLogEntry
+}
+
+// WriteTaskLog 记录分析执行器产生的阶段日志，验证任务日志链路不会丢阶段上下文。
+func (writer *recordingTaskLogWriter) WriteTaskLog(_ context.Context, entry model.TaskLogEntry) error {
+	writer.entries = append(writer.entries, entry)
+	return nil
+}
+
+// assertTaskLogStages 验证分析执行器为关键阶段写入可检索、可关联的结构化日志。
+func assertTaskLogStages(t *testing.T, entries []model.TaskLogEntry, expectedStages []string) {
+	t.Helper()
+	if len(entries) < len(expectedStages) {
+		t.Fatalf("expected at least %d task log entries, got %+v", len(expectedStages), entries)
+	}
+	seen := make(map[string]model.TaskLogEntry, len(entries))
+	for _, entry := range entries {
+		seen[entry.Stage] = entry
+	}
+	for _, stage := range expectedStages {
+		entry, ok := seen[stage]
+		if !ok {
+			t.Fatalf("missing task log stage %q in %+v", stage, entries)
+		}
+		if entry.TaskID != "task-1" ||
+			entry.Module != "analysis" ||
+			entry.Provider != aiservice.ProviderOpenAICompatible ||
+			entry.Model != "gpt-analysis" ||
+			entry.Symbol != "US:AAPL" {
+			t.Fatalf("unexpected task log entry for stage %q: %+v", stage, entry)
+		}
+		if entry.Level != "INFO" {
+			t.Fatalf("expected INFO level for stage %q, got %+v", stage, entry)
+		}
+	}
 }
 
 // mustValidateCreateRequest 校验测试请求并在失败时终止测试。

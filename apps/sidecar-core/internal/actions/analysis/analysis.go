@@ -217,6 +217,8 @@ func startExecutor(config Config, taskID string, request analysisservice.Validat
 				logger.FieldRequestID, requestContext.RequestID,
 				logger.FieldTraceID, requestContext.TraceID,
 				"task_id", taskID,
+				logger.FieldModule, "analysis",
+				logger.FieldStage, "execute_failed",
 				"error", logger.RedactError(err),
 			)
 		}

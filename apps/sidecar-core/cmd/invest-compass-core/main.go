@@ -28,6 +28,7 @@ import (
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/sidecar"
 	taskservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/task"
 	tasklogservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/tasklog"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
 )
 
 const version = "0.1.0"
@@ -103,8 +104,26 @@ func main() {
 		slog.Error("恢复 RUNNING 任务失败", "error", err)
 		os.Exit(1)
 	}
+	taskLogService := tasklogservice.Service{Store: store}
+	ndjsonWriter, err := tasklogservice.NewNDJSONWriter(tasklogservice.NDJSONWriterConfig{WorkspaceDir: *workspace})
+	if err != nil {
+		slog.Error("初始化本地任务日志文件写入器失败", "error", err)
+		os.Exit(1)
+	}
+	taskLogAppender := tasklogservice.NewMultiAppender(
+		taskLogService,
+		tasklogservice.WriterAppender{Writer: ndjsonWriter},
+	)
+	taskLogWriter, err := tasklogservice.NewAsyncWriter(tasklogservice.AsyncWriterConfig{Appender: taskLogAppender})
+	if err != nil {
+		slog.Error("初始化任务日志异步写入器失败", "error", err)
+		os.Exit(1)
+	}
+	defer shutdownTaskLogWriter(taskLogWriter)
+	applyTaskLogRetention(dbCtx, store, ndjsonWriter)
+
 	logSource := logexportservice.NewMemorySource(slog.Default().Handler(), 500)
-	slog.SetDefault(slog.New(logSource))
+	slog.SetDefault(slog.New(logger.NewTaskLogHandler(logSource, taskLogWriter)))
 
 	schedulerQueue, schedulerService, err := newProductionScheduler(store, time.Now)
 	if err != nil {
@@ -136,7 +155,7 @@ func main() {
 		}
 	})
 	defer lifecycle.stopScheduler()
-	handler := actions.NewHandler(buildActionsConfig(handshake.Token, store, schedulerQueue, schedulerService, logSource, lifecycle.requestShutdown))
+	handler := actions.NewHandler(buildActionsConfig(handshake.Token, store, schedulerQueue, schedulerService, taskLogService, taskLogWriter, logSource, lifecycle.requestShutdown))
 
 	if err := server.Serve(listener, handler, shutdownRequested); err != nil {
 		slog.Error("本地 HTTP server 异常退出", "error", err)
@@ -212,8 +231,38 @@ func (lifecycle *shutdownLifecycle) stopScheduler() {
 	})
 }
 
+// shutdownTaskLogWriter 在 sidecar 退出前 flush 任务日志队列，避免运行中日志丢失。
+func shutdownTaskLogWriter(writer *tasklogservice.AsyncWriter) {
+	if writer == nil {
+		return
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := writer.Shutdown(shutdownCtx); err != nil {
+		slog.Warn("关闭任务日志写入器失败", "error", logger.RedactError(err))
+	}
+}
+
+// applyTaskLogRetention 启动时执行数据库和 NDJSON 文件保留策略，防止日志无限增长。
+func applyTaskLogRetention(ctx context.Context, store *dao.Store, ndjsonWriter *tasklogservice.NDJSONWriter) {
+	retention, err := tasklogservice.NewRetentionManager(tasklogservice.RetentionConfig{Store: store})
+	if err != nil {
+		slog.Warn("初始化任务日志保留策略失败", "error", logger.RedactError(err))
+		return
+	}
+	if _, err := retention.Apply(ctx); err != nil {
+		slog.Warn("执行任务日志数据库保留策略失败", "error", logger.RedactError(err))
+	}
+	if ndjsonWriter == nil {
+		return
+	}
+	if err := ndjsonWriter.ApplyRetention(ctx); err != nil {
+		slog.Warn("执行任务日志文件保留策略失败", "error", logger.RedactError(err))
+	}
+}
+
 // buildActionsConfig 组装生产 actions 依赖，避免 main 漏注入后端能力。
-func buildActionsConfig(token string, store *dao.Store, schedulerQueue *schedulerservice.ExecutionQueue, schedulerService *schedulerservice.Service, logSource *logexportservice.MemorySource, onShutdown func()) actions.Config {
+func buildActionsConfig(token string, store *dao.Store, schedulerQueue *schedulerservice.ExecutionQueue, schedulerService *schedulerservice.Service, taskLogService tasklogservice.Service, taskLogWriter tasklogservice.StageWriter, logSource *logexportservice.MemorySource, onShutdown func()) actions.Config {
 	return actions.Config{
 		Version:             version,
 		Token:               token,
@@ -231,14 +280,14 @@ func buildActionsConfig(token string, store *dao.Store, schedulerQueue *schedule
 		AIConfigStore:       store,
 		AIConfigTester:      aiservice.OpenAIConfigTester{},
 		AnalysisStore:       store,
-		AnalysisExecutor:    analysisservice.Executor{Store: store},
+		AnalysisExecutor:    analysisservice.Executor{Store: store, TaskLogWriter: taskLogWriter},
 		AnalysisTransact: func(ctx context.Context, run func(analysisaction.Store) error) error {
 			return store.WithTransaction(ctx, func(tx *dao.Store) error {
 				return run(tx)
 			})
 		},
 		TaskStore:             store,
-		TaskLogService:        tasklogservice.Service{Store: store},
+		TaskLogService:        taskLogService,
 		ReportStore:           store,
 		DashboardStore:        store,
 		SettingsStore:         store,

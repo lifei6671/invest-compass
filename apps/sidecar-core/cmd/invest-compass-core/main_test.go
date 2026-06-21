@@ -14,6 +14,7 @@ import (
 	logexportservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/logexport"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
 	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
+	tasklogservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/tasklog"
 )
 
 // TestValidateListenHostOnlyAllowsLoopback 验证 sidecar 只能监听本机回环地址。
@@ -135,7 +136,8 @@ func TestBuildActionsConfigInjectsProductionAIConfigTester(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new scheduler service: %v", err)
 	}
-	config := buildActionsConfig("test-token", store, queue, schedulerService, logSource, func() {})
+	taskLogService := tasklogservice.Service{Store: store}
+	config := buildActionsConfig("test-token", store, queue, schedulerService, taskLogService, nil, logSource, func() {})
 
 	if config.AIConfigTester == nil {
 		t.Fatal("production actions config must inject AI config tester")
@@ -154,7 +156,8 @@ func TestBuildActionsConfigKeepsMarketProviderUnconfiguredUntilComplianceReady(t
 	if err != nil {
 		t.Fatalf("new scheduler service: %v", err)
 	}
-	config := buildActionsConfig("test-token", store, queue, schedulerService, logSource, func() {})
+	taskLogService := tasklogservice.Service{Store: store}
+	config := buildActionsConfig("test-token", store, queue, schedulerService, taskLogService, nil, logSource, func() {})
 
 	if config.MarketProvider == nil || config.NewsProvider == nil {
 		t.Fatalf("production config must inject explicit provider implementations: %+v", config)
