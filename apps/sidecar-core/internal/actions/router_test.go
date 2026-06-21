@@ -51,6 +51,27 @@ func TestHealthRejectsNonPost(t *testing.T) {
 	assertErrorEnvelope(t, recorder.Body.String(), "method_not_allowed")
 }
 
+// TestTaskLogRouteRejectsNonPost 验证任务日志路由同样受全局 POST-only 边界保护。
+func TestTaskLogRouteRejectsNonPost(t *testing.T) {
+	handler := NewHandler(Config{
+		Version:  "0.1.0",
+		Token:    "test-token",
+		DBStatus: "not_configured",
+		Ready:    true,
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/tasks/logs/list", nil)
+	request.Header.Set(httpx.TokenHeader, "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status %d, got %d", http.StatusMethodNotAllowed, recorder.Code)
+	}
+	assertErrorEnvelope(t, recorder.Body.String(), "method_not_allowed")
+}
+
 // TestHealthRequiresReadyToken 验证 sidecar 未完成握手前健康检查不可用。
 func TestHealthRequiresReadyToken(t *testing.T) {
 	handler := NewHandler(Config{

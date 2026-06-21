@@ -7,6 +7,13 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use tauri::State;
 
+const TASK_LOGS_LIST_PATH: &str = "/api/tasks/logs/list";
+const TASK_LOG_GET_PATH: &str = "/api/tasks/logs/get";
+const TASK_LOG_SUMMARY_PATH: &str = "/api/tasks/logs/summary";
+const TASK_LOG_DIAGNOSIS_PATH: &str = "/api/tasks/logs/diagnosis";
+const TASK_LOG_CONTEXT_PATH: &str = "/api/tasks/logs/context";
+const TASK_LOG_EXPORT_PATH: &str = "/api/tasks/logs/export";
+
 #[derive(Deserialize)]
 struct CoreResponse<T> {
     data: T,
@@ -78,7 +85,7 @@ pub fn task_logs_list(
     }
     let client = state.client().map_err(|error| error.to_string())?;
     client
-        .post_api("/api/tasks/logs/list", &request)
+        .post_api(TASK_LOGS_LIST_PATH, &request)
         .map_err(|error| error.to_string())
 }
 
@@ -88,7 +95,7 @@ pub fn task_log_get(state: State<'_, CoreState>, id: i64) -> Result<serde_json::
     validate_task_log_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
     client
-        .post_api("/api/tasks/logs/get", &TaskLogGetRequest { id })
+        .post_api(TASK_LOG_GET_PATH, &TaskLogGetRequest { id })
         .map_err(|error| error.to_string())
 }
 
@@ -98,7 +105,7 @@ pub fn task_log_summary(
     state: State<'_, CoreState>,
     task_id: String,
 ) -> Result<serde_json::Value, String> {
-    post_task_log_task_id(state, "/api/tasks/logs/summary", task_id)
+    post_task_log_task_id(state, TASK_LOG_SUMMARY_PATH, task_id)
 }
 
 /// 读取失败诊断，固定转发到 Go core `/api/tasks/logs/diagnosis`。
@@ -107,7 +114,7 @@ pub fn task_log_diagnosis(
     state: State<'_, CoreState>,
     task_id: String,
 ) -> Result<serde_json::Value, String> {
-    post_task_log_task_id(state, "/api/tasks/logs/diagnosis", task_id)
+    post_task_log_task_id(state, TASK_LOG_DIAGNOSIS_PATH, task_id)
 }
 
 /// 读取安全上下文摘要，固定转发到 Go core `/api/tasks/logs/context`。
@@ -116,7 +123,7 @@ pub fn task_log_context(
     state: State<'_, CoreState>,
     task_id: String,
 ) -> Result<serde_json::Value, String> {
-    post_task_log_task_id(state, "/api/tasks/logs/context", task_id)
+    post_task_log_task_id(state, TASK_LOG_CONTEXT_PATH, task_id)
 }
 
 /// 导出单个任务的脱敏日志包，并写入调用方明确选择的本地目录。
@@ -131,7 +138,7 @@ pub fn task_logs_export(
     validate_task_log_export_target_dir(&target_dir)?;
     let client = state.client().map_err(|error| error.to_string())?;
     let response: CoreResponse<TaskLogExportBundle> = client
-        .post_api("/api/tasks/logs/export", &TaskLogTaskIDRequest { task_id })
+        .post_api(TASK_LOG_EXPORT_PATH, &TaskLogTaskIDRequest { task_id })
         .map_err(|error| error.to_string())?;
     let output_path = write_task_log_export_bundle(&target_dir, &response.data)?;
     Ok(TaskLogsExportResult {
@@ -187,6 +194,9 @@ fn write_task_log_export_bundle(
 }
 
 fn validate_task_log_export_target_dir(target_dir: &Path) -> Result<(), String> {
+    if target_dir.as_os_str().is_empty() {
+        return Err("task log export target is not a directory".to_string());
+    }
     if !target_dir.is_dir() {
         return Err("task log export target is not a directory".to_string());
     }
@@ -225,6 +235,12 @@ mod tests {
     }
 
     #[test]
+    /// 验证任务日志列表 command 固定转发到白名单路径，不暴露任意路径代理。
+    fn task_logs_list_fixed_path() {
+        assert_eq!(TASK_LOGS_LIST_PATH, "/api/tasks/logs/list");
+    }
+
+    #[test]
     /// 验证任务日志 command 在 Rust 边界拒绝空任务 ID。
     fn validate_task_id_rejects_blank_values() {
         assert!(validate_task_id("task_1").is_ok());
@@ -236,7 +252,7 @@ mod tests {
 
     #[test]
     /// 验证上下文摘要 command 复用任务 ID 校验，空 task_id 不会进入 Go core。
-    fn task_log_context_rejects_empty_task_id_boundary() {
+    fn task_log_context_rejects_empty_task_id() {
         assert_eq!(
             validate_task_id("").expect_err("empty task id should fail"),
             "invalid task id"
@@ -245,7 +261,7 @@ mod tests {
 
     #[test]
     /// 验证单条日志详情 command 在 Rust 边界拒绝非正数日志 ID。
-    fn validate_task_log_id_rejects_non_positive_values() {
+    fn task_log_get_rejects_non_positive_id() {
         assert!(validate_task_log_id(1).is_ok());
         assert_eq!(
             validate_task_log_id(0).expect_err("zero log id should fail"),
@@ -259,7 +275,7 @@ mod tests {
 
     #[test]
     /// 验证任务日志导出只允许写入调用方授权目录，且拒绝路径穿越文件名。
-    fn write_task_log_export_bundle_writes_only_inside_target_dir() {
+    fn task_logs_export_rejects_path_traversal_filename() {
         let target_dir = unique_test_dir("export");
         std::fs::create_dir_all(&target_dir).expect("target dir should be created");
         let bundle = TaskLogExportBundle {
@@ -287,7 +303,7 @@ mod tests {
 
     #[test]
     /// 验证任务日志导出不会覆盖用户目录里已有的同名文件。
-    fn write_task_log_export_bundle_rejects_existing_file() {
+    fn task_logs_export_does_not_overwrite_existing_file() {
         let target_dir = unique_test_dir("existing");
         std::fs::create_dir_all(&target_dir).expect("target dir should be created");
         let output_path = target_dir.join("invest-compass-task-log-existing.txt");
@@ -310,14 +326,18 @@ mod tests {
     }
 
     #[test]
-    /// 验证任务日志导出拒绝空路径和不存在目录。
-    fn validate_task_log_export_target_dir_rejects_empty_and_missing_paths() {
+    /// 验证任务日志导出拒绝空路径。
+    fn task_logs_export_rejects_empty_target_dir() {
         assert_eq!(
             validate_task_log_export_target_dir(Path::new(""))
                 .expect_err("empty export target should fail"),
             "task log export target is not a directory"
         );
+    }
 
+    #[test]
+    /// 验证任务日志导出拒绝不存在目录。
+    fn task_logs_export_rejects_missing_target_dir() {
         let missing_dir = unique_test_dir("missing");
         assert_eq!(
             validate_task_log_export_target_dir(&missing_dir)
@@ -329,7 +349,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     /// 验证 Unix 下脱敏日志导出文件使用私有权限，避免其他本机用户读取。
-    fn write_task_log_export_bundle_creates_private_file_on_unix() {
+    fn task_logs_export_creates_private_file_on_unix() {
         use std::os::unix::fs::PermissionsExt;
 
         let target_dir = unique_test_dir("private-mode");

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,10 +19,14 @@ type fakeService struct {
 	detailOK  bool
 	summary   tasklogservice.Summary
 	summaryOK bool
+	listErr   error
 }
 
 func (service *fakeService) List(_ context.Context, query tasklogservice.Query) (tasklogservice.ListResult, error) {
 	service.listQuery = query
+	if service.listErr != nil {
+		return tasklogservice.ListResult{}, service.listErr
+	}
 	return tasklogservice.ListResult{Rows: []tasklogservice.Row{{ID: 7, TaskID: query.TaskID, Level: "INFO"}}}, nil
 }
 
@@ -84,6 +89,47 @@ func TestGetTaskLogReturnsNotFound(t *testing.T) {
 	recorder := perform(t, handleGet(testConfig(&fakeService{})), map[string]any{"id": 99})
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", recorder.Code)
+	}
+}
+
+func TestListTaskLogsRejectsInvalidQuery(t *testing.T) {
+	recorder := perform(t, handleList(testConfig(&fakeService{})), map[string]any{
+		"task_id":  "task_1",
+		"after_id": -1,
+		"limit":    10,
+	})
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid after_id, got %d", recorder.Code)
+	}
+
+	recorder = perform(t, handleList(testConfig(&fakeService{listErr: errors.New("invalid limit")})), map[string]any{
+		"task_id": "task_1",
+		"limit":   501,
+	})
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid limit, got %d", recorder.Code)
+	}
+}
+
+func TestListTaskLogsRequiresReadyToken(t *testing.T) {
+	service := &fakeService{}
+	request := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(`{"task_id":"task_1","limit":10}`)))
+	recorder := httptest.NewRecorder()
+
+	handleList(testConfig(service))(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d", recorder.Code)
+	}
+}
+
+func TestListTaskLogsRejectsWhenNotReady(t *testing.T) {
+	config := testConfig(&fakeService{})
+	config.Security.Ready = false
+	recorder := perform(t, handleList(config), map[string]any{"task_id": "task_1", "limit": 10})
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when core is not ready, got %d", recorder.Code)
 	}
 }
 
