@@ -282,6 +282,93 @@ export type TaskEventsResult = {
   items: TaskEventItem[];
 };
 
+export type TaskLogLevel = "INFO" | "WARN" | "ERROR";
+
+export type TaskLogRow = {
+  id: number;
+  task_id: string;
+  time: string;
+  timestamp: string;
+  level: TaskLogLevel;
+  module: string;
+  stage: string;
+  message: string;
+  code?: string;
+  provider?: string;
+  model?: string;
+  symbol?: string;
+  duration_ms?: number;
+  retryable: boolean;
+};
+
+export type TaskLogListPayload = {
+  taskId: string;
+  level?: "" | TaskLogLevel;
+  module?: string;
+  stage?: string;
+  keyword?: string;
+  onlyError?: boolean;
+  afterId?: number;
+  limit?: number;
+};
+
+export type TaskLogListResult = {
+  rows: TaskLogRow[];
+  next_after_id: number;
+  has_more: boolean;
+};
+
+export type TaskLogDetail = TaskLogRow & {
+  raw_json: string;
+};
+
+export type TaskLogSummary = {
+  title: string;
+  task_id: string;
+  task_type: string;
+  stock?: string;
+  model?: string;
+  started_at: string;
+  duration: string;
+  request_id: string;
+  trace_id: string;
+  status: string;
+};
+
+export type TaskLogDiagnosis = {
+  task_id: string;
+  error_code?: string;
+  error_stage?: string;
+  summary: string;
+  causes: string[];
+  suggestions: string[];
+  retryable: boolean;
+  request_id?: string;
+  trace_id?: string;
+  source_log_id?: number;
+};
+
+export type TaskLogContextSummary = {
+  task_id: string;
+  stock?: string;
+  analysis_type?: string;
+  model?: string;
+  prompt_template?: string;
+  quote_status?: string;
+  kline_status?: string;
+  indicator_status?: string;
+  news_status?: string;
+  user_position?: string;
+  data_updated_at?: string;
+  report_created_at?: string;
+  raw_snapshot_brief?: string;
+};
+
+export type TaskLogsExportResult = {
+  file_path: string;
+  file_name: string;
+};
+
 export type AnalysisReport = {
   id: number;
   task_id: string;
@@ -711,6 +798,41 @@ export async function taskGet(taskID: string): Promise<TaskItem> {
 export async function taskEvents(taskID: string, afterEventID: number): Promise<TaskEventsResult> {
   const response = await invoke<CoreEnvelope<TaskEventsResult>>("task_events", { taskId: taskID, afterEventId: afterEventID });
   return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取任务结构化日志列表。
+export async function taskLogsList(payload: TaskLogListPayload): Promise<TaskLogListResult> {
+  const response = await invoke<CoreEnvelope<TaskLogListResult>>("task_logs_list", payload);
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取单条任务结构化日志详情。
+export async function taskLogGet(id: number): Promise<TaskLogDetail> {
+  const response = await invoke<CoreEnvelope<TaskLogDetail>>("task_log_get", { id });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取日志抽屉基础摘要。
+export async function taskLogSummary(taskID: string): Promise<TaskLogSummary> {
+  const response = await invoke<CoreEnvelope<TaskLogSummary>>("task_log_summary", { taskId: taskID });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取任务错误诊断。
+export async function taskLogDiagnosis(taskID: string): Promise<TaskLogDiagnosis> {
+  const response = await invoke<CoreEnvelope<TaskLogDiagnosis>>("task_log_diagnosis", { taskId: taskID });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取任务上下文摘要。
+export async function taskLogContext(taskID: string): Promise<TaskLogContextSummary> {
+  const response = await invoke<CoreEnvelope<TaskLogContextSummary>>("task_log_context", { taskId: taskID });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 将 Go core 生成的脱敏日志包写入用户授权目录。
+export async function taskLogsExport(taskID: string, targetDir: string): Promise<TaskLogsExportResult> {
+  return invoke<TaskLogsExportResult>("task_logs_export", { taskId: taskID, targetDir });
 }
 
 /// 通过固定 Rust command 读取报告历史列表。
