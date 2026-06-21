@@ -28,6 +28,8 @@ func TestFilterCacheCleanupTargetsKeepsReportsAndConfigs(t *testing.T) {
 		CacheTargetKline,
 		CacheTargetNews,
 		CacheTargetChartImage,
+		CacheTargetTaskLogs,
+		CacheTargetAppLogs,
 		CacheTargetReport,
 		CacheTargetConfig,
 	})
@@ -39,8 +41,8 @@ func TestFilterCacheCleanupTargetsKeepsReportsAndConfigs(t *testing.T) {
 			}
 		}
 	}
-	if len(targets) != 4 {
-		t.Fatalf("expected 4 cache targets, got %+v", targets)
+	if len(targets) != 6 {
+		t.Fatalf("expected 6 cache targets, got %+v", targets)
 	}
 }
 
@@ -97,15 +99,17 @@ func TestBuildCacheStatsOnlyCountsTemporaryTargets(t *testing.T) {
 	stats := BuildCacheStats([]CacheUsage{
 		{Target: CacheTargetQuote, Bytes: 10},
 		{Target: CacheTargetNews, Bytes: 20},
+		{Target: CacheTargetTaskLogs, Bytes: 30},
+		{Target: CacheTargetAppLogs, Bytes: 40},
 		{Target: CacheTargetReport, Bytes: 300},
 		{Target: CacheTargetConfig, Bytes: 400},
 	})
 
-	if stats.TotalBytes != 30 {
-		t.Fatalf("expected temporary total 30, got %+v", stats)
+	if stats.TotalBytes != 100 {
+		t.Fatalf("expected temporary total 100, got %+v", stats)
 	}
-	if len(stats.Items) != 2 {
-		t.Fatalf("expected 2 temporary cache items, got %+v", stats.Items)
+	if len(stats.Items) != 4 {
+		t.Fatalf("expected 4 temporary cache items, got %+v", stats.Items)
 	}
 }
 

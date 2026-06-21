@@ -20,6 +20,10 @@ const (
 	CacheTargetNews CacheTarget = "news"
 	// CacheTargetChartImage 表示图片或图表临时缓存。
 	CacheTargetChartImage CacheTarget = "chart_image"
+	// CacheTargetTaskLogs 表示任务结构化日志缓存，只允许清理日志明细和诊断摘要。
+	CacheTargetTaskLogs CacheTarget = "task_logs"
+	// CacheTargetAppLogs 表示本地 NDJSON 应用日志文件缓存。
+	CacheTargetAppLogs CacheTarget = "app_logs"
 	// CacheTargetReport 表示用户报告，不能被缓存清理删除。
 	CacheTargetReport CacheTarget = "report"
 	// CacheTargetConfig 表示用户配置，不能被缓存清理删除。
@@ -183,7 +187,7 @@ func validateMaskedAPIKey(maskedAPIKey string) error {
 // isTemporaryCacheTarget 判断缓存目标是否属于允许统计和清理的临时缓存。
 func isTemporaryCacheTarget(target CacheTarget) bool {
 	switch target {
-	case CacheTargetQuote, CacheTargetKline, CacheTargetNews, CacheTargetChartImage:
+	case CacheTargetQuote, CacheTargetKline, CacheTargetNews, CacheTargetChartImage, CacheTargetTaskLogs, CacheTargetAppLogs:
 		return true
 	default:
 		return false

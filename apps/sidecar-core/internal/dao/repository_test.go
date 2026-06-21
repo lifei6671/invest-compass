@@ -492,8 +492,29 @@ func TestStoreCleanCacheDeletesTemporaryTablesOnly(t *testing.T) {
 	if err := store.db.WithContext(ctx).Create(&model.NewsItem{Title: "news", ContentHash: "hash-1"}).Error; err != nil {
 		t.Fatalf("seed news: %v", err)
 	}
+	if err := store.AppendTaskLogs(ctx, []model.TaskLogEntry{{
+		TaskID: "task-1", Level: "ERROR", Module: "ai", Stage: "stream_failed", Message: "timeout",
+	}}); err != nil {
+		t.Fatalf("seed task log: %v", err)
+	}
+	if err := store.UpsertTaskErrorDiagnosis(ctx, model.TaskErrorDiagnosis{
+		TaskID:          "task-1",
+		ErrorCode:       "provider_timeout",
+		ErrorStage:      "stream_failed",
+		Summary:         "模型服务响应超时",
+		CausesJSON:      `["timeout"]`,
+		SuggestionsJSON: `["retry"]`,
+	}); err != nil {
+		t.Fatalf("seed task diagnosis: %v", err)
+	}
 	if err := store.SaveAnalysisReportByTaskID(ctx, &model.AnalysisReport{TaskID: "task-1", Symbol: "US:AAPL", Title: "report", AnalysisType: "stock_full"}); err != nil {
 		t.Fatalf("seed report: %v", err)
+	}
+	if err := store.db.WithContext(ctx).Create(&model.Task{ID: "task-1", Type: "AI 分析", Status: "FAILED"}).Error; err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := store.db.WithContext(ctx).Create(&model.TaskEvent{TaskID: "task-1", EventType: "TASK_FAILED"}).Error; err != nil {
+		t.Fatalf("seed task event: %v", err)
 	}
 	if err := store.UpsertSetting(ctx, model.Setting{Key: "theme", Value: "dark"}); err != nil {
 		t.Fatalf("seed setting: %v", err)
@@ -503,6 +524,7 @@ func TestStoreCleanCacheDeletesTemporaryTablesOnly(t *testing.T) {
 		settings.CacheTargetQuote,
 		settings.CacheTargetKline,
 		settings.CacheTargetNews,
+		settings.CacheTargetTaskLogs,
 		settings.CacheTargetReport,
 		settings.CacheTargetConfig,
 	})
@@ -513,6 +535,10 @@ func TestStoreCleanCacheDeletesTemporaryTablesOnly(t *testing.T) {
 	requireCount(t, store, &model.Quote{}, 0)
 	requireCount(t, store, &model.Kline{}, 0)
 	requireCount(t, store, &model.NewsItem{}, 0)
+	requireCount(t, store, &model.TaskLogEntry{}, 0)
+	requireCount(t, store, &model.TaskErrorDiagnosis{}, 0)
+	requireCount(t, store, &model.Task{}, 1)
+	requireCount(t, store, &model.TaskEvent{}, 1)
 	requireCount(t, store, &model.AnalysisReport{}, 1)
 	requireCount(t, store, &model.Setting{}, 1)
 }
@@ -531,6 +557,11 @@ func TestStoreCacheUsagesReadsTemporaryCacheData(t *testing.T) {
 	if err := store.db.WithContext(ctx).Create(&model.NewsItem{Title: "news", Summary: "summary", ContentHash: "hash-1"}).Error; err != nil {
 		t.Fatalf("seed news: %v", err)
 	}
+	if err := store.AppendTaskLogs(ctx, []model.TaskLogEntry{{
+		TaskID: "task-1", Level: "INFO", Module: "ai", Stage: "prompt_build", Message: "Prompt 构建完成",
+	}}); err != nil {
+		t.Fatalf("seed task log: %v", err)
+	}
 	if err := store.SaveAnalysisReportByTaskID(ctx, &model.AnalysisReport{TaskID: "task-1", Symbol: "US:AAPL", Title: "report", AnalysisType: "stock_full"}); err != nil {
 		t.Fatalf("seed report: %v", err)
 	}
@@ -545,6 +576,7 @@ func TestStoreCacheUsagesReadsTemporaryCacheData(t *testing.T) {
 	requirePositiveCacheUsage(t, usages, settings.CacheTargetQuote)
 	requirePositiveCacheUsage(t, usages, settings.CacheTargetKline)
 	requirePositiveCacheUsage(t, usages, settings.CacheTargetNews)
+	requirePositiveCacheUsage(t, usages, settings.CacheTargetTaskLogs)
 	requireMissingCacheUsage(t, usages, settings.CacheTargetReport)
 	requireMissingCacheUsage(t, usages, settings.CacheTargetConfig)
 }

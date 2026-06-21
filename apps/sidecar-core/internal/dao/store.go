@@ -662,7 +662,7 @@ func (store *Store) CleanCache(ctx context.Context, targets []settings.CacheTarg
 
 // CacheUsages 从真实缓存表读取可清理缓存体积，不统计报告和配置。
 func (store *Store) CacheUsages(ctx context.Context) ([]settings.CacheUsage, error) {
-	result := make([]settings.CacheUsage, 0, 3)
+	result := make([]settings.CacheUsage, 0, 4)
 
 	var quotes []model.Quote
 	if err := store.db.WithContext(ctx).Find(&quotes).Error; err != nil {
@@ -682,6 +682,19 @@ func (store *Store) CacheUsages(ctx context.Context) ([]settings.CacheUsage, err
 	}
 	appendCacheUsage(&result, settings.CacheTargetNews, newsItems)
 
+	var taskLogs []model.TaskLogEntry
+	if err := store.db.WithContext(ctx).Find(&taskLogs).Error; err != nil {
+		return nil, err
+	}
+	var taskDiagnoses []model.TaskErrorDiagnosis
+	if err := store.db.WithContext(ctx).Find(&taskDiagnoses).Error; err != nil {
+		return nil, err
+	}
+	appendCacheUsage(&result, settings.CacheTargetTaskLogs, map[string]any{
+		"logs":      taskLogs,
+		"diagnoses": taskDiagnoses,
+	})
+
 	return result, nil
 }
 
@@ -695,6 +708,14 @@ func cleanCacheTarget(tx *gorm.DB, target settings.CacheTarget) error {
 	case settings.CacheTargetNews:
 		return tx.Unscoped().Where("1 = 1").Delete(&model.NewsItem{}).Error
 	case settings.CacheTargetChartImage:
+		return nil
+	case settings.CacheTargetTaskLogs:
+		if err := tx.Where("1 = 1").Delete(&model.TaskLogEntry{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("1 = 1").Delete(&model.TaskErrorDiagnosis{}).Error
+	case settings.CacheTargetAppLogs:
+		// NDJSON 文件日志依赖工作区路径，由 tasklog 文件 writer 的保留策略治理。
 		return nil
 	default:
 		return nil

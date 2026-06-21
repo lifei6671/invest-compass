@@ -2,6 +2,7 @@ package dao
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -159,6 +160,96 @@ func TestTaskLogRepositoryRejectsInvalidBoundaries(t *testing.T) {
 	}
 	if ok {
 		t.Fatalf("expected missing log to return ok=false")
+	}
+}
+
+// TestTaskLogRepositoryPrunesExpiredLogsOnly 验证日志保留策略不删除任务、事件、报告和设置。
+func TestTaskLogRepositoryPrunesExpiredLogsOnly(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2025, 5, 20, 15, 30, 0, 0, time.UTC)
+	if err := store.db.WithContext(ctx).Create(&model.Task{ID: "task-1", Type: "AI 分析", Status: "SUCCESS"}).Error; err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := store.db.WithContext(ctx).Create(&model.TaskEvent{TaskID: "task-1", EventType: "TASK_SUCCESS"}).Error; err != nil {
+		t.Fatalf("seed task event: %v", err)
+	}
+	if err := store.db.WithContext(ctx).Create(&model.AnalysisReport{TaskID: "task-1", Symbol: "CN:SH:600183", Title: "report", AnalysisType: "stock_full"}).Error; err != nil {
+		t.Fatalf("seed report: %v", err)
+	}
+	if err := store.db.WithContext(ctx).Create(&model.Setting{Key: "theme", Value: "light"}).Error; err != nil {
+		t.Fatalf("seed setting: %v", err)
+	}
+	if err := store.AppendTaskLogs(ctx, []model.TaskLogEntry{
+		{TaskID: "task-1", Ts: now.AddDate(0, 0, -40), Level: "INFO", Module: "ai", Stage: "old", Message: "old"},
+		{TaskID: "task-1", Ts: now.AddDate(0, 0, -1), Level: "INFO", Module: "ai", Stage: "new", Message: "new"},
+	}); err != nil {
+		t.Fatalf("append logs: %v", err)
+	}
+
+	result, err := store.PruneTaskLogs(ctx, TaskLogRetentionOptions{Before: now.AddDate(0, 0, -30)})
+	if err != nil {
+		t.Fatalf("prune task logs: %v", err)
+	}
+	if result.DeletedExpired != 1 {
+		t.Fatalf("expected one expired log deleted, got %+v", result)
+	}
+
+	logs, err := store.ListTaskLogs(ctx, TaskLogQuery{TaskID: "task-1", Limit: 10})
+	if err != nil {
+		t.Fatalf("list logs after prune: %v", err)
+	}
+	if len(logs.Entries) != 1 || logs.Entries[0].Stage != "new" {
+		t.Fatalf("unexpected remaining logs: %+v", logs.Entries)
+	}
+	requireCount(t, store, &model.Task{}, 1)
+	requireCount(t, store, &model.TaskEvent{}, 1)
+	requireCount(t, store, &model.AnalysisReport{}, 1)
+	requireCount(t, store, &model.Setting{}, 1)
+}
+
+// TestTaskLogRepositoryPrunesPerTaskAndTotalOverflow 验证单任务和全库上限按最旧日志裁剪。
+func TestTaskLogRepositoryPrunesPerTaskAndTotalOverflow(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2025, 5, 20, 15, 30, 0, 0, time.UTC)
+	for taskIndex := 1; taskIndex <= 2; taskIndex++ {
+		for logIndex := 1; logIndex <= 4; logIndex++ {
+			if err := store.AppendTaskLogs(ctx, []model.TaskLogEntry{{
+				TaskID:  fmt.Sprintf("task-%d", taskIndex),
+				Ts:      now.Add(time.Duration(taskIndex*10+logIndex) * time.Second),
+				Level:   "INFO",
+				Module:  "ai",
+				Stage:   "stage",
+				Message: "log",
+			}}); err != nil {
+				t.Fatalf("append log task=%d index=%d: %v", taskIndex, logIndex, err)
+			}
+		}
+	}
+
+	result, err := store.PruneTaskLogs(ctx, TaskLogRetentionOptions{PerTaskLimit: 3, TotalLimit: 5})
+	if err != nil {
+		t.Fatalf("prune task logs: %v", err)
+	}
+	if result.DeletedPerTaskOverflow != 2 || result.DeletedTotalOverflow != 1 {
+		t.Fatalf("unexpected prune result: %+v", result)
+	}
+	requireCount(t, store, &model.TaskLogEntry{}, 5)
+
+	taskOne, err := store.ListTaskLogs(ctx, TaskLogQuery{TaskID: "task-1", Limit: 10})
+	if err != nil {
+		t.Fatalf("list task-1 logs: %v", err)
+	}
+	if len(taskOne.Entries) != 2 {
+		t.Fatalf("expected task-1 to have 2 logs after total overflow pruning, got %+v", taskOne.Entries)
+	}
+	taskTwo, err := store.ListTaskLogs(ctx, TaskLogQuery{TaskID: "task-2", Limit: 10})
+	if err != nil {
+		t.Fatalf("list task-2 logs: %v", err)
+	}
+	if len(taskTwo.Entries) != 3 {
+		t.Fatalf("expected task-2 to have 3 logs after pruning, got %+v", taskTwo.Entries)
 	}
 }
 

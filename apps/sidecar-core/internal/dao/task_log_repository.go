@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
 	"gorm.io/gorm"
@@ -32,6 +33,20 @@ type TaskLogListResult struct {
 	Entries []model.TaskLogEntry
 	HasMore bool
 	NextID  int64
+}
+
+// TaskLogRetentionOptions 描述 SQLite 任务日志容量治理规则。
+type TaskLogRetentionOptions struct {
+	Before       time.Time
+	PerTaskLimit int
+	TotalLimit   int
+}
+
+// TaskLogRetentionResult 记录本次容量治理实际删除的日志数量。
+type TaskLogRetentionResult struct {
+	DeletedExpired         int64
+	DeletedPerTaskOverflow int64
+	DeletedTotalOverflow   int64
 }
 
 // AppendTaskLogs 批量写入已经脱敏的任务结构化日志。
@@ -164,6 +179,45 @@ func (store *Store) GetTaskErrorDiagnosis(ctx context.Context, taskID string) (m
 	return model.TaskErrorDiagnosis{}, false, err
 }
 
+// PruneTaskLogs 只裁剪 task_log_entries，避免误删任务、事件、报告和设置。
+func (store *Store) PruneTaskLogs(ctx context.Context, options TaskLogRetentionOptions) (TaskLogRetentionResult, error) {
+	if options.PerTaskLimit < 0 {
+		return TaskLogRetentionResult{}, fmt.Errorf("task log per task limit must be non-negative")
+	}
+	if options.TotalLimit < 0 {
+		return TaskLogRetentionResult{}, fmt.Errorf("task log total limit must be non-negative")
+	}
+
+	var result TaskLogRetentionResult
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if !options.Before.IsZero() {
+			deleted := tx.Where("ts < ?", options.Before).Delete(&model.TaskLogEntry{})
+			if deleted.Error != nil {
+				return deleted.Error
+			}
+			result.DeletedExpired = deleted.RowsAffected
+		}
+
+		if options.PerTaskLimit > 0 {
+			deleted, err := pruneTaskLogPerTaskOverflow(tx, options.PerTaskLimit)
+			if err != nil {
+				return err
+			}
+			result.DeletedPerTaskOverflow = deleted
+		}
+
+		if options.TotalLimit > 0 {
+			deleted, err := pruneTaskLogTotalOverflow(tx, options.TotalLimit)
+			if err != nil {
+				return err
+			}
+			result.DeletedTotalOverflow = deleted
+		}
+		return nil
+	})
+	return result, err
+}
+
 func normalizeTaskLogLimit(limit int) (int, error) {
 	if limit == 0 {
 		return defaultTaskLogLimit, nil
@@ -175,4 +229,65 @@ func normalizeTaskLogLimit(limit int) (int, error) {
 		return 0, fmt.Errorf("task log limit exceeds %d", maxTaskLogLimit)
 	}
 	return limit, nil
+}
+
+func pruneTaskLogPerTaskOverflow(tx *gorm.DB, limit int) (int64, error) {
+	var taskIDs []string
+	if err := tx.Model(&model.TaskLogEntry{}).Distinct("task_id").Pluck("task_id", &taskIDs).Error; err != nil {
+		return 0, err
+	}
+
+	var deleted int64
+	for _, taskID := range taskIDs {
+		var count int64
+		if err := tx.Model(&model.TaskLogEntry{}).Where("task_id = ?", taskID).Count(&count).Error; err != nil {
+			return deleted, err
+		}
+		overflow := int(count) - limit
+		if overflow <= 0 {
+			continue
+		}
+
+		var ids []int64
+		if err := tx.Model(&model.TaskLogEntry{}).
+			Where("task_id = ?", taskID).
+			Order("ts ASC, id ASC").
+			Limit(overflow).
+			Pluck("id", &ids).Error; err != nil {
+			return deleted, err
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		result := tx.Where("id IN ?", ids).Delete(&model.TaskLogEntry{})
+		if result.Error != nil {
+			return deleted, result.Error
+		}
+		deleted += result.RowsAffected
+	}
+	return deleted, nil
+}
+
+func pruneTaskLogTotalOverflow(tx *gorm.DB, limit int) (int64, error) {
+	var count int64
+	if err := tx.Model(&model.TaskLogEntry{}).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	overflow := int(count) - limit
+	if overflow <= 0 {
+		return 0, nil
+	}
+
+	var ids []int64
+	if err := tx.Model(&model.TaskLogEntry{}).
+		Order("ts ASC, id ASC").
+		Limit(overflow).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	result := tx.Where("id IN ?", ids).Delete(&model.TaskLogEntry{})
+	return result.RowsAffected, result.Error
 }
