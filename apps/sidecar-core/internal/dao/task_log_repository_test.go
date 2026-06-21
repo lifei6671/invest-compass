@@ -134,6 +134,85 @@ func TestTaskLogRepositoryPersistsAndFilters(t *testing.T) {
 	}
 }
 
+// TestAppendTaskLogsBatch 验证 DAO 支持批量写入任务结构化日志。
+func TestAppendTaskLogsBatch(t *testing.T) {
+	store, ctx, _ := seedTaskLogFilterFixture(t)
+	result, err := store.ListTaskLogs(ctx, TaskLogQuery{TaskID: "task-1", Limit: 10})
+	if err != nil {
+		t.Fatalf("list task logs: %v", err)
+	}
+	if len(result.Entries) != 3 {
+		t.Fatalf("expected three task-1 logs after batch append, got %+v", result.Entries)
+	}
+}
+
+// TestListTaskLogsByTaskID 验证日志列表只返回指定任务的数据。
+func TestListTaskLogsByTaskID(t *testing.T) {
+	store, ctx, _ := seedTaskLogFilterFixture(t)
+	result, err := store.ListTaskLogs(ctx, TaskLogQuery{TaskID: "task-2", Limit: 10})
+	if err != nil {
+		t.Fatalf("list by task id: %v", err)
+	}
+	if len(result.Entries) != 1 || result.Entries[0].TaskID != "task-2" {
+		t.Fatalf("unexpected task id filter result: %+v", result.Entries)
+	}
+}
+
+// TestListTaskLogsByLevel 验证日志级别筛选只返回匹配级别。
+func TestListTaskLogsByLevel(t *testing.T) {
+	store, ctx, _ := seedTaskLogFilterFixture(t)
+	result, err := store.ListTaskLogs(ctx, TaskLogQuery{TaskID: "task-1", Level: "ERROR", Limit: 10})
+	if err != nil {
+		t.Fatalf("list by level: %v", err)
+	}
+	if len(result.Entries) != 1 || result.Entries[0].Level != "ERROR" {
+		t.Fatalf("unexpected level filter result: %+v", result.Entries)
+	}
+}
+
+// TestListTaskLogsByModuleStage 验证模块和阶段组合筛选用于日志抽屉阶段过滤。
+func TestListTaskLogsByModuleStage(t *testing.T) {
+	store, ctx, _ := seedTaskLogFilterFixture(t)
+	result, err := store.ListTaskLogs(ctx, TaskLogQuery{TaskID: "task-1", Module: "ai", Stage: "stream_timeout", Limit: 10})
+	if err != nil {
+		t.Fatalf("list by module stage: %v", err)
+	}
+	if len(result.Entries) != 1 || !result.Entries[0].Retryable {
+		t.Fatalf("unexpected module/stage result: %+v", result.Entries)
+	}
+}
+
+// TestListTaskLogsByKeyword 验证关键字筛选覆盖消息和错误码。
+func TestListTaskLogsByKeyword(t *testing.T) {
+	store, ctx, _ := seedTaskLogFilterFixture(t)
+	result, err := store.ListTaskLogs(ctx, TaskLogQuery{TaskID: "task-1", Keyword: "provider_timeout", Limit: 10})
+	if err != nil {
+		t.Fatalf("list by keyword: %v", err)
+	}
+	if len(result.Entries) != 1 || result.Entries[0].Code != "provider_timeout" {
+		t.Fatalf("unexpected keyword result: %+v", result.Entries)
+	}
+}
+
+// TestGetTaskLog 验证单条日志详情读取用于原始 JSON 面板。
+func TestGetTaskLog(t *testing.T) {
+	store, ctx, entries := seedTaskLogFilterFixture(t)
+	result, err := store.ListTaskLogs(ctx, TaskLogQuery{TaskID: "task-1", Level: "ERROR", Limit: 10})
+	if err != nil {
+		t.Fatalf("list error log: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("expected one error log, got %+v", result.Entries)
+	}
+	entry, ok, err := store.GetTaskLog(ctx, result.Entries[0].ID)
+	if err != nil {
+		t.Fatalf("get task log: %v", err)
+	}
+	if !ok || entry.PayloadJSON != entries[2].PayloadJSON {
+		t.Fatalf("unexpected detail entry: ok=%v entry=%+v", ok, entry)
+	}
+}
+
 // TestTaskLogRepositoryRejectsInvalidBoundaries 验证 DAO 对无界查询和缺失标识快速失败。
 func TestTaskLogRepositoryRejectsInvalidBoundaries(t *testing.T) {
 	store := newTestStore(t)
@@ -312,4 +391,21 @@ func TestTaskErrorDiagnosisRepositoryRejectsInvalidInput(t *testing.T) {
 	if ok {
 		t.Fatalf("expected missing diagnosis to return ok=false")
 	}
+}
+
+func seedTaskLogFilterFixture(t *testing.T) (*Store, context.Context, []model.TaskLogEntry) {
+	t.Helper()
+	store := newTestStore(t)
+	ctx := context.Background()
+	baseTime := time.Date(2025, 5, 20, 15, 28, 40, 123000000, time.UTC)
+	entries := []model.TaskLogEntry{
+		{TaskID: "task-1", Ts: baseTime, Level: "INFO", Module: "market", Stage: "quote_fetch", Message: "开始拉取行情", PayloadJSON: `{"rows":1}`},
+		{TaskID: "task-1", Ts: baseTime.Add(time.Second), Level: "WARN", Module: "ai", Stage: "stream_timeout", Message: "模型流式响应耗时过长", Retryable: true, PayloadJSON: `{"retryable":true}`},
+		{TaskID: "task-1", Ts: baseTime.Add(2 * time.Second), Level: "ERROR", Module: "ai", Stage: "stream_failed", Message: "Provider 响应超时，任务终止", Code: "provider_timeout", PayloadJSON: `{"code":"provider_timeout"}`},
+		{TaskID: "task-2", Ts: baseTime, Level: "INFO", Module: "market", Stage: "quote_fetch", Message: "其他任务日志", PayloadJSON: `{}`},
+	}
+	if err := store.AppendTaskLogs(ctx, entries); err != nil {
+		t.Fatalf("append task log fixture: %v", err)
+	}
+	return store, ctx, entries
 }

@@ -64,6 +64,8 @@ func TestMigrateCreatesInitialSchema(t *testing.T) {
 		"analysis_reports",
 		"tasks",
 		"task_events",
+		"task_log_entries",
+		"task_error_diagnoses",
 		"settings",
 		"scheduler_jobs",
 		"scheduler_runs",
@@ -80,12 +82,32 @@ func TestMigrateCreatesInitialSchema(t *testing.T) {
 		assertColumns(t, db, table, "deleted_at")
 	}
 	assertColumns(t, db, "ai_configs", "api_key_ref", "masked_api_key", "has_api_key")
+	assertColumns(t, db, "task_log_entries", "task_id", "request_id", "trace_id", "ts", "level", "module", "stage", "payload_json")
+	assertColumns(t, db, "task_error_diagnoses", "task_id", "error_code", "error_stage", "summary", "causes_json", "suggestions_json")
 	assertColumns(t, db, "scheduler_jobs", "cron_type", "catchup_enabled", "catchup_max_days", "deleted_at")
 	assertColumns(t, db, "scheduler_runs", "cron_type", "data_type", "period", "params_json", "run_key", "trigger_type", "target_date", "scope_key")
 	assertColumns(t, db, "ingestion_watermarks", "data_type", "scope_key", "provider", "period", "last_trade_date")
 	if db.Migrator().HasColumn("scheduler_jobs", "type") {
 		t.Fatal("scheduler_jobs must use cron_type column instead of reserved type column")
 	}
+}
+
+// TestTaskLogMigration 验证结构化任务日志专题新增表能随标准迁移一次性创建。
+func TestTaskLogMigration(t *testing.T) {
+	db, err := Open(context.Background(), Config{Path: testSQLitePath(t)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := Migrate(context.Background(), db); err != nil {
+		t.Fatalf("migrate sqlite: %v", err)
+	}
+	for _, table := range []string{"task_log_entries", "task_error_diagnoses"} {
+		if !db.Migrator().HasTable(table) {
+			t.Fatalf("expected %s to exist", table)
+		}
+	}
+	assertColumns(t, db, "task_log_entries", "task_id", "level", "module", "stage", "message", "payload_json")
+	assertColumns(t, db, "task_error_diagnoses", "task_id", "summary", "retryable", "source_log_id")
 }
 
 // TestMigrateIsIdempotent 验证重复迁移不会破坏已有数据库。

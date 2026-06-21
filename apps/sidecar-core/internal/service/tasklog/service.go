@@ -244,7 +244,20 @@ func (service Service) Export(ctx context.Context, taskID string) (ExportBundle,
 	if err != nil {
 		return ExportBundle{}, err
 	}
-	content := buildExportContent(summary, events, logResult.Rows, diagnosis, contextSummary)
+	rawJSONSample := ""
+	if len(logResult.Rows) > 0 {
+		sampleID := logResult.Rows[0].ID
+		for _, row := range logResult.Rows {
+			if row.Level == LevelError {
+				sampleID = row.ID
+				break
+			}
+		}
+		if detail, ok, err := service.Get(ctx, sampleID); err == nil && ok {
+			rawJSONSample = detail.RawJSON
+		}
+	}
+	content := buildExportContent(summary, events, logResult.Rows, diagnosis, contextSummary, rawJSONSample)
 	createdAt := service.now().UTC()
 	return ExportBundle{
 		FileName:  "invest-compass-task-log-" + safeFilePart(taskID) + "-" + createdAt.Format("20060102-150405") + ".txt",

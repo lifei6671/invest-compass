@@ -39,8 +39,8 @@ func (appender *captureBatchAppender) totalEntries() int {
 	return total
 }
 
-// TestAsyncWriterFlushesByBatchSize 验证达到批量阈值后会自动 flush。
-func TestAsyncWriterFlushesByBatchSize(t *testing.T) {
+// TestTaskLogAsyncWriterFlushBySize 验证达到批量阈值后会自动 flush。
+func TestTaskLogAsyncWriterFlushBySize(t *testing.T) {
 	appender := &captureBatchAppender{}
 	writer, err := NewAsyncWriter(AsyncWriterConfig{
 		Appender:      appender,
@@ -63,8 +63,8 @@ func TestAsyncWriterFlushesByBatchSize(t *testing.T) {
 	waitFor(t, func() bool { return appender.batchCount() == 1 && appender.totalEntries() == 2 })
 }
 
-// TestAsyncWriterFlushesByInterval 验证未达到批量阈值的日志会在定时器触发后落库。
-func TestAsyncWriterFlushesByInterval(t *testing.T) {
+// TestTaskLogAsyncWriterFlushByInterval 验证未达到批量阈值的日志会在定时器触发后落库。
+func TestTaskLogAsyncWriterFlushByInterval(t *testing.T) {
 	appender := &captureBatchAppender{}
 	writer, err := NewAsyncWriter(AsyncWriterConfig{
 		Appender:      appender,
@@ -84,8 +84,8 @@ func TestAsyncWriterFlushesByInterval(t *testing.T) {
 	waitFor(t, func() bool { return appender.batchCount() == 1 && appender.totalEntries() == 1 })
 }
 
-// TestAsyncWriterShutdownFlushesQueuedLogs 验证关闭时会写出未达到批量阈值的日志。
-func TestAsyncWriterShutdownFlushesQueuedLogs(t *testing.T) {
+// TestTaskLogAsyncWriterFlushOnShutdown 验证关闭时会写出未达到批量阈值的日志。
+func TestTaskLogAsyncWriterFlushOnShutdown(t *testing.T) {
 	appender := &captureBatchAppender{}
 	writer, err := NewAsyncWriter(AsyncWriterConfig{
 		Appender:      appender,

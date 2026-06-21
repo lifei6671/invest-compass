@@ -201,7 +201,7 @@ func inferLoadedStatus(snapshot string, key string) string {
 	return "未记录"
 }
 
-func buildExportContent(summary Summary, events []model.TaskEvent, rows []Row, diagnosis Diagnosis, contextSummary ContextSummary) string {
+func buildExportContent(summary Summary, events []model.TaskEvent, rows []Row, diagnosis Diagnosis, contextSummary ContextSummary, rawJSONSample string) string {
 	var builder strings.Builder
 	builder.WriteString("# 投研罗盘任务脱敏日志\n\n")
 	builder.WriteString("## 任务摘要\n")
@@ -233,6 +233,12 @@ func buildExportContent(summary Summary, events []model.TaskEvent, rows []Row, d
 	builder.WriteString(fmt.Sprintf("- 分析类型：%s\n", logger.RedactText(contextSummary.AnalysisType)))
 	builder.WriteString(fmt.Sprintf("- 使用模型：%s\n", logger.RedactText(contextSummary.Model)))
 	builder.WriteString(fmt.Sprintf("- 数据更新时间：%s\n", logger.RedactText(contextSummary.DataUpdatedAt)))
+	if strings.TrimSpace(rawJSONSample) != "" {
+		builder.WriteString("\n## 原始 JSON 示例\n")
+		builder.WriteString("```json\n")
+		builder.WriteString(logger.RedactText(rawJSONSample))
+		builder.WriteString("\n```\n")
+	}
 	return logger.RedactText(builder.String())
 }
 

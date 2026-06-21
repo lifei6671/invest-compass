@@ -22,8 +22,8 @@ func (writer *captureStageWriter) WriteTaskLog(_ context.Context, entry model.Ta
 	return writer.err
 }
 
-// TestRunStageWritesSuccessLog 验证阶段成功时写入 INFO 日志和耗时。
-func TestRunStageWritesSuccessLog(t *testing.T) {
+// TestRunStageSuccess 验证阶段成功时写入 INFO 日志和耗时。
+func TestRunStageSuccess(t *testing.T) {
 	writer := &captureStageWriter{}
 	now := steppingNow(
 		time.Date(2025, 5, 20, 15, 28, 40, 0, time.UTC),
@@ -57,8 +57,8 @@ func TestRunStageWritesSuccessLog(t *testing.T) {
 	}
 }
 
-// TestRunStageWritesErrorLogWithRedaction 验证阶段失败时写入 ERROR 日志并脱敏。
-func TestRunStageWritesErrorLogWithRedaction(t *testing.T) {
+// TestRunStageFailed 验证阶段失败时写入 ERROR 日志并脱敏。
+func TestRunStageFailed(t *testing.T) {
 	writer := &captureStageWriter{}
 	stageErr := &xerr.Error{Code: xerr.AICancelled, Message: "Authorization: Bearer secret-token"}
 	err := RunStage(context.Background(), writer, StageMeta{
