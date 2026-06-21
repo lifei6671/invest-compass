@@ -362,7 +362,7 @@ body {
   max-width: 120px;
   height: 52px;
   justify-self: end;
-  margin-top: 38px;
+  margin-top: 54px;
 }
 
 .dashboard-card-title {
@@ -761,8 +761,8 @@ body {
 
 @media (min-width: 1281px) and (max-width: 1500px) {
   .dashboard-index-main {
-    grid-template-columns: minmax(0, 1fr) 82px;
-    gap: 6px;
+    grid-template-columns: minmax(0, 1fr) 74px;
+    gap: 8px;
   }
 
   .dashboard-index-value {
@@ -776,9 +776,9 @@ body {
   }
 
   .dashboard-sparkline {
-    max-width: 82px;
+    max-width: 74px;
     height: 46px;
-    margin-top: 42px;
+    margin-top: 56px;
   }
 }
 
@@ -801,7 +801,7 @@ body {
   .dashboard-sparkline {
     max-width: 74px;
     height: 42px;
-    margin-top: 44px;
+    margin-top: 52px;
   }
 }
 
