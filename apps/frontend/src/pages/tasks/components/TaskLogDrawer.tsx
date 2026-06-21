@@ -23,18 +23,20 @@ import {
 import {
   selectDirectory,
   taskEvents,
+  type TaskEventItem,
+} from "../../../services/coreClient";
+import {
   taskLogContext,
   taskLogDiagnosis,
   taskLogGet,
   taskLogSummary,
   taskLogsExport,
   taskLogsList,
-  type TaskEventItem,
   type TaskLogContextSummary,
   type TaskLogDiagnosis,
   type TaskLogRow,
   type TaskLogSummary as RemoteTaskLogSummary,
-} from "../../../services/coreClient";
+} from "../../../services/taskLogs";
 import { taskStatusLabels } from "../types";
 import type { TaskItem, TaskStatus } from "../types";
 import type {
@@ -564,12 +566,14 @@ function ExecutionLogsTab(props: ExecutionLogsTabProps) {
           className="task-log-level-select"
           value={props.level}
           options={logLevelOptions.map((value) => ({ label: value, value }))}
+          virtual={false}
           onChange={props.onLevelChange}
         />
         <Select
           className="task-log-stage-select"
           value={props.stage}
           options={props.stageOptions}
+          virtual={false}
           onChange={props.onStageChange}
         />
         <Checkbox checked={props.errorsOnly} onChange={(event) => props.onErrorsOnlyChange(event.target.checked)}>
