@@ -6355,10 +6355,24 @@ body {
   color: #1677ff !important;
 }
 
+.task-log-table-viewport {
+  max-height: 258px;
+  overflow: auto;
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  scrollbar-width: thin;
+}
+
 .task-log-table {
   border: 1px solid #edf1f7;
   border-radius: 8px;
   overflow: hidden;
+}
+
+.task-log-table-viewport .task-log-table {
+  min-width: 640px;
+  border: 0;
+  border-radius: 0;
 }
 
 .task-log-table .ant-table {

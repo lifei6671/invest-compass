@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import type { ColumnsType } from "antd/es/table";
 import { Table } from "antd";
 import type { TaskLogLevel, TaskLogRecord } from "../taskLogTypes";
@@ -6,6 +7,7 @@ type ExecutionLogTableProps = {
   records: TaskLogRecord[];
   loading?: boolean;
   selectedRecordId?: number | null;
+  viewportRef?: RefObject<HTMLDivElement | null>;
   onSelectRecord?: (record: TaskLogRecord) => void;
 };
 
@@ -19,6 +21,7 @@ export function ExecutionLogTable({
   records,
   loading = false,
   selectedRecordId,
+  viewportRef,
   onSelectRecord,
 }: ExecutionLogTableProps) {
   const columns: ColumnsType<TaskLogRecord> = [
@@ -35,25 +38,27 @@ export function ExecutionLogTable({
   ];
 
   return (
-    <Table<TaskLogRecord>
-      className="task-log-table"
-      rowKey="id"
-      size="small"
-      columns={columns}
-      dataSource={records}
-      loading={loading}
-      pagination={false}
-      rowClassName={(record) =>
-        [
-          record.level === "ERROR" ? "task-log-row-error" : "",
-          record.id === selectedRecordId ? "task-log-row-selected" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")
-      }
-      onRow={(record) => ({
-        onClick: () => onSelectRecord?.(record),
-      })}
-    />
+    <div className="task-log-table-viewport" ref={viewportRef}>
+      <Table<TaskLogRecord>
+        className="task-log-table"
+        rowKey="id"
+        size="small"
+        columns={columns}
+        dataSource={records}
+        loading={loading}
+        pagination={false}
+        rowClassName={(record) =>
+          [
+            record.level === "ERROR" ? "task-log-row-error" : "",
+            record.id === selectedRecordId ? "task-log-row-selected" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")
+        }
+        onRow={(record) => ({
+          onClick: () => onSelectRecord?.(record),
+        })}
+      />
+    </div>
   );
 }

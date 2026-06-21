@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   Alert,
   App as AntApp,
@@ -248,6 +248,7 @@ export function TaskLogDrawer({ open, task, onClose }: TaskLogDrawerProps) {
   const [logsLoading, setLogsLoading] = useState(false);
   const [rawLoading, setRawLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const logTableViewportRef = useRef<HTMLDivElement>(null);
 
   const drawerWidth = screens.xl ? "clamp(620px, 48vw, 760px)" : screens.md ? "72vw" : "100vw";
   const stageSelectOptions = useMemo(() => {
@@ -380,14 +381,26 @@ export function TaskLogDrawer({ open, task, onClose }: TaskLogDrawerProps) {
   }, [open, task, keyword, level, stage, errorsOnly, loadLogs]);
 
   useEffect(() => {
-    if (!open || !task || !autoScroll || task.status !== "RUNNING") {
+    if (!open || !task || task.status !== "RUNNING") {
       return;
     }
     const timer = window.setInterval(() => {
       void loadLogs({ afterId: nextAfterId, append: true, silent: true });
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [autoScroll, loadLogs, nextAfterId, open, task]);
+  }, [loadLogs, nextAfterId, open, task]);
+
+  useEffect(() => {
+    if (!autoScroll) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      const viewport = logTableViewportRef.current;
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    });
+  }, [autoScroll, records.length]);
 
   const renderedEvents = events.length > 0 ? events : deriveEventsFromLogs(records);
   const diagnosisView = task ? diagnosisFromRemote(diagnosis, task) : null;
@@ -463,6 +476,7 @@ export function TaskLogDrawer({ open, task, onClose }: TaskLogDrawerProps) {
                 selectedRecordId={selectedRecordId}
                 rawJson={rawJson}
                 rawLoading={rawLoading}
+                tableViewportRef={logTableViewportRef}
                 onKeywordChange={setKeyword}
                 onLevelChange={setLevel}
                 onStageChange={setStage}
@@ -506,6 +520,7 @@ type ExecutionLogsTabProps = {
   selectedRecordId: number | null;
   rawJson: Record<string, unknown> | null;
   rawLoading: boolean;
+  tableViewportRef: RefObject<HTMLDivElement | null>;
   onKeywordChange: (value: string) => void;
   onLevelChange: (value: "全部级别" | TaskLogLevel) => void;
   onStageChange: (value: string) => void;
@@ -576,6 +591,7 @@ function ExecutionLogsTab(props: ExecutionLogsTabProps) {
         records={props.records}
         loading={props.loading}
         selectedRecordId={props.selectedRecordId}
+        viewportRef={props.tableViewportRef}
         onSelectRecord={props.onSelectRecord}
       />
       <div className="task-log-filter-count">
