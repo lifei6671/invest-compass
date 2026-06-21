@@ -14,15 +14,27 @@ func TestFieldNamesMatchObservabilityContract(t *testing.T) {
 		FieldRequestID,
 		FieldTraceID,
 		FieldTaskID,
+		FieldModule,
+		FieldStage,
 		FieldProvider,
+		FieldModel,
 		FieldSymbol,
+		FieldCode,
+		FieldDurationMS,
+		FieldRetryable,
 	}
 	want := []string{
 		"request_id",
 		"trace_id",
 		"task_id",
+		"module",
+		"stage",
 		"provider",
+		"model",
 		"symbol",
+		"code",
+		"duration_ms",
+		"retryable",
 	}
 
 	if !reflect.DeepEqual(got, want) {
