@@ -27,6 +27,7 @@ import (
 	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/sidecar"
 	taskservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/task"
+	tasklogservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/tasklog"
 )
 
 const version = "0.1.0"
@@ -237,6 +238,7 @@ func buildActionsConfig(token string, store *dao.Store, schedulerQueue *schedule
 			})
 		},
 		TaskStore:             store,
+		TaskLogService:        tasklogservice.Service{Store: store},
 		ReportStore:           store,
 		DashboardStore:        store,
 		SettingsStore:         store,

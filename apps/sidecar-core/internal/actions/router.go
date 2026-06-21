@@ -22,6 +22,7 @@ import (
 	scheduleraction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/scheduler"
 	settingsaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/settings"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/stocks"
+	tasklogaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/tasklog"
 	taskaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/tasks"
 	updatecheckaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/updatecheck"
 	watchlistaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/watchlist"
@@ -52,6 +53,7 @@ type Config struct {
 	AnalysisExecutor      analysisaction.Executor
 	AnalysisTransact      analysisaction.TransactFunc
 	TaskStore             taskaction.Store
+	TaskLogService        tasklogaction.Service
 	ReportStore           reportaction.Store
 	DashboardInput        dashboardservice.Input
 	DashboardStore        dashboard.Store
@@ -130,6 +132,10 @@ func Routes(config Config) []httpx.Route {
 	routes = append(routes, taskaction.Routes(taskaction.Config{
 		Security: security,
 		Store:    config.TaskStore,
+	})...)
+	routes = append(routes, tasklogaction.Routes(tasklogaction.Config{
+		Security: security,
+		Service:  config.TaskLogService,
 	})...)
 	routes = append(routes, reportaction.Routes(reportaction.Config{
 		Security: security,

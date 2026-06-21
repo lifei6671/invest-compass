@@ -226,6 +226,9 @@ func (service Service) Context(ctx context.Context, taskID string) (ContextSumma
 
 // Export 生成任务级脱敏日志包，文件写入仍由 Rust 白名单命令完成。
 func (service Service) Export(ctx context.Context, taskID string) (ExportBundle, error) {
+	if service.Store == nil {
+		return ExportBundle{}, fmt.Errorf("task log store is required")
+	}
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
 		return ExportBundle{}, fmt.Errorf("task_id is required")

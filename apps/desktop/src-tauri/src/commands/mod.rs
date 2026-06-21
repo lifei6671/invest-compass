@@ -11,6 +11,7 @@ pub mod providers;
 pub mod reports;
 pub mod scheduler;
 pub mod settings;
+pub mod task_logs;
 pub mod tasks;
 pub mod update;
 pub mod watchlist;
