@@ -83,6 +83,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 任务结构化日志专题：`docs/2026-06-21-invest-compass-task-structured-logs-implementation-checklist.md`
   - 范围：`task_log_entries`、任务日志写入链路、`TaskLogDrawer` 真实数据接入、错误诊断、上下文摘要、脱敏日志导出和后续容量治理。
   - 停止线：远程日志平台、日志上传、公网指标服务、复杂统计图表、完整 AI 输出重复入库和用户隐私输入入库不随任务日志 MVP 自动完成。
+  - 状态：专题清单 SL00-SL32 已完成并通过 Go、Rust、前端自动化验证；FTS5 保持延期停止线。
 
 ---
 

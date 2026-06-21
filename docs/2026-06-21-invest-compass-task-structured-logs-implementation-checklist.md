@@ -173,7 +173,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL02 新增 task_log_entries schema
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL00
 - 交付物：
   - `apps/sidecar-core/internal/model/task_log.go`
@@ -193,7 +193,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL03 实现 task log DAO
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL02
 - 交付物：
   - `apps/sidecar-core/internal/dao/task_log_repository.go`
@@ -212,7 +212,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL04 补充 DAO 边界测试
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL03
 - 交付物：
   - DAO 单测
@@ -231,7 +231,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL05 建立 service/tasklog 包边界
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL03
 - 交付物：
   - `apps/sidecar-core/internal/service/tasklog/doc.go`
@@ -248,7 +248,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL06 实现统一脱敏能力
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL05
 - 交付物：
   - `apps/sidecar-core/pkg/logger` 或现有脱敏包
@@ -264,7 +264,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL07 实现 pkg/logger.TaskLogHandler
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL05、SL06
 - 交付物：
   - `apps/sidecar-core/pkg/logger/task_log_handler.go`
@@ -281,7 +281,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL08 实现 TaskLogAsyncWriter
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL03、SL07
 - 交付物：
   - `apps/sidecar-core/internal/service/tasklog/async_writer.go`
@@ -297,7 +297,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL09 实现 RunStage helper
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL07、SL08
 - 交付物：
   - `apps/sidecar-core/internal/service/tasklog/run_stage.go`
@@ -314,7 +314,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL10 AI 分析任务接入关键阶段日志
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL09
 - 交付物：
   - `apps/sidecar-core/internal/service/analysis` 相关文件
@@ -335,7 +335,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL11 新增 task logs Go API
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL05、SL10
 - 交付物：
   - `apps/sidecar-core/internal/actions/tasklog`
@@ -353,7 +353,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL12 加强 Go API 入参和安全测试
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL11
 - 交付物：
   - action 层测试
@@ -370,7 +370,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL13 新增 Rust task log command
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL11
 - 交付物：
   - `apps/desktop/src-tauri/src/commands/task_logs.rs`
@@ -392,7 +392,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL14 新增前端 task logs typed service
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL13
 - 交付物：
   - `apps/frontend/src/services/taskLogs.ts`
@@ -409,7 +409,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL15 TaskLogDrawer 接入真实日志列表
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL14
 - 交付物：
   - `apps/frontend/src/pages/tasks/components/TaskLogDrawer.tsx`
@@ -427,7 +427,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL16 执行日志筛选和运行中增量拉取
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL15
 - 交付物：
   - `TaskLogTabs` / `ExecutionLogTable` 相关实现
@@ -444,7 +444,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL17 原始 JSON 详情接真实单条日志
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL15
 - 交付物：
   - `apps/frontend/src/pages/tasks/components/RawJsonPanel.tsx`
@@ -463,7 +463,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL18 新增 task_error_diagnoses schema 和 DAO
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：RGSL4
 - 交付物：
   - `apps/sidecar-core/internal/model/task_log.go`
@@ -480,7 +480,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL19 实现 TaskErrorDiagnosisService
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL18
 - 交付物：
   - `apps/sidecar-core/internal/service/tasklog/diagnosis.go`
@@ -496,7 +496,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL20 接入 diagnosis API、Rust command 和前端 Tab
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL19
 - 交付物：
   - `POST /api/tasks/logs/diagnosis`
@@ -516,7 +516,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL21 实现上下文摘要 API、Rust command 和前端 Tab
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：RGSL4
 - 交付物：
   - `POST /api/tasks/logs/context`
@@ -534,7 +534,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL22 实现脱敏日志导出 Go API
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL20、SL21
 - 交付物：
   - `POST /api/tasks/logs/export`
@@ -551,7 +551,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL23 实现 Rust task_logs_export 和前端导出交互
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL22
 - 交付物：
   - `task_logs_export(task_id, target_dir)`
@@ -573,7 +573,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL24 新增 NDJSON 文件日志 writer
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：RGSL5
 - 交付物：
   - Go 文件日志 writer
@@ -589,7 +589,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL25 实现日志按天滚动和保留策略
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL24
 - 交付物：
   - rolling/retention 实现
@@ -606,7 +606,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL26 设置中心和缓存清理接入日志治理
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL25
 - 交付物：
   - 设置中心日志保留配置入口
@@ -623,7 +623,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL27 FTS5 搜索停止线
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：RGSL6
 - 交付物：
   - 是否启用 FTS5 的决策记录
@@ -642,7 +642,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL28 补齐 Go 单测
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：RGSL5
 - 交付物：
   - Go 单测
@@ -671,7 +671,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL29 补齐 Rust command 单测
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL13、SL23
 - 交付物：
   - Rust 单测
@@ -692,7 +692,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL30 补齐前端测试和交互验收
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL17、SL20、SL21、SL23
 - 交付物：
   - 前端测试
@@ -718,7 +718,7 @@ SL7 验收、测试、文档同步和停止线
 
 ### SL31 集成验收
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL28、SL29、SL30
 - 交付物：
   - 集成验收记录
@@ -736,12 +736,17 @@ SL7 验收、测试、文档同步和停止线
   - `pnpm --dir apps check`
   - `pnpm --dir apps test`
   - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  - 2026-06-22 已执行：
+    - `cd apps/sidecar-core && go test -mod=readonly ./...`
+    - `pnpm --dir apps --filter @invest-compass/frontend check`
+    - `pnpm --dir apps --filter @invest-compass/frontend test -- TaskLogDrawer`
+    - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml task_log`
 - 退出条件：
   - 任务日志从 Go 写入、Rust 白名单、前端抽屉到脱敏导出形成闭环。
 
 ### SL32 文档同步和停止线复核
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：SL31
 - 交付物：
   - `docs/2026-06-17-invest-compass-technical-solution.md`

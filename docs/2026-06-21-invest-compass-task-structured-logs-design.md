@@ -161,7 +161,7 @@ SQLite 负责 UI 查询，NDJSON 文件负责完整本地排障和导出来源�
 {"ts":"2025-05-20T15:29:46.120+08:00","level":"ERROR","task_id":"task_20250520_152834_abc123","module":"ai","stage":"stream_failed","message":"Provider 响应超时","trace_id":"trace_91aa..."}
 ```
 
-首版可以先只实现 SQLite 结构化日志；NDJSON 放第二阶段。
+当前实现已经同时落地 SQLite 结构化日志和本地 NDJSON 文件日志。SQLite 作为任务日志抽屉、筛选和单条 raw JSON 的查询来源；NDJSON 作为本地排障文件补充，并与 SQLite 共享统一脱敏能力。
 
 ---
 
@@ -1452,7 +1452,7 @@ settings
 
 ## 16. NDJSON 文件日志设计
 
-第二阶段实现。
+当前实现已接入 Go sidecar 启动链路，和 SQLite 任务日志 writer 通过 multi appender 同步写入。
 
 路径：
 

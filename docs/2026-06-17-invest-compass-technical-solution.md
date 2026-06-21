@@ -339,6 +339,17 @@ Rust 层不提供 `core_request(method, path, body)` 这类任意路径代理。
 
 日志导出 API 只生成已二次脱敏的导出包，不直接写入用户目录。真实文件写入必须由 Rust 在用户选择的授权目录内完成。Rust `export_logs(target_dir)` 必须先校验 `target_dir` 是已存在目录，非法目录不得触发 Go core 导出请求；写入时必须拒绝带目录分隔符或路径穿越的文件名，不得覆盖目标目录中已有同名文件，Unix/macOS 下导出文件权限必须为 `0600`，并返回实际写入的 `file_path` 和 `file_name`。
 
+任务结构化日志 command 必须固定映射：
+
+- `task_logs_list(payload)` -> `POST /api/tasks/logs/list`
+- `task_log_get(id)` -> `POST /api/tasks/logs/get`
+- `task_log_summary(task_id)` -> `POST /api/tasks/logs/summary`
+- `task_log_diagnosis(task_id)` -> `POST /api/tasks/logs/diagnosis`
+- `task_log_context(task_id)` -> `POST /api/tasks/logs/context`
+- `task_logs_export(task_id, target_dir)` -> `POST /api/tasks/logs/export`
+
+任务结构化日志 API 只返回已脱敏的任务日志、错误诊断、上下文摘要和导出包内容。Go core 不直接写入用户目录；`task_logs_export` 由 Go 生成脱敏日志包，Rust 负责校验目标目录、拒绝路径穿越、避免覆盖同名文件，并在 Unix/macOS 下使用当前用户私有读写权限创建导出文件。上下文摘要不得返回完整 Prompt、完整输入快照、API Key、代理密码或用户一次性持仓明细。
+
 调度相关 command 必须固定映射：
 
 - `scheduler_job_types()` -> `POST /api/scheduler/job-types`
@@ -1715,6 +1726,12 @@ POST /api/settings/set
 POST /api/cache/stats
 POST /api/cache/clean
 POST /api/logs/export
+POST /api/tasks/logs/list
+POST /api/tasks/logs/get
+POST /api/tasks/logs/summary
+POST /api/tasks/logs/diagnosis
+POST /api/tasks/logs/context
+POST /api/tasks/logs/export
 POST /api/workspace/get
 POST /api/workspace/set
 POST /api/providers/status
@@ -1722,6 +1739,7 @@ POST /api/providers/status
 
 这些接口同样只供 Rust 白名单 command 调用。其中 `providers_status()` 固定映射到 `POST /api/providers/status`；`workspace_set(payload)` 必须在 Rust 边界拒绝空路径和相对路径；`logs/export` 必须先脱敏 API Key、代理密码、持仓输入和授权信息。
 `POST /api/logs/export` 从 Go core 运行期内存 `slog` 快照生成已二次脱敏的导出包，必须保留 `request_id`、`trace_id`，任务链路日志存在时必须继续保留 `task_id` 方便排障；Go core 不直接写入用户目录。Rust `export_logs(target_dir)` 在调用该 API 前先校验目标目录存在，避免无效目标触发日志包生成；写入导出文件时必须使用不覆盖已有文件的方式，防止用户目录中同名文件被替换；Unix/macOS 下必须使用当前用户私有读写权限创建导出文件。
+任务结构化日志接口从 `task_log_entries` 和 `task_error_diagnoses` 读取结构化日志、错误诊断与上下文摘要。列表接口必须支持 task、level、module、stage、关键字和 cursor/limit 边界；单条 raw JSON、诊断、上下文摘要和导出内容必须复用统一脱敏规则，禁止返回 API Key、Authorization、Proxy-Authorization、代理密码或用户隐私明细。
 
 ### 8.13 调度管理
 
