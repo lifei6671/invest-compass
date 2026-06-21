@@ -135,6 +135,8 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 			&model.AnalysisReport{},
 			&model.Task{},
 			&model.TaskEvent{},
+			&model.TaskLogEntry{},
+			&model.TaskErrorDiagnosis{},
 			&model.Setting{},
 			&model.SchedulerJob{},
 			&model.SchedulerRun{},
