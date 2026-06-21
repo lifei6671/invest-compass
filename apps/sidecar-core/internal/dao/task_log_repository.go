@@ -7,6 +7,7 @@ import (
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -113,6 +114,54 @@ func (store *Store) GetTaskLog(ctx context.Context, id int64) (model.TaskLogEntr
 		return model.TaskLogEntry{}, false, nil
 	}
 	return model.TaskLogEntry{}, false, err
+}
+
+// UpsertTaskErrorDiagnosis 按 task_id 幂等保存失败任务诊断摘要。
+func (store *Store) UpsertTaskErrorDiagnosis(ctx context.Context, diagnosis model.TaskErrorDiagnosis) error {
+	if strings.TrimSpace(diagnosis.TaskID) == "" {
+		return fmt.Errorf("task diagnosis task_id is required")
+	}
+	if strings.TrimSpace(diagnosis.ErrorCode) == "" {
+		return fmt.Errorf("task diagnosis error_code is required")
+	}
+	if strings.TrimSpace(diagnosis.ErrorStage) == "" {
+		return fmt.Errorf("task diagnosis error_stage is required")
+	}
+	if strings.TrimSpace(diagnosis.Summary) == "" {
+		return fmt.Errorf("task diagnosis summary is required")
+	}
+	return store.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "task_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"error_code",
+			"error_stage",
+			"summary",
+			"causes_json",
+			"suggestions_json",
+			"retryable",
+			"request_id",
+			"trace_id",
+			"source_log_id",
+			"updated_at",
+		}),
+	}).Create(&diagnosis).Error
+}
+
+// GetTaskErrorDiagnosis 按 task_id 读取失败任务诊断摘要。
+func (store *Store) GetTaskErrorDiagnosis(ctx context.Context, taskID string) (model.TaskErrorDiagnosis, bool, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return model.TaskErrorDiagnosis{}, false, fmt.Errorf("task_id is required")
+	}
+	var diagnosis model.TaskErrorDiagnosis
+	err := store.db.WithContext(ctx).Where("task_id = ?", taskID).First(&diagnosis).Error
+	if err == nil {
+		return diagnosis, true, nil
+	}
+	if err == gorm.ErrRecordNotFound {
+		return model.TaskErrorDiagnosis{}, false, nil
+	}
+	return model.TaskErrorDiagnosis{}, false, err
 }
 
 func normalizeTaskLogLimit(limit int) (int, error) {

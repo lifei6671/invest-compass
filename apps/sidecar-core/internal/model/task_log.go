@@ -29,16 +29,17 @@ type TaskLogEntry struct {
 
 // TaskErrorDiagnosis 是失败任务的诊断摘要，供日志抽屉错误诊断 Tab 使用。
 type TaskErrorDiagnosis struct {
-	ID          int64  `gorm:"primaryKey;autoIncrement"`
-	TaskID      string `gorm:"column:task_id;not null;uniqueIndex"`
-	ErrorCode   string `gorm:"column:error_code;not null"`
-	ErrorStage  string `gorm:"column:error_stage;not null"`
-	Summary     string `gorm:"column:summary;not null"`
-	Suggestion  string `gorm:"column:suggestion"`
-	Retryable   bool   `gorm:"column:retryable;not null;default:false"`
-	RequestID   string `gorm:"column:request_id"`
-	TraceID     string `gorm:"column:trace_id"`
-	SourceLogID int64  `gorm:"column:source_log_id"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID              int64  `gorm:"primaryKey;autoIncrement"`
+	TaskID          string `gorm:"column:task_id;not null;uniqueIndex"`
+	ErrorCode       string `gorm:"column:error_code;not null"`
+	ErrorStage      string `gorm:"column:error_stage;not null"`
+	Summary         string `gorm:"column:summary;not null"`
+	CausesJSON      string `gorm:"column:causes_json"`
+	SuggestionsJSON string `gorm:"column:suggestions_json"`
+	Retryable       bool   `gorm:"column:retryable;not null;default:false"`
+	RequestID       string `gorm:"column:request_id"`
+	TraceID         string `gorm:"column:trace_id"`
+	SourceLogID     int64  `gorm:"column:source_log_id"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }

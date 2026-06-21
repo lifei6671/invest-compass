@@ -410,6 +410,21 @@ func (store *Store) ListVisibleAnalysisReports(ctx context.Context) ([]model.Ana
 	return reports, err
 }
 
+// GetAnalysisReportByTaskID 按 task_id 读取未软删除报告，供任务日志上下文摘要使用。
+func (store *Store) GetAnalysisReportByTaskID(ctx context.Context, taskID string) (model.AnalysisReport, bool, error) {
+	var report model.AnalysisReport
+	err := store.db.WithContext(ctx).
+		Where("task_id = ? AND deleted_at IS NULL", taskID).
+		First(&report).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.AnalysisReport{}, false, nil
+	}
+	if err != nil {
+		return model.AnalysisReport{}, false, err
+	}
+	return report, true, nil
+}
+
 // SoftDeleteAnalysisReport 对分析报告执行软删除。
 func (store *Store) SoftDeleteAnalysisReport(ctx context.Context, id int64) error {
 	return store.db.WithContext(ctx).Delete(&model.AnalysisReport{}, id).Error
