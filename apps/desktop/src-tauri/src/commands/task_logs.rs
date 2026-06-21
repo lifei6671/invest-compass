@@ -211,6 +211,18 @@ fn safe_task_log_export_file_name(file_name: &str) -> Result<&str, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_test_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "invest-compass-task-log-{label}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
 
     #[test]
     /// 验证任务日志 command 在 Rust 边界拒绝空任务 ID。
@@ -218,6 +230,15 @@ mod tests {
         assert!(validate_task_id("task_1").is_ok());
         assert_eq!(
             validate_task_id(" \t\n").expect_err("blank task id should fail"),
+            "invalid task id"
+        );
+    }
+
+    #[test]
+    /// 验证上下文摘要 command 复用任务 ID 校验，空 task_id 不会进入 Go core。
+    fn task_log_context_rejects_empty_task_id_boundary() {
+        assert_eq!(
+            validate_task_id("").expect_err("empty task id should fail"),
             "invalid task id"
         );
     }
@@ -239,10 +260,7 @@ mod tests {
     #[test]
     /// 验证任务日志导出只允许写入调用方授权目录，且拒绝路径穿越文件名。
     fn write_task_log_export_bundle_writes_only_inside_target_dir() {
-        let target_dir = std::env::temp_dir().join(format!(
-            "invest-compass-task-log-export-test-{}",
-            std::process::id()
-        ));
+        let target_dir = unique_test_dir("export");
         std::fs::create_dir_all(&target_dir).expect("target dir should be created");
         let bundle = TaskLogExportBundle {
             file_name: "invest-compass-task-log-task-1-20260618-010203.txt".to_string(),
@@ -270,10 +288,7 @@ mod tests {
     #[test]
     /// 验证任务日志导出不会覆盖用户目录里已有的同名文件。
     fn write_task_log_export_bundle_rejects_existing_file() {
-        let target_dir = std::env::temp_dir().join(format!(
-            "invest-compass-task-log-export-existing-test-{}",
-            std::process::id()
-        ));
+        let target_dir = unique_test_dir("existing");
         std::fs::create_dir_all(&target_dir).expect("target dir should be created");
         let output_path = target_dir.join("invest-compass-task-log-existing.txt");
         std::fs::write(&output_path, "existing content").expect("existing file should be created");
@@ -290,6 +305,49 @@ mod tests {
             std::fs::read_to_string(&output_path).expect("existing file should still be readable"),
             "existing content"
         );
+
+        std::fs::remove_dir_all(&target_dir).expect("target dir should be removed");
+    }
+
+    #[test]
+    /// 验证任务日志导出拒绝空路径和不存在目录。
+    fn validate_task_log_export_target_dir_rejects_empty_and_missing_paths() {
+        assert_eq!(
+            validate_task_log_export_target_dir(Path::new(""))
+                .expect_err("empty export target should fail"),
+            "task log export target is not a directory"
+        );
+
+        let missing_dir = unique_test_dir("missing");
+        assert_eq!(
+            validate_task_log_export_target_dir(&missing_dir)
+                .expect_err("missing export target should fail"),
+            "task log export target is not a directory"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    /// 验证 Unix 下脱敏日志导出文件使用私有权限，避免其他本机用户读取。
+    fn write_task_log_export_bundle_creates_private_file_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let target_dir = unique_test_dir("private-mode");
+        std::fs::create_dir_all(&target_dir).expect("target dir should be created");
+        let bundle = TaskLogExportBundle {
+            file_name: "invest-compass-task-log-private.txt".to_string(),
+            content: "redacted task log".to_string(),
+        };
+
+        let output_path =
+            write_task_log_export_bundle(&target_dir, &bundle).expect("bundle should write");
+
+        let mode = std::fs::metadata(&output_path)
+            .expect("exported log metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
 
         std::fs::remove_dir_all(&target_dir).expect("target dir should be removed");
     }

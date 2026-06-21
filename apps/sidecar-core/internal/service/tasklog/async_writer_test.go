@@ -63,6 +63,27 @@ func TestAsyncWriterFlushesByBatchSize(t *testing.T) {
 	waitFor(t, func() bool { return appender.batchCount() == 1 && appender.totalEntries() == 2 })
 }
 
+// TestAsyncWriterFlushesByInterval 验证未达到批量阈值的日志会在定时器触发后落库。
+func TestAsyncWriterFlushesByInterval(t *testing.T) {
+	appender := &captureBatchAppender{}
+	writer, err := NewAsyncWriter(AsyncWriterConfig{
+		Appender:      appender,
+		QueueSize:     4,
+		BatchSize:     10,
+		FlushInterval: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("new async writer: %v", err)
+	}
+	defer shutdownAsyncWriter(t, writer)
+
+	if err := writer.WriteTaskLog(context.Background(), model.TaskLogEntry{TaskID: "task-1"}); err != nil {
+		t.Fatalf("write interval log: %v", err)
+	}
+
+	waitFor(t, func() bool { return appender.batchCount() == 1 && appender.totalEntries() == 1 })
+}
+
 // TestAsyncWriterShutdownFlushesQueuedLogs 验证关闭时会写出未达到批量阈值的日志。
 func TestAsyncWriterShutdownFlushesQueuedLogs(t *testing.T) {
 	appender := &captureBatchAppender{}
