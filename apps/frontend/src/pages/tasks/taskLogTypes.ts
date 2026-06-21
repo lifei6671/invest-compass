@@ -9,7 +9,7 @@ export type TaskLogDrawerProps = {
 export type TaskLogLevel = "INFO" | "WARN" | "ERROR";
 
 export type TaskLogRecord = {
-  id: string;
+  id: number;
   time: string;
   level: TaskLogLevel;
   module: string;
@@ -31,6 +31,20 @@ export type TaskLogSummary = {
   requestId: string;
   traceId: string;
   status: TaskStatus;
+};
+
+export type TaskLogDiagnosisView = {
+  summary: string;
+  causes: string[];
+  suggestions: string[];
+  retryable: boolean;
+  errorCode?: string;
+  errorStage?: string;
+};
+
+export type TaskLogContextItem = {
+  label: string;
+  value: string;
 };
 
 export type TaskLogEvent = {

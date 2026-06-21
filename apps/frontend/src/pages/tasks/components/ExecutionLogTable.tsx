@@ -4,6 +4,9 @@ import type { TaskLogLevel, TaskLogRecord } from "../taskLogTypes";
 
 type ExecutionLogTableProps = {
   records: TaskLogRecord[];
+  loading?: boolean;
+  selectedRecordId?: number | null;
+  onSelectRecord?: (record: TaskLogRecord) => void;
 };
 
 const levelClassMap: Record<TaskLogLevel, string> = {
@@ -12,7 +15,12 @@ const levelClassMap: Record<TaskLogLevel, string> = {
   ERROR: "task-log-level-error",
 };
 
-export function ExecutionLogTable({ records }: ExecutionLogTableProps) {
+export function ExecutionLogTable({
+  records,
+  loading = false,
+  selectedRecordId,
+  onSelectRecord,
+}: ExecutionLogTableProps) {
   const columns: ColumnsType<TaskLogRecord> = [
     { title: "时间", dataIndex: "time", width: 112 },
     {
@@ -33,8 +41,19 @@ export function ExecutionLogTable({ records }: ExecutionLogTableProps) {
       size="small"
       columns={columns}
       dataSource={records}
+      loading={loading}
       pagination={false}
-      rowClassName={(record) => (record.level === "ERROR" ? "task-log-row-error" : "")}
+      rowClassName={(record) =>
+        [
+          record.level === "ERROR" ? "task-log-row-error" : "",
+          record.id === selectedRecordId ? "task-log-row-selected" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      }
+      onRow={(record) => ({
+        onClick: () => onSelectRecord?.(record),
+      })}
     />
   );
 }
