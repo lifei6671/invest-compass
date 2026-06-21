@@ -1,6 +1,7 @@
 import { dispose, init, type KLineData } from "klinecharts";
 import { useEffect, useMemo, useRef } from "react";
 import type { MarketKlineItem } from "../../services/coreClient";
+import { APP_FONT } from "../../styles/fonts";
 
 export function KlineChart(props: { items: MarketKlineItem[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -29,6 +30,20 @@ export function KlineChart(props: { items: MarketKlineItem[] }) {
       const chart = init(containerRef.current, {
         timezone: "Asia/Shanghai",
         styles: {
+          xAxis: {
+            tickText: { color: "#64748b", family: APP_FONT, size: 12, weight: 400 },
+          },
+          yAxis: {
+            tickText: { color: "#64748b", family: APP_FONT, size: 12, weight: 400 },
+          },
+          crosshair: {
+            horizontal: {
+              text: { color: "#334155", family: APP_FONT, size: 12, weight: 400 },
+            },
+            vertical: {
+              text: { color: "#334155", family: APP_FONT, size: 12, weight: 400 },
+            },
+          },
           grid: {
             horizontal: { color: "#e2e8f0", size: 1, style: "solid", show: true, dashedValue: [2, 2] },
             vertical: { color: "#e2e8f0", size: 1, style: "solid", show: true, dashedValue: [2, 2] },
@@ -44,6 +59,26 @@ export function KlineChart(props: { items: MarketKlineItem[] }) {
               upWickColor: "#dc2626",
               downWickColor: "#16a34a",
               noChangeWickColor: "#64748b",
+            },
+            tooltip: {
+              title: { color: "#334155", family: APP_FONT, size: 12, weight: 500 },
+              legend: { color: "#64748b", family: APP_FONT, size: 12, weight: 400 },
+            },
+            priceMark: {
+              high: { textFamily: APP_FONT, textSize: 12, textWeight: "400" },
+              low: { textFamily: APP_FONT, textSize: 12, textWeight: "400" },
+              last: {
+                text: { color: "#334155", family: APP_FONT, size: 12, weight: 400 },
+              },
+            },
+          },
+          indicator: {
+            tooltip: {
+              title: { color: "#334155", family: APP_FONT, size: 12, weight: 500 },
+              legend: { color: "#64748b", family: APP_FONT, size: 12, weight: 400 },
+            },
+            lastValueMark: {
+              text: { color: "#334155", family: APP_FONT, size: 12, weight: 400 },
             },
           },
         },

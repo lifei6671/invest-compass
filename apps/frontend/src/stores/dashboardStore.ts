@@ -2,10 +2,12 @@ import { create } from "zustand";
 import {
   coreHealth,
   dashboardSummary,
+  marketKline,
   marketQuote,
   watchlistList,
   type CoreHealth,
   type DashboardSummary,
+  type MarketKlineItem,
   type MarketQuote,
   type WatchlistItem,
 } from "../services/coreClient";
@@ -25,6 +27,7 @@ export type DashboardViewState = {
   health: CoreHealth;
   summary: DashboardSummary;
   indexQuotes: DashboardQuoteState[];
+  indexTrends: Record<string, MarketKlineItem[]>;
   watchlistRows: DashboardWatchlistRow[];
 };
 
@@ -47,11 +50,12 @@ export const useDashboardStore = create<DashboardStoreState>((set) => ({
   load: async () => {
     set({ state: null, loading: true, error: null });
     try {
-	      const [health, summary, watchlist, indexQuotes] = await Promise.all([
+	      const [health, summary, watchlist, indexQuotes, indexTrends] = await Promise.all([
 	        coreHealth(),
 	        dashboardSummary(),
 	        watchlistList(),
 	        loadQuoteStates(overviewIndexSymbols),
+	        loadIndexTrends(overviewIndexSymbols),
 	      ]);
       const watchlistRows = await loadWatchlistRows(watchlist.items);
       set({
@@ -59,6 +63,7 @@ export const useDashboardStore = create<DashboardStoreState>((set) => ({
           health,
           summary,
           indexQuotes,
+          indexTrends,
           watchlistRows,
         },
         loading: false,
@@ -84,6 +89,21 @@ async function loadQuoteStates(symbols: string[]): Promise<DashboardQuoteState[]
       }
     }),
   );
+}
+
+async function loadIndexTrends(symbols: string[]): Promise<Record<string, MarketKlineItem[]>> {
+  const entries = await Promise.all(
+    symbols.map(async (symbol) => {
+      try {
+        const result = await marketKline({ symbol, period: "day", adjust: "qfq", limit: 40 });
+        return [symbol, result.items] as const;
+      } catch {
+        // 迷你走势是总览增强信息，失败时只降级为空态，不阻断核心总览读取。
+        return [symbol, []] as const;
+      }
+    }),
+  );
+  return Object.fromEntries(entries);
 }
 
 async function loadWatchlistRows(items: WatchlistItem[]): Promise<DashboardWatchlistRow[]> {

@@ -1,0 +1,127 @@
+import type { AnalysisTypeDistributionItem, ReportFilters, ReportItem, ReportStats, TopModelItem } from "./types";
+
+export const initialReportFilters: ReportFilters = {
+  keyword: "",
+  analysisType: "全部类型",
+  model: "全部模型",
+  dateRangeLabel: "2025-04-20 ~ 2025-05-20",
+  dateRangeStart: "2025-04-20",
+  dateRangeEnd: "2025-05-20",
+  status: "全部状态",
+};
+
+export const initialReportItems: ReportItem[] = [
+  {
+    id: "report-1",
+    title: "生益科技 个股综合分析",
+    stockName: "生益科技",
+    stockCode: "600183.SH",
+    analysisType: "个股综合分析",
+    model: "DeepSeek-V3",
+    generatedAt: "2025-05-20 15:28",
+    riskSummary: "行业竞争加剧；成本波动；需求不及预期",
+    status: "success",
+    favorite: true,
+  },
+  {
+    id: "report-2",
+    title: "雅克科技 技术面分析",
+    stockName: "雅克科技",
+    stockCode: "002409.SZ",
+    analysisType: "技术面分析",
+    model: "Qwen2.5-72B",
+    generatedAt: "2025-05-20 14:42",
+    riskSummary: "趋势反转失败；量能不足；关键位失守",
+    status: "success",
+  },
+  {
+    id: "report-3",
+    title: "泰晶科技 个股综合分析",
+    stockName: "泰晶科技",
+    stockCode: "603738.SH",
+    analysisType: "个股综合分析",
+    model: "DeepSeek-V3",
+    generatedAt: "2025-05-20 11:05",
+    riskSummary: "宏观不确定性；原材料价格波动；订单不及预期",
+    status: "success",
+  },
+  {
+    id: "report-4",
+    title: "新易盛 个股综合分析",
+    stockName: "新易盛",
+    stockCode: "300502.SZ",
+    analysisType: "个股综合分析",
+    model: "Qwen2.5-72B",
+    generatedAt: "2025-05-20 10:10",
+    riskSummary: "行业景气度下降风险；估值波动；竞争格局变化",
+    status: "success",
+  },
+  {
+    id: "report-5",
+    title: "中际旭创 技术面分析",
+    stockName: "中际旭创",
+    stockCode: "300308.SZ",
+    analysisType: "技术面分析",
+    model: "DeepSeek-R1",
+    generatedAt: "2025-05-19 16:43",
+    riskSummary: "短期强势回调；均线压力位",
+    status: "success",
+  },
+  {
+    id: "report-6",
+    title: "沪电股份 个股综合分析",
+    stockName: "沪电股份",
+    stockCode: "002463.SZ",
+    analysisType: "个股综合分析",
+    model: "OpenAI GPT-4o",
+    generatedAt: "2025-05-19 15:20",
+    riskSummary: "下游需求波动；汇率波动；毛利率承压",
+    status: "success",
+  },
+  {
+    id: "report-7",
+    title: "贵州茅台 个股综合分析",
+    stockName: "贵州茅台",
+    stockCode: "600519.SH",
+    analysisType: "个股综合分析",
+    model: "DeepSeek-V3",
+    generatedAt: "2025-05-19 09:33",
+    riskSummary: "消费复苏不及预期；政策扰动风险",
+    status: "success",
+  },
+  {
+    id: "report-8",
+    title: "天孚通信 技术面分析",
+    stockName: "天孚通信",
+    stockCode: "300394.SZ",
+    analysisType: "技术面分析",
+    model: "Qwen2.5-72B",
+    generatedAt: "2025-05-18 21:15",
+    riskSummary: "突破假信号风险；量能未放大",
+    status: "failed",
+  },
+];
+
+export const reportStats: ReportStats = {
+  weeklyCount: 36,
+  weeklyChangePercent: 20,
+  successRate: 94.4,
+  successRateChangePercent: 5.2,
+  recentFailedCount: 2,
+  recentFailedChange: -1,
+};
+
+export const topModels: TopModelItem[] = [
+  { name: "DeepSeek-V3", count: 42, percent: 26.9 },
+  { name: "Qwen2.5-72B", count: 38, percent: 24.4 },
+  { name: "OpenAI GPT-4o", count: 28, percent: 17.9 },
+  { name: "DeepSeek-R1", count: 24, percent: 15.4 },
+  { name: "Claude 3.7 Sonnet", count: 18, percent: 11.5 },
+];
+
+export const analysisTypeDistribution: AnalysisTypeDistributionItem[] = [
+  { type: "个股综合分析", value: 78, percent: 50, color: "#1677ff" },
+  { type: "技术面分析", value: 46, percent: 29.5, color: "#16a34a" },
+  { type: "财务分析", value: 18, percent: 11.5, color: "#f97316" },
+  { type: "持仓分析", value: 14, percent: 9, color: "#8b5cf6" },
+];

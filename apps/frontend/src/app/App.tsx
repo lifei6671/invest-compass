@@ -1,10 +1,12 @@
-import { Component, type ErrorInfo, type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { HashRouter, Link, Route, Routes, useParams } from "react-router-dom";
-import { Alert, Button, ConfigProvider, Spin, Tag, Typography } from "antd";
+import { Alert, App as AntApp, Button, ConfigProvider, Spin, Tag, Typography } from "antd";
+import { Component, lazy, Suspense, useEffect, useMemo, useState, type ErrorInfo, type FormEvent, type ReactNode } from "react";
+import { HashRouter, Link, Route, Routes } from "react-router-dom";
+import { KlineChart } from "../components/market/KlineChart";
+import { SchedulerBackfillDialog } from "../components/scheduler/SchedulerBackfillDialog";
+import { SchedulerJobEditor, type SchedulerJobFormState } from "../components/scheduler/SchedulerJobEditor";
+import { SchedulerJobTable } from "../components/scheduler/SchedulerJobTable";
+import { SchedulerRunList } from "../components/scheduler/SchedulerRunList";
 import {
-  analysisTaskCancel,
-  analysisTaskCreate,
-  analysisTaskSubscribe,
   aiConfigDelete,
   aiConfigList,
   aiConfigSave,
@@ -19,62 +21,50 @@ import {
   marketKline,
   marketQuote,
   newsList,
-  newsMarket,
   openExternalURL,
   promptTemplatesCreate,
   promptTemplatesDelete,
   promptTemplatesList,
   promptTemplatesUpdate,
-  reportDelete,
-  reportGet,
-  reportList,
   providersStatus,
   selectDirectory,
   settingsGet,
   settingsSet,
   stockSearch,
-  taskEvents,
-  taskGet,
-  taskList,
   watchlistCreate,
   watchlistDelete,
   watchlistList,
   watchlistUpdate,
-  type AnalysisReport,
-  type AnalysisTaskCreatePayload,
-  type AutostartState,
+  workspaceGet,
+  workspaceSet,
   type AIConfig,
   type AIConfigSavePayload,
   type AIConfigTestResult,
+  type AutostartState,
   type CacheStatsResult,
   type ExportLogsResult,
   type MarketIndicatorsResult,
   type MarketKlineItem,
   type MarketQuote,
   type NewsItem,
-  type ProviderStatusItem,
   type PromptTemplate,
   type PromptTemplateCreatePayload,
   type PromptTemplateType,
+  type ProviderStatusItem,
   type SettingItem,
   type StockSearchResult,
-  type TaskEventItem,
-  type TaskItem,
   type UpdateCheckResult,
   type WatchlistItem,
   type WorkspaceResult,
-  workspaceGet,
-  workspaceSet,
 } from "../services/coreClient";
-import { sendDesktopNotification, type DesktopNotificationPayload } from "../services/desktopNotification";
 import {
-  schedulerJobTypes,
   schedulerJobsBackfill,
   schedulerJobsDelete,
   schedulerJobsList,
   schedulerJobsRunNow,
   schedulerJobsSave,
   schedulerJobsSetEnabled,
+  schedulerJobTypes,
   schedulerRefreshSymbol,
   schedulerRunsGet,
   schedulerRunsList,
@@ -85,13 +75,60 @@ import {
   type SchedulerRun,
   type SchedulerStatus,
 } from "../services/scheduler";
-import { SchedulerJobEditor, type SchedulerJobFormState } from "../components/scheduler/SchedulerJobEditor";
-import { SchedulerJobTable } from "../components/scheduler/SchedulerJobTable";
-import { SchedulerBackfillDialog } from "../components/scheduler/SchedulerBackfillDialog";
-import { SchedulerRunList } from "../components/scheduler/SchedulerRunList";
+import { APP_FONT } from "../styles/fonts";
+import { appAntdLocale } from "../lib/antdLocale";
 import { AppShell } from "./AppShell";
-import { DashboardOverview } from "../components/dashboard/DashboardOverview";
-import { KlineChart } from "../components/market/KlineChart";
+
+const DashboardPage = lazy(() =>
+  import("../pages/dashboard/DashboardPage").then((module) => ({
+    default: module.DashboardPage,
+  })),
+);
+const WatchlistPage = lazy(() =>
+  import("../components/watchlist/WatchlistPage").then((module) => ({
+    default: module.WatchlistPage,
+  })),
+);
+const StockDetailPage = lazy(() =>
+  import("../components/stock-detail/StockDetailPage").then((module) => ({
+    default: module.StockDetailPage,
+  })),
+);
+const AnalysisPage = lazy(() =>
+  import("../pages/analysis/AnalysisPage").then((module) => ({
+    default: module.AnalysisPage,
+  })),
+);
+const AnalysisRunningPage = lazy(() =>
+  import("../pages/analysis-running/AnalysisRunningPage").then((module) => ({
+    default: module.AnalysisRunningPage,
+  })),
+);
+const ReportHistoryPage = lazy(() =>
+  import("../pages/reports/ReportHistoryPage").then((module) => ({
+    default: module.ReportHistoryPage,
+  })),
+);
+const ReportDetailPage = lazy(() =>
+  import("../pages/reports/detail/ReportDetailPage").then((module) => ({
+    default: module.ReportDetailPage,
+  })),
+);
+const TaskHistoryPage = lazy(() =>
+  import("../pages/tasks/TaskHistoryPage").then((module) => ({
+    default: module.TaskHistoryPage,
+  })),
+);
+const NewsCenterPage = lazy(() =>
+  import("../pages/news/NewsCenterPage").then((module) => ({
+    default: module.NewsCenterPage,
+  })),
+);
+const SettingsPage = lazy(() =>
+  import("../pages/settings/SettingsPage").then((module) => ({
+    default: module.SettingsPage,
+  })),
+);
 
 type AppErrorBoundaryProps = {
   children: ReactNode;
@@ -126,7 +163,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
       if (isDevMode && this.state.message) {
         return (
           <Alert
-            message="界面渲染失败"
+            title="界面渲染失败"
             description={
               <pre className="whitespace-pre-wrap break-words text-xs">
                 {this.state.message}
@@ -138,7 +175,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
           />
         );
       }
-      return <Alert message="界面渲染失败" type="error" showIcon />;
+      return <Alert title="界面渲染失败" type="error" showIcon />;
     }
 
     return this.props.children;
@@ -152,14 +189,16 @@ const APP_ROUTES = {
   news: "/news",
   scheduler: "/scheduler",
   analysis: "/analysis",
+  analysisRunning: "/analysis/running",
   reports: "/reports",
+  reportDetail: "/reports/:reportId",
   tasks: "/tasks",
   settings: "/settings",
   aiSettings: "/ai-settings",
 } as const;
 
 export const APP_NAV_ITEMS = [
-  { path: APP_ROUTES.home, label: "概览" },
+  { path: APP_ROUTES.home, label: "总览" },
   { path: APP_ROUTES.watchlist, label: "自选股" },
   { path: APP_ROUTES.analysis, label: "AI 分析" },
   { path: APP_ROUTES.reports, label: "报告历史" },
@@ -170,42 +209,53 @@ export const APP_NAV_ITEMS = [
 
 export const APP_ROUTE_PATHS = Object.values(APP_ROUTES);
 
-const appFont =
-    '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif';
-
 export function App() {
   return (
     <ConfigProvider
+      locale={appAntdLocale}
       theme={{
         token: {
-          borderRadius: 8,
+          borderRadius: 4,
           colorPrimary: "#1677ff",
           colorTextSecondary: "#6b7280",
           colorBorder: "#e5e7eb",
-          fontFamily: appFont,
-          fontSize:14,
+          fontFamily: APP_FONT,
+          fontSize: 13,
+          boxShadowSecondary: "0 8px 24px rgba(15, 23, 42, 0.06)",
         },
       }}
     >
-      <AppErrorBoundary>
-        <HashRouter>
-          <AppShell routes={APP_ROUTES} navItems={APP_NAV_ITEMS}>
-            <Routes>
-              <Route path={APP_ROUTES.home} element={<DashboardOverview />} />
-              <Route path={APP_ROUTES.watchlist} element={<WatchlistRoute />} />
-              <Route path={APP_ROUTES.stockDetail} element={<StockDetailRoute />} />
-              <Route path={APP_ROUTES.news} element={<NewsCenterRoute />} />
-              <Route path={APP_ROUTES.scheduler} element={<SchedulerRoute />} />
-              <Route path={APP_ROUTES.analysis} element={<AnalysisRoute />} />
-              <Route path={APP_ROUTES.reports} element={<ReportHistoryRoute />} />
-              <Route path={APP_ROUTES.tasks} element={<TaskHistoryRoute />} />
-              <Route path={APP_ROUTES.settings} element={<SettingsRoute />} />
-              <Route path={APP_ROUTES.aiSettings} element={<AISettingsRoute />} />
-              <Route path="*" element={<Alert message="页面不存在" type="warning" showIcon />} />
-            </Routes>
-          </AppShell>
-        </HashRouter>
-      </AppErrorBoundary>
+      <AntApp>
+        <AppErrorBoundary>
+          <HashRouter>
+            <AppShell routes={APP_ROUTES} navItems={APP_NAV_ITEMS}>
+              <Suspense
+                fallback={
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                    正在连接本地核心服务 <Spin className="ml-2" size="small" />
+                  </div>
+                }
+              >
+                <Routes>
+                  <Route path={APP_ROUTES.home} element={<DashboardPage />} />
+                  <Route path={APP_ROUTES.watchlist} element={<WatchlistPage />} />
+                  <Route path={APP_ROUTES.stockDetail} element={<StockDetailRoute />} />
+                  <Route path={APP_ROUTES.news} element={<NewsCenterPage />} />
+                  <Route path={APP_ROUTES.scheduler} element={<SchedulerRoute />} />
+                  <Route path={APP_ROUTES.analysis} element={<AnalysisPage />} />
+                  <Route path={APP_ROUTES.analysisRunning} element={<AnalysisRunningPage />} />
+                  <Route path={APP_ROUTES.reports} element={<ReportHistoryPage />} />
+                  <Route path={APP_ROUTES.reportDetail} element={<ReportDetailPage />} />
+                  <Route path={APP_ROUTES.tasks} element={<TaskHistoryPage />} />
+                  <Route path={APP_ROUTES.settings} element={<SettingsPage />} />
+                  <Route path={APP_ROUTES.aiSettings} element={<AISettingsRoute />} />
+                  <Route path="*" element={<Alert title="页面不存在" type="warning" showIcon />} />
+                </Routes>
+              </Suspense>
+            </AppShell>
+          </HashRouter>
+        </AppErrorBoundary>
+      </AntApp>
     </ConfigProvider>
   );
 }
@@ -221,35 +271,6 @@ type SchedulerViewState = {
 type AISettingsViewState = {
   configs: AIConfig[];
   templates: PromptTemplate[];
-};
-
-type AnalysisViewState = AISettingsViewState & {
-  taskNotificationsEnabled: boolean;
-};
-
-type AnalysisFormState = {
-  symbol: string;
-  analysisType: AnalysisTaskCreatePayload["analysis_type"];
-  aiConfigID: string;
-  promptTemplateID: string;
-  usePosition: boolean;
-  costPrice: string;
-  shares: string;
-  riskLevel: string;
-};
-
-type AnalysisRunState = {
-  taskID: string;
-  status: string;
-  lastEventID: number;
-  chunks: string[];
-  events: TaskEventItem[];
-  report: AnalysisReport | null;
-};
-
-type TaskHistoryDetailState = {
-  task: TaskItem;
-  events: TaskEventItem[];
 };
 
 type SettingsViewState = {
@@ -308,12 +329,6 @@ type StockDetailViewState = {
   kline: MarketKlineItem[];
   indicators: MarketIndicatorsResult;
   news: NewsItem[];
-};
-
-type NewsCenterViewState = {
-  market: NewsItem[];
-  symbol: NewsItem[];
-  symbolValue: string;
 };
 
 function AISettingsRoute() {
@@ -461,10 +476,10 @@ function AISettingsRoute() {
   };
 
   if (loadError) {
-    return <Alert message="模型配置读取失败" description={loadError} type="error" showIcon />;
+    return <Alert title="模型配置读取失败" description={loadError} type="error" showIcon />;
   }
   if (!state) {
-    return <Alert message="正在读取模型配置" description={<Spin size="small" />} type="info" showIcon />;
+    return <Alert title="正在读取模型配置" description={<Spin size="small" />} type="info" showIcon />;
   }
 
   return (
@@ -475,8 +490,8 @@ function AISettingsRoute() {
         </Typography.Title>
         <Typography.Text type="secondary">OpenAI-compatible Provider、一次性 API Key 写入和 Prompt 模板管理。</Typography.Text>
       </div>
-      {actionError ? <Alert message={actionError} type="error" showIcon /> : null}
-      {actionMessage ? <Alert message={actionMessage} type="success" showIcon /> : null}
+      {actionError ? <Alert title={actionError} type="error" showIcon /> : null}
+      {actionMessage ? <Alert title={actionMessage} type="success" showIcon /> : null}
       <section className="rounded-md border border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <Typography.Title level={4} className="m-0">
@@ -732,637 +747,6 @@ function AISettingsRoute() {
   );
 }
 
-function AnalysisRoute() {
-  const [state, setState] = useState<AnalysisViewState | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const [form, setForm] = useState<AnalysisFormState>(() => defaultAnalysisForm());
-  const [run, setRun] = useState<AnalysisRunState | null>(null);
-  const notifiedTerminalEventsRef = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    let active = true;
-    Promise.all([aiConfigList(), promptTemplatesList(), settingsGet(["notifications.task_terminal"])])
-      .then(([configs, templates, settings]) => {
-        if (!active) {
-          return;
-        }
-        const nextState = {
-          configs: configs.items,
-          templates: templates.items,
-          taskNotificationsEnabled: taskNotificationsEnabledFromSettings(settings.items),
-        };
-        setState(nextState);
-        setLoadError(null);
-        setForm((current) => ({
-          ...current,
-          aiConfigID: current.aiConfigID || String(defaultAnalysisConfig(nextState.configs)?.id ?? ""),
-          promptTemplateID: current.promptTemplateID || String(defaultAnalysisTemplate(nextState.templates)?.id ?? ""),
-        }));
-      })
-      .catch((error: Error) => {
-        if (active) {
-          setLoadError(redactSensitiveText(error.message));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!state) {
-      return;
-    }
-    const validationError = validateAnalysisForm(form, state);
-    if (validationError) {
-      setActionError(validationError);
-      return;
-    }
-
-    const payload = analysisPayloadFromForm(form, state);
-    setActionError(null);
-    setActionMessage(null);
-    setRunning(true);
-    setRun(null);
-    notifiedTerminalEventsRef.current.clear();
-    analysisTaskCreate(payload)
-      .then(async (result) => {
-        setRun({
-          taskID: result.task_id,
-          status: result.status,
-          lastEventID: 0,
-          chunks: [],
-          events: [],
-          report: null,
-        });
-        const subscription = await analysisTaskSubscribe(result.task_id, 0);
-        const eventResult = await taskEvents(result.task_id, 0);
-        const events = eventResult.items;
-        for (const item of events) {
-          notifyAnalysisTerminalEvent(
-            item,
-            payload.symbol,
-            state.taskNotificationsEnabled,
-            notifiedTerminalEventsRef.current,
-          );
-        }
-        const report = await loadAnalysisReport(result.task_id, events);
-        setRun({
-          taskID: result.task_id,
-          status: statusFromEvents(events) || result.status,
-          lastEventID: latestEventID(events, subscription.last_event_id),
-          chunks: chunksFromEvents(events),
-          events,
-          report,
-        });
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setRunning(false));
-  };
-
-  const cancel = () => {
-    if (!run || terminalTaskStatuses.has(run.status)) {
-      return;
-    }
-    setActionError(null);
-    setActionMessage(null);
-    setCancelling(true);
-    analysisTaskCancel(run.taskID)
-      .then((result) => {
-        setRun((current) =>
-          current
-            ? {
-                ...current,
-                status: result.status,
-              }
-            : current,
-        );
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setCancelling(false));
-  };
-
-  const copyReportMarkdown = (report: AnalysisReport) => {
-    setActionError(null);
-    setActionMessage(null);
-    const writer = navigator.clipboard?.writeText;
-    if (!writer) {
-      setActionError("当前环境不支持复制 Markdown");
-      return;
-    }
-    writer.call(navigator.clipboard, reportMarkdown(report))
-      .then(() => setActionMessage(`已复制 Markdown ${report.id}`))
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)));
-  };
-
-  const exportReportMarkdown = (report: AnalysisReport) => {
-    setActionError(null);
-    setActionMessage(null);
-    const blob = new Blob([reportMarkdown(report)], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = reportMarkdownFileName(report);
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setActionMessage(`已导出 Markdown ${report.id}`);
-  };
-
-  if (loadError) {
-    return <Alert message="AI 分析读取失败" description={loadError} type="error" showIcon />;
-  }
-  if (!state) {
-    return <Alert message="正在读取 AI 分析配置" description={<Spin size="small" />} type="info" showIcon />;
-  }
-
-  return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <Typography.Title level={2} className="m-0">
-          AI 分析
-        </Typography.Title>
-        <Typography.Text type="secondary">基于真实行情、已保存模型配置和 Prompt 模板创建单股分析任务。</Typography.Text>
-      </div>
-      {actionError ? <Alert message={actionError} type="error" showIcon /> : null}
-      {actionMessage ? <Alert message={actionMessage} type="success" showIcon /> : null}
-      <Alert message="AI 生成内容仅作研究辅助，不构成投资建议。" type="warning" showIcon />
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            创建分析
-          </Typography.Title>
-        </div>
-        <form className="grid gap-3 px-4 py-4 md:grid-cols-4" onSubmit={submit}>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">股票代码</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              placeholder="600000.SH"
-              value={form.symbol}
-              onChange={(event) => setForm((current) => ({ ...current, symbol: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">分析类型</span>
-            <select
-              className="h-8 rounded border border-slate-300 px-2"
-              value={form.analysisType}
-              onChange={(event) => setForm((current) => ({ ...current, analysisType: event.target.value as AnalysisFormState["analysisType"] }))}
-            >
-              <option value="stock_full">综合分析</option>
-              <option value="technical">技术分析</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">AI 模型</span>
-            <select
-              className="h-8 rounded border border-slate-300 px-2"
-              value={form.aiConfigID}
-              onChange={(event) => setForm((current) => ({ ...current, aiConfigID: event.target.value }))}
-            >
-              <option value="">请选择</option>
-              {state.configs.map((config) => (
-                <option key={config.id} value={config.id}>
-                  {config.name || `模型配置 ${config.id}`}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">Prompt 模板</span>
-            <select
-              className="h-8 rounded border border-slate-300 px-2"
-              value={form.promptTemplateID}
-              onChange={(event) => setForm((current) => ({ ...current, promptTemplateID: event.target.value }))}
-            >
-              <option value="">请选择</option>
-              {state.templates
-                .filter((template) => template.type === form.analysisType || template.type === "custom")
-                .map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.name || `Prompt 模板 ${template.id}`}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={form.usePosition}
-              onChange={(event) => setForm((current) => ({ ...current, usePosition: event.target.checked }))}
-            />
-            使用一次性持仓输入
-          </label>
-          {form.usePosition ? (
-            <>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-xs text-slate-500">成本价</span>
-                <input
-                  className="h-8 rounded border border-slate-300 px-2"
-                  inputMode="decimal"
-                  value={form.costPrice}
-                  onChange={(event) => setForm((current) => ({ ...current, costPrice: event.target.value }))}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-xs text-slate-500">股数</span>
-                <input
-                  className="h-8 rounded border border-slate-300 px-2"
-                  inputMode="numeric"
-                  value={form.shares}
-                  onChange={(event) => setForm((current) => ({ ...current, shares: event.target.value }))}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-xs text-slate-500">风险偏好</span>
-                <select
-                  className="h-8 rounded border border-slate-300 px-2"
-                  value={form.riskLevel}
-                  onChange={(event) => setForm((current) => ({ ...current, riskLevel: event.target.value }))}
-                >
-                  <option value="low">低</option>
-                  <option value="medium">中</option>
-                  <option value="high">高</option>
-                </select>
-              </label>
-            </>
-          ) : null}
-          <div className="flex flex-wrap gap-2 md:col-span-4">
-            <Button htmlType="submit" loading={running}>
-              开始分析
-            </Button>
-            {run && !terminalTaskStatuses.has(run.status) ? (
-              <Button htmlType="button" danger loading={cancelling} onClick={cancel}>
-                停止生成
-              </Button>
-            ) : null}
-          </div>
-        </form>
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            任务事件
-          </Typography.Title>
-          {run ? <Tag color={analysisStatusColor(run.status)}>{run.status}</Tag> : <Tag>未开始</Tag>}
-        </div>
-        {!run ? (
-          <div className="px-4 py-8 text-sm text-slate-500">暂无分析任务</div>
-        ) : (
-          <div className="grid gap-0">
-            <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">Task ID: {run.taskID}</div>
-            {run.chunks.length > 0 ? (
-              <div className="border-t border-slate-100 px-4 py-3">
-                <div className="text-xs text-slate-500">生成片段</div>
-                <div className="mt-2 whitespace-pre-wrap text-sm text-slate-800">{run.chunks.join("\n")}</div>
-              </div>
-            ) : null}
-            {run.events.map((item) => (
-              <div key={item.id} className="grid gap-2 border-t border-slate-100 px-4 py-3 text-sm md:grid-cols-[auto_1fr_auto]">
-                <span className="text-xs text-slate-500">#{item.id}</span>
-                <span>
-                  {item.event}
-                  {taskEventErrorText(item) ? (
-                    <span className="mt-1 block text-xs text-red-600">{taskEventErrorText(item)}</span>
-                  ) : null}
-                </span>
-                <span className="text-xs text-slate-500">{item.created_at || ""}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            分析报告
-          </Typography.Title>
-          {run?.report ? (
-            <div className="flex flex-wrap gap-2">
-              <Button size="small" onClick={() => copyReportMarkdown(run.report!)}>
-                复制 Markdown {run.report.id}
-              </Button>
-              <Button size="small" onClick={() => exportReportMarkdown(run.report!)}>
-                导出 Markdown {run.report.id}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-        {run?.report ? (
-          <div className="px-4 py-4 text-sm">
-            <div className="font-medium text-slate-900">{run.report.title || `${run.report.symbol} 分析报告`}</div>
-            {run.report.risk_summary ? <div className="mt-2 rounded bg-amber-50 px-3 py-2 text-amber-800">{run.report.risk_summary}</div> : null}
-            <div className="mt-4 space-y-2 text-slate-800">
-              {(run.report.content_markdown || "").split("\n").map((line, index) => (
-                <p key={`${index}-${line}`} className="m-0 whitespace-pre-wrap">
-                  {line}
-                </p>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="px-4 py-8 text-sm text-slate-500">报告会在任务成功后展示</div>
-        )}
-      </section>
-    </section>
-  );
-}
-
-function ReportHistoryRoute() {
-  const [reports, setReports] = useState<AnalysisReport[] | null>(null);
-  const [selectedReport, setSelectedReport] = useState<AnalysisReport | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [actionPending, setActionPending] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    reportList()
-      .then((result) => {
-        if (active) {
-          setReports(result.items);
-          setLoadError(null);
-        }
-      })
-      .catch((error: Error) => {
-        if (active) {
-          setLoadError(redactSensitiveText(error.message));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const viewReport = (id: number) => {
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending(`view-report-${id}`);
-    reportGet(id)
-      .then((report) => setSelectedReport(report))
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const deleteReport = (id: number) => {
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending(`delete-report-${id}`);
-    reportDelete(id)
-      .then(() => {
-        setReports((current) => (current ?? []).filter((report) => report.id !== id));
-        setSelectedReport((current) => (current?.id === id ? null : current));
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const copyMarkdown = (report: AnalysisReport) => {
-    setActionError(null);
-    setActionMessage(null);
-    const writer = navigator.clipboard?.writeText;
-    if (!writer) {
-      setActionError("当前环境不支持复制 Markdown");
-      return;
-    }
-    writer.call(navigator.clipboard, reportMarkdown(report))
-      .then(() => setActionMessage(`已复制 Markdown ${report.id}`))
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)));
-  };
-
-  const exportMarkdown = (report: AnalysisReport) => {
-    setActionError(null);
-    setActionMessage(null);
-    const blob = new Blob([reportMarkdown(report)], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = reportMarkdownFileName(report);
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setActionMessage(`已导出 Markdown ${report.id}`);
-  };
-
-  if (loadError) {
-    return <Alert message="报告历史读取失败" description={loadError} type="error" showIcon />;
-  }
-  if (!reports) {
-    return <Alert message="正在读取报告历史" description={<Spin size="small" />} type="info" showIcon />;
-  }
-
-  return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <Typography.Title level={2} className="m-0">
-          报告历史
-        </Typography.Title>
-        <Typography.Text type="secondary">查看本地保存的 AI 分析报告，删除操作只软删除报告记录。</Typography.Text>
-      </div>
-      {actionError ? <Alert message={actionError} type="error" showIcon /> : null}
-      {actionMessage ? <Alert message={actionMessage} type="success" showIcon /> : null}
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            报告列表
-          </Typography.Title>
-        </div>
-        {reports.length === 0 ? (
-          <div className="px-4 py-8 text-sm text-slate-500">暂无分析报告</div>
-        ) : (
-          <div className="grid gap-0">
-            {reports.map((report) => (
-              <div key={report.id} className="grid gap-3 border-t border-slate-100 px-4 py-3 text-sm md:grid-cols-[1fr_auto]">
-                <div className="min-w-0">
-                  <div className="truncate font-medium text-slate-900">{report.title || `${report.symbol} 分析报告`}</div>
-                  <div className="mt-1 text-xs text-slate-500">{[report.symbol, report.analysis_type, report.model_name, report.created_at].filter(Boolean).join(" · ")}</div>
-                  {report.risk_summary ? <div className="mt-2 line-clamp-2 text-slate-600">{report.risk_summary}</div> : null}
-                </div>
-                <div className="flex flex-wrap items-start gap-2">
-                  <Button size="small" loading={actionPending === `view-report-${report.id}`} onClick={() => viewReport(report.id)}>
-                    查看报告 {report.id}
-                  </Button>
-                  <Button size="small" danger loading={actionPending === `delete-report-${report.id}`} onClick={() => deleteReport(report.id)}>
-                    删除报告 {report.id}
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            报告详情
-          </Typography.Title>
-          {selectedReport ? (
-            <div className="flex flex-wrap gap-2">
-              <Button size="small" onClick={() => copyMarkdown(selectedReport)}>
-                复制 Markdown {selectedReport.id}
-              </Button>
-              <Button size="small" onClick={() => exportMarkdown(selectedReport)}>
-                导出 Markdown {selectedReport.id}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-        {selectedReport ? (
-          <div className="px-4 py-4 text-sm">
-            <div className="font-medium text-slate-900">{selectedReport.title || `${selectedReport.symbol} 分析报告`}</div>
-            {selectedReport.risk_summary ? <div className="mt-2 rounded bg-amber-50 px-3 py-2 text-amber-800">{selectedReport.risk_summary}</div> : null}
-            <div className="mt-4 space-y-2 text-slate-800">
-              {markdownLines(selectedReport.content_markdown).map((line, index) => (
-                <p key={`${index}-${line}`} className="m-0 whitespace-pre-wrap">
-                  {line}
-                </p>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="px-4 py-8 text-sm text-slate-500">请选择一份报告查看详情</div>
-        )}
-      </section>
-    </section>
-  );
-}
-
-function TaskHistoryRoute() {
-  const [tasks, setTasks] = useState<TaskItem[] | null>(null);
-  const [detail, setDetail] = useState<TaskHistoryDetailState | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionPending, setActionPending] = useState<string | null>(null);
-  const detailRequestRef = useRef(0);
-
-  useEffect(() => {
-    let active = true;
-    taskList(50)
-      .then((result) => {
-        if (active) {
-          setTasks(result.items);
-          setLoadError(null);
-        }
-      })
-      .catch((error: Error) => {
-        if (active) {
-          setLoadError(redactSensitiveText(error.message));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const viewTask = (taskID: string) => {
-    const requestID = detailRequestRef.current + 1;
-    detailRequestRef.current = requestID;
-    setActionError(null);
-    setActionPending(`view-task-${taskID}`);
-    Promise.all([taskGet(taskID), taskEvents(taskID, 0)])
-      .then(async ([task, events]) => {
-        if (detailRequestRef.current !== requestID) {
-          return;
-        }
-        const initialEvents = events.items;
-        setDetail({ task, events: initialEvents });
-        const lastEventID = latestEventID(initialEvents, 0);
-        const currentStatus = statusFromEvents(initialEvents) || task.status;
-        if (terminalTaskStatuses.has(currentStatus)) {
-          return;
-        }
-        await analysisTaskSubscribe(taskID, lastEventID);
-        const nextEvents = await taskEvents(taskID, lastEventID);
-        if (detailRequestRef.current !== requestID) {
-          return;
-        }
-        const mergedEvents = mergeTaskEvents(initialEvents, nextEvents.items);
-        const nextStatus = statusFromEvents(mergedEvents) || task.status;
-        setDetail({ task: { ...task, status: nextStatus }, events: mergedEvents });
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  if (loadError) {
-    return <Alert message="任务历史读取失败" description={loadError} type="error" showIcon />;
-  }
-  if (!tasks) {
-    return <Alert message="正在读取任务历史" description={<Spin size="small" />} type="info" showIcon />;
-  }
-
-  return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <Typography.Title level={2} className="m-0">
-          任务历史
-        </Typography.Title>
-        <Typography.Text type="secondary">查看本地分析任务、失败原因和持久化事件回放。</Typography.Text>
-      </div>
-      {actionError ? <Alert message={actionError} type="error" showIcon /> : null}
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            任务列表
-          </Typography.Title>
-        </div>
-        {tasks.length === 0 ? (
-          <div className="px-4 py-8 text-sm text-slate-500">暂无任务记录</div>
-        ) : (
-          <div className="grid gap-0">
-            {tasks.map((task) => (
-              <div key={task.id} className="grid gap-3 border-t border-slate-100 px-4 py-3 text-sm md:grid-cols-[1fr_auto_auto]">
-                <div className="min-w-0">
-                  <div className="truncate font-medium text-slate-900">{task.title || task.id}</div>
-                  <div className="mt-1 text-xs text-slate-500">{[task.id, task.type, task.updated_at || task.created_at].filter(Boolean).join(" · ")}</div>
-                  {task.error_message ? <div className="mt-2 text-red-600">{task.error_message}</div> : null}
-                </div>
-                <Tag color={analysisStatusColor(task.status)}>{task.status}</Tag>
-                <Button size="small" loading={actionPending === `view-task-${task.id}`} onClick={() => viewTask(task.id)}>
-                  查看任务 {task.id}
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            事件回放
-          </Typography.Title>
-        </div>
-        {detail ? (
-          <div className="grid gap-0">
-            <div className="border-t border-slate-100 px-4 py-3 text-sm">
-              <div className="font-medium text-slate-900">{detail.task.title || detail.task.id}</div>
-              <div className="mt-1 text-xs text-slate-500">{detail.task.id}</div>
-              {detail.task.error_message ? <div className="mt-2 text-red-600">{detail.task.error_message}</div> : null}
-            </div>
-            {detail.events.map((event) => (
-              <div key={event.id} className="grid gap-2 border-t border-slate-100 px-4 py-3 text-sm md:grid-cols-[auto_1fr_auto]">
-                <span className="text-xs text-slate-500">#{event.id}</span>
-                <div>
-                  <div className="font-medium text-slate-900">{event.event}</div>
-                  {taskEventText(event) ? <div className="mt-1 text-slate-600">{taskEventText(event)}</div> : null}
-                </div>
-                <span className="text-xs text-slate-500">{event.created_at || ""}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="px-4 py-8 text-sm text-slate-500">请选择一个任务查看事件</div>
-        )}
-      </section>
-    </section>
-  );
-}
-
 function SettingsRoute() {
   const [state, setState] = useState<SettingsViewState | null>(null);
   const [form, setForm] = useState<SettingsFormState>(() => defaultSettingsForm());
@@ -1495,10 +879,10 @@ function SettingsRoute() {
   };
 
   if (loadError) {
-    return <Alert message="设置中心读取失败" description={loadError} type="error" showIcon />;
+    return <Alert title="设置中心读取失败" description={loadError} type="error" showIcon />;
   }
   if (!state) {
-    return <Alert message="正在读取设置中心" description={<Spin size="small" />} type="info" showIcon />;
+    return <Alert title="正在读取设置中心" description={<Spin size="small" />} type="info" showIcon />;
   }
 
   return (
@@ -1509,8 +893,8 @@ function SettingsRoute() {
         </Typography.Title>
         <Typography.Text type="secondary">工作区、代理、缓存、数据源、更新和本地日志。</Typography.Text>
       </div>
-      {actionError ? <Alert message={actionError} type="error" showIcon /> : null}
-      {actionMessage ? <Alert message={actionMessage} type="success" showIcon /> : null}
+      {actionError ? <Alert title={actionError} type="error" showIcon /> : null}
+      {actionMessage ? <Alert title={actionMessage} type="success" showIcon /> : null}
       <section className="rounded-md border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
           <Typography.Title level={4} className="m-0">
@@ -1704,7 +1088,6 @@ function SettingsRoute() {
 const allowedPromptTemplateTypes: PromptTemplateType[] = ["system", "stock_full", "technical", "custom"];
 const allowedPromptVariables = ["stock_name", "stock_code", "market", "quote", "kline_summary", "indicators", "news", "analysis_language"];
 const allowedPromptVariableSet = new Set(allowedPromptVariables);
-const terminalTaskStatuses = new Set(["SUCCESS", "FAILED", "CANCELLED"]);
 const settingsPageKeys = ["proxy_url", "proxy_credential_ref", "window.close_to_tray", "notifications.task_terminal", "update.manifest_url", "update.allowed_hosts"];
 
 function defaultSettingsForm(): SettingsFormState {
@@ -1779,241 +1162,6 @@ function formatBytes(value: number) {
     return `${value} B`;
   }
   return `${(value / 1024).toFixed(1)} KiB`;
-}
-
-function defaultAnalysisForm(): AnalysisFormState {
-  return {
-    symbol: "",
-    analysisType: "stock_full",
-    aiConfigID: "",
-    promptTemplateID: "",
-    usePosition: false,
-    costPrice: "",
-    shares: "",
-    riskLevel: "medium",
-  };
-}
-
-function defaultAnalysisConfig(configs: AIConfig[]) {
-  return configs.find((config) => config.is_default && config.has_api_key) ?? configs.find((config) => config.has_api_key) ?? configs[0];
-}
-
-function defaultAnalysisTemplate(templates: PromptTemplate[]) {
-  return templates.find((template) => template.type === "stock_full") ?? templates[0];
-}
-
-function validateAnalysisForm(form: AnalysisFormState, state: AnalysisViewState) {
-  if (!form.symbol.trim()) {
-    return "请填写股票代码";
-  }
-  const config = selectedAnalysisConfig(form, state);
-  if (!config || !config.has_api_key || !config.api_key_ref) {
-    return "请选择已配置 API Key 的模型";
-  }
-  if (!selectedAnalysisTemplate(form, state)) {
-    return "请选择 Prompt 模板";
-  }
-  if (form.usePosition) {
-    if (!positiveNumber(form.costPrice)) {
-      return "成本价必须是正数";
-    }
-    if (!positiveNumber(form.shares)) {
-      return "股数必须是正数";
-    }
-  }
-  return "";
-}
-
-function analysisPayloadFromForm(form: AnalysisFormState, state: AnalysisViewState): AnalysisTaskCreatePayload {
-  const config = selectedAnalysisConfig(form, state);
-  const template = selectedAnalysisTemplate(form, state);
-  if (!config || !template) {
-    throw new Error("分析配置缺失");
-  }
-  return {
-    symbol: form.symbol.trim(),
-    analysis_type: form.analysisType,
-    ai_config_id: config.id,
-    api_key_ref: config.api_key_ref,
-    prompt_template_id: template.id,
-    user_position: form.usePosition
-      ? {
-          cost_price: Number(form.costPrice),
-          shares: Number(form.shares),
-          risk_level: form.riskLevel,
-        }
-      : null,
-  };
-}
-
-function selectedAnalysisConfig(form: AnalysisFormState, state: AnalysisViewState) {
-  return state.configs.find((config) => config.id === Number(form.aiConfigID));
-}
-
-function selectedAnalysisTemplate(form: AnalysisFormState, state: AnalysisViewState) {
-  return state.templates.find((template) => template.id === Number(form.promptTemplateID));
-}
-
-function positiveNumber(value: string) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0;
-}
-
-function chunksFromEvents(events: TaskEventItem[]) {
-  return events.map((event) => taskEventText(event)).filter(Boolean);
-}
-
-function taskEventText(event: TaskEventItem) {
-  const data = event.data;
-  for (const key of ["content", "delta", "text", "message"]) {
-    const value = data[key];
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-  return "";
-}
-
-function taskEventErrorText(event: TaskEventItem) {
-  if (event.event !== "TASK_FAILED") {
-    return "";
-  }
-  for (const key of ["error_message", "error", "message"]) {
-    const value = event.data[key];
-    if (typeof value === "string" && value.trim()) {
-      return redactSensitiveText(value);
-    }
-  }
-  return "";
-}
-
-function notifyAnalysisTerminalEvent(event: TaskEventItem, symbol: string, enabled: boolean, notifiedEvents: Set<string>) {
-  if (!enabled) {
-    return;
-  }
-  const payload = analysisTerminalNotificationPayload(event, symbol);
-  if (!payload) {
-    return;
-  }
-  const key = `${event.event}:${event.id}`;
-  if (notifiedEvents.has(key)) {
-    return;
-  }
-  notifiedEvents.add(key);
-  void sendDesktopNotification(payload).catch(() => undefined);
-}
-
-function analysisTerminalNotificationPayload(event: TaskEventItem, symbol: string): DesktopNotificationPayload | null {
-  if (event.event === "TASK_SUCCESS") {
-    return {
-      title: "AI 分析已完成",
-      body: `${symbol} 分析报告已生成`,
-    };
-  }
-  if (event.event === "TASK_FAILED") {
-    return {
-      title: "AI 分析失败",
-      body: taskEventErrorText(event) || `${symbol} 分析任务失败`,
-    };
-  }
-  return null;
-}
-
-function statusFromEvents(events: TaskEventItem[]) {
-  for (const event of [...events].reverse()) {
-    if (event.event === "TASK_SUCCESS") {
-      return "SUCCESS";
-    }
-    if (event.event === "TASK_FAILED") {
-      return "FAILED";
-    }
-    if (event.event === "TASK_CANCELLED") {
-      return "CANCELLED";
-    }
-    const status = event.data.status;
-    if (typeof status === "string" && status.trim()) {
-      return status;
-    }
-  }
-  return "";
-}
-
-function latestEventID(events: TaskEventItem[], fallback: number) {
-  return events.reduce((current, event) => Math.max(current, event.id), fallback);
-}
-
-function mergeTaskEvents(currentEvents: TaskEventItem[], nextEvents: TaskEventItem[]) {
-  const byID = new Map<number, TaskEventItem>();
-  for (const event of [...currentEvents, ...nextEvents]) {
-    byID.set(event.id, event);
-  }
-  return [...byID.values()].sort((left, right) => left.id - right.id);
-}
-
-async function loadAnalysisReport(taskID: string, events: TaskEventItem[]) {
-  const reportID = reportIDFromEvents(events);
-  if (reportID > 0) {
-    return reportGet(reportID);
-  }
-  if (!events.some((event) => event.event === "TASK_SUCCESS")) {
-    return null;
-  }
-  const reports = await reportList();
-  return reports.items.find((report) => report.task_id === taskID) ?? null;
-}
-
-function markdownLines(content: string | undefined) {
-  return (content || "").split("\n").filter((line) => line.length > 0);
-}
-
-function reportMarkdown(report: AnalysisReport) {
-  const title = report.title?.trim() || `${report.symbol} 分析报告`;
-  const lines = [`# ${title}`, ""];
-  if (report.symbol) {
-    lines.push(`- 股票代码：${report.symbol}`);
-  }
-  if (report.analysis_type) {
-    lines.push(`- 分析类型：${report.analysis_type}`);
-  }
-  if (report.created_at) {
-    lines.push(`- 生成时间：${report.created_at}`);
-  }
-  lines.push("", (report.content_markdown || "").trim());
-  if (report.risk_summary?.trim()) {
-    lines.push("", "## 风险摘要", "", report.risk_summary.trim());
-  }
-  return `${lines.join("\n").trim()}\n`;
-}
-
-function reportMarkdownFileName(report: AnalysisReport) {
-  const title = (report.title?.trim() || `${report.symbol || "analysis"}-report`).replace(/[^\w\u4e00-\u9fa5.-]+/g, "-");
-  return `${title || "analysis-report"}.md`;
-}
-
-function reportIDFromEvents(events: TaskEventItem[]) {
-  for (const event of [...events].reverse()) {
-    const value = event.data.report_id;
-    if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-      return value;
-    }
-    if (typeof value === "string" && positiveInteger(value)) {
-      return Number(value);
-    }
-  }
-  return 0;
-}
-
-function analysisStatusColor(status: string) {
-  if (status === "SUCCESS") {
-    return "green";
-  }
-  if (status === "FAILED") {
-    return "red";
-  }
-  if (status === "CANCELLED") {
-    return "default";
-  }
-  return "blue";
 }
 
 function defaultAIConfigForm(): AIConfigFormState {
@@ -2253,9 +1401,9 @@ function WatchlistRoute() {
     setState((current) =>
       current
         ? {
-            ...current,
-            items: current.items.map((item) => (item.id === id ? { ...item, ...patch } : item)),
-          }
+          ...current,
+          items: current.items.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+        }
         : current,
     );
   };
@@ -2282,9 +1430,9 @@ function WatchlistRoute() {
         setState((current) =>
           current
             ? {
-                items: current.items.filter((value) => value.id !== item.id),
-                quotes: Object.fromEntries(Object.entries(current.quotes).filter(([symbol]) => symbol !== item.symbol)),
-              }
+              items: current.items.filter((value) => value.id !== item.id),
+              quotes: Object.fromEntries(Object.entries(current.quotes).filter(([symbol]) => symbol !== item.symbol)),
+            }
             : current,
         );
         setActionMessage(`${item.symbol} 已删除`);
@@ -2320,9 +1468,9 @@ function WatchlistRoute() {
         setState((current) =>
           current
             ? {
-                ...current,
-                quotes: { ...current.quotes, [item.symbol]: quote },
-              }
+              ...current,
+              quotes: { ...current.quotes, [item.symbol]: quote },
+            }
             : current,
         );
         setActionMessage(`${item.symbol} 行情已刷新`);
@@ -2338,10 +1486,10 @@ function WatchlistRoute() {
   };
 
   if (loadError) {
-    return <Alert message="自选股读取失败" description={loadError} type="error" showIcon />;
+    return <Alert title="自选股读取失败" description={loadError} type="error" showIcon />;
   }
   if (!state) {
-    return <Alert message="正在读取自选股" description={<Spin size="small" />} type="info" showIcon />;
+    return <Alert title="正在读取自选股" description={<Spin size="small" />} type="info" showIcon />;
   }
 
   const sortedItems = [...state.items].sort((left, right) => left.sort_order - right.sort_order || left.symbol.localeCompare(right.symbol));
@@ -2358,8 +1506,8 @@ function WatchlistRoute() {
         <Button aria-label="刷新" onClick={refresh}>刷新</Button>
       </div>
 
-      {actionError ? <Alert message={actionError} type="error" showIcon /> : null}
-      {actionMessage ? <Alert message={actionMessage} type="success" showIcon /> : null}
+      {actionError ? <Alert title={actionError} type="error" showIcon /> : null}
+      {actionMessage ? <Alert title={actionMessage} type="success" showIcon /> : null}
 
       <form onSubmit={search} className="flex flex-wrap items-end gap-3 rounded-md border border-slate-200 bg-white p-4">
         <label className="flex min-w-60 flex-1 flex-col gap-1 text-sm">
@@ -2504,166 +1652,6 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(value);
 }
 
-function NewsCenterRoute() {
-  const [state, setState] = useState<NewsCenterViewState | null>(null);
-  const [symbolInput, setSymbolInput] = useState("");
-  const [tagFilter, setTagFilter] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const loadMarketNews = () => {
-    setLoading(true);
-    newsMarket({ market: "CN", limit: 50 })
-      .then((result) => {
-        setState((current) => ({
-          market: normalizeNewsItems(result.items),
-          symbol: current?.symbol ?? [],
-          symbolValue: current?.symbolValue ?? "",
-        }));
-        setError(null);
-      })
-      .catch((cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : "资讯读取失败");
-      })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    newsMarket({ market: "CN", limit: 50 })
-      .then((result) => {
-        if (active) {
-          setState({ market: normalizeNewsItems(result.items), symbol: [], symbolValue: "" });
-          setError(null);
-        }
-      })
-      .catch((cause: unknown) => {
-        if (active) {
-          setError(cause instanceof Error ? cause.message : "资讯读取失败");
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const loadSymbolNews = (event: FormEvent) => {
-    event.preventDefault();
-    const symbol = symbolInput.trim();
-    if (!symbol) {
-      setError("股票代码不能为空");
-      return;
-    }
-    setLoading(true);
-    newsList({ symbol, limit: 50 })
-      .then((result) => {
-        setState((current) => ({
-          market: current?.market ?? [],
-          symbol: normalizeNewsItems(result.items),
-          symbolValue: symbol,
-        }));
-        setError(null);
-      })
-      .catch((cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : "资讯读取失败");
-      })
-      .finally(() => setLoading(false));
-  };
-
-  const visibleItems = useMemo(() => {
-    const filter = tagFilter.trim();
-    const items = [...(state?.market ?? []), ...(state?.symbol ?? [])];
-    return filter ? items.filter((item) => item.tags?.some((tag) => tag.includes(filter))) : items;
-  }, [state, tagFilter]);
-
-  if (error) {
-    return <Alert message="资讯读取失败" description={error} type="error" showIcon />;
-  }
-
-  return (
-    <section className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        <Typography.Title level={2} className="m-0">
-          资讯中心
-        </Typography.Title>
-        <Typography.Text type="secondary">市场新闻和个股新闻来自本地核心服务，外链只保留 HTTPS 来源。</Typography.Text>
-      </div>
-
-      <section className="rounded-md border border-slate-200 bg-white px-4 py-4">
-        <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto_auto]" onSubmit={loadSymbolNews}>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">股票代码</span>
-            <input
-              aria-label="股票代码"
-              className="h-8 rounded border border-slate-300 px-2"
-              value={symbolInput}
-              onChange={(event) => setSymbolInput(event.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">标签筛选</span>
-            <input
-              aria-label="标签筛选"
-              className="h-8 rounded border border-slate-300 px-2"
-              value={tagFilter}
-              onChange={(event) => setTagFilter(event.target.value)}
-            />
-          </label>
-          <Button className="self-end" htmlType="submit" type="primary">
-            查询个股新闻
-          </Button>
-          <Button className="self-end" onClick={loadMarketNews}>
-            读取市场新闻
-          </Button>
-        </form>
-        {state?.symbolValue ? (
-          <div className="mt-3 text-xs text-slate-500">当前个股：{state.symbolValue}</div>
-        ) : null}
-      </section>
-
-      {loading && !state ? (
-        <Alert message="正在读取资讯" description={<Spin size="small" />} type="info" showIcon />
-      ) : (
-        <DashboardList title="新闻列表" emptyText="暂无资讯">
-          {visibleItems.map((item) => (
-            <NewsCenterItem key={`${item.source}-${item.id}-${item.title}`} item={item} />
-          ))}
-        </DashboardList>
-      )}
-    </section>
-  );
-}
-
-function NewsCenterItem(props: { item: NewsItem }) {
-  return (
-    <article className="border-t border-slate-100 px-4 py-3 text-sm">
-      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-        <div>
-          <div className="font-medium text-slate-900">{props.item.title}</div>
-          <div className="mt-1 text-xs text-slate-500">
-            {[props.item.source, props.item.published_at].filter(Boolean).join(" · ")}
-          </div>
-        </div>
-        {props.item.tags?.length ? (
-          <div className="flex flex-wrap gap-1">
-            {props.item.tags.map((tag) => (
-              <Tag key={tag}>{tag}</Tag>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      {props.item.summary ? <p className="mt-2 text-slate-600">{props.item.summary}</p> : null}
-      <NewsExternalLink url={props.item.url} />
-    </article>
-  );
-}
-
 function NewsExternalLink(props: { url?: string }) {
   const [error, setError] = useState<string | null>(null);
 
@@ -2718,138 +1706,7 @@ async function loadStockDetailState(normalizedSymbol: string, period: string, ad
 }
 
 function StockDetailRoute() {
-  const { symbol = "" } = useParams();
-  const [period, setPeriod] = useState("day");
-  const [adjust, setAdjust] = useState("qfq");
-  const [state, setState] = useState<StockDetailViewState | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-
-  useEffect(() => {
-    const normalizedSymbol = symbol.trim();
-    if (!normalizedSymbol) {
-      setError("股票代码不能为空");
-      return;
-    }
-    let active = true;
-    loadStockDetailState(normalizedSymbol, period, adjust)
-      .then((nextState) => {
-        if (active) {
-          setState(nextState);
-          setError(null);
-        }
-      })
-      .catch((cause: unknown) => {
-        if (active) {
-          setError(cause instanceof Error ? cause.message : "个股详情读取失败");
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [symbol, period, adjust]);
-
-  async function refreshCurrentSymbol() {
-    const normalizedSymbol = symbol.trim();
-    if (!normalizedSymbol) {
-      setRefreshError("股票代码不能为空");
-      return;
-    }
-    setRefreshing(true);
-    setRefreshError(null);
-    setRefreshMessage(null);
-    try {
-      const result = await schedulerRefreshSymbol({
-        symbol: normalizedSymbol,
-        data_type: "all",
-        period,
-        adjust,
-        limit: 120,
-      });
-      if (result.items.some((run) => run.status === "queued" || run.status === "running")) {
-        setRefreshMessage("正在刷新当前股票数据");
-        return;
-      }
-      if (result.items.length > 0 && result.items.every((run) => run.status === "success")) {
-        setState(await loadStockDetailState(normalizedSymbol, period, adjust));
-        setRefreshMessage("刷新完成，已读取最新缓存");
-        return;
-      }
-      setRefreshMessage("已提交单股刷新任务");
-    } catch (cause: unknown) {
-      setRefreshError(cause instanceof Error ? cause.message : "提交单股刷新失败");
-    } finally {
-      setRefreshing(false);
-    }
-  }
-
-  if (error) {
-    return <Alert message="个股详情读取失败" description={error} type="error" showIcon />;
-  }
-  if (!state) {
-    return <Alert message="正在读取个股详情" description={<Spin size="small" />} type="info" showIcon />;
-  }
-
-  return (
-    <section className="flex flex-col gap-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <Typography.Title level={2} className="m-0">
-            {state.quote.symbol || symbol}
-          </Typography.Title>
-          <Typography.Text type="secondary">
-            {[state.quote.provider ? `来源 ${state.quote.provider}` : "", state.quote.quote_time].filter(Boolean).join(" · ")}
-          </Typography.Text>
-        </div>
-        <div className="flex gap-3">
-          <Button className="self-end" aria-label="刷新单股" loading={refreshing} onClick={refreshCurrentSymbol}>
-            刷新单股
-          </Button>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">周期</span>
-            <select
-              aria-label="周期"
-              className="h-8 rounded border border-slate-300 px-2"
-              value={period}
-              onChange={(event) => setPeriod(event.target.value)}
-            >
-              <option value="day">日线</option>
-              <option value="week">周线</option>
-              <option value="month">月线</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">复权</span>
-            <select
-              aria-label="复权"
-              className="h-8 rounded border border-slate-300 px-2"
-              value={adjust}
-              onChange={(event) => setAdjust(event.target.value)}
-            >
-              <option value="none">不复权</option>
-              <option value="qfq">前复权</option>
-              <option value="hfq">后复权</option>
-            </select>
-          </label>
-        </div>
-      </div>
-      {refreshMessage ? <Alert message={refreshMessage} type="success" showIcon /> : null}
-      {refreshError ? <Alert message="提交单股刷新失败" description={refreshError} type="error" showIcon /> : null}
-
-      <div className="grid gap-3 md:grid-cols-4">
-        <Metric label="最新价" value={state.quote.price} />
-        <Metric label="涨跌幅" value={state.quote.change_percent ?? 0} suffix="%" />
-        <Metric label="成交量" value={state.quote.volume ?? 0} />
-        <Metric label="成交额" value={state.quote.amount ?? 0} />
-      </div>
-
-      <KlinePanel items={state.kline} />
-      <IndicatorPanel indicators={state.indicators.indicators} />
-      <NewsPanel items={state.news} />
-    </section>
-  );
+  return <StockDetailPage />;
 }
 
 function KlinePanel(props: { items: MarketKlineItem[] }) {
@@ -3168,10 +2025,10 @@ function SchedulerRoute() {
   };
 
   if (loadError && !state) {
-    return <Alert message="任务调度读取失败" description={loadError} type="error" showIcon />;
+    return <Alert title="任务调度读取失败" description={loadError} type="error" showIcon />;
   }
   if (!state) {
-    return <Alert message="正在读取任务调度" description={<Spin size="small" />} type="info" showIcon />;
+    return <Alert title="正在读取任务调度" description={<Spin size="small" />} type="info" showIcon />;
   }
 
   return (
@@ -3182,9 +2039,9 @@ function SchedulerRoute() {
         </Typography.Title>
         <Typography.Text type="secondary">数据刷新、启动补偿和手动补偿的本地执行状态。</Typography.Text>
       </div>
-      {actionMessage ? <Alert message={actionMessage} type="success" showIcon /> : null}
-      {actionError ? <Alert message={actionError} type="error" showIcon /> : null}
-      {loadError ? <Alert message="任务调度刷新失败" description={loadError} type="warning" showIcon /> : null}
+      {actionMessage ? <Alert title={actionMessage} type="success" showIcon /> : null}
+      {actionError ? <Alert title={actionError} type="error" showIcon /> : null}
+      {loadError ? <Alert title="任务调度刷新失败" description={loadError} type="warning" showIcon /> : null}
       <div className="grid gap-3 md:grid-cols-5">
         <Metric label="任务总数" value={state.status.jobs_total} />
         <Metric label="启用任务" value={state.status.jobs_enabled} />

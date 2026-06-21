@@ -17,9 +17,15 @@
         "width": 1280,
         "height": 800,
         "minWidth": 1024,
-        "minHeight": 720
+        "minHeight": 720,
+        "transparent": true,
+        "windowEffects": {
+          "effects": ["mica", "windowBackground", "underWindowBackground"],
+          "state": "active"
+        }
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'",
       "capabilities": ["main"]
