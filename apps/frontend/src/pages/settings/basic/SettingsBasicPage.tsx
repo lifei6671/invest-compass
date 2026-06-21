@@ -1,5 +1,6 @@
 import { App as AntApp } from "antd";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { cacheClean, cacheStats, type CacheStatsItem, type CacheStatsResult } from "../../../services/coreClient";
 import { AppBasicSettingsCard } from "./components/AppBasicSettingsCard";
 import { CacheManagementCard } from "./components/CacheManagementCard";
 import { DesktopCapabilityCard } from "./components/DesktopCapabilityCard";
@@ -23,13 +24,55 @@ import {
   type OtherSettingsState,
 } from "./types";
 
+const cacheTargetLabels: Record<string, string> = {
+  quote: "行情缓存",
+  kline: "K 线缓存",
+  news: "资讯缓存",
+  chart_image: "图表缓存",
+  task_logs: "任务日志",
+  app_logs: "应用日志",
+};
+
 export function SettingsBasicPage() {
   const { message } = AntApp.useApp();
   const [basicSettings, setBasicSettings] = useState<BasicSettingsState>(initialBasicSettings);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsState>(initialNotificationSettings);
   const [desktopSettings, setDesktopSettings] = useState<DesktopSettingsState>(initialDesktopSettings);
   const [cacheSummary, setCacheSummary] = useState<CacheSummary>(initialCacheSummary);
+  const [cacheLoading, setCacheLoading] = useState(false);
   const [otherSettings, setOtherSettings] = useState<OtherSettingsState>(initialOtherSettings);
+
+  const loadCacheSummary = useCallback(async () => {
+    try {
+      const stats = await cacheStats();
+      setCacheSummary(buildCacheSummary(stats));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "缓存统计读取失败");
+      setCacheSummary(initialCacheSummary);
+    }
+  }, [message]);
+
+  useEffect(() => {
+    void loadCacheSummary();
+  }, [loadCacheSummary]);
+
+  const handleCleanCache = async () => {
+    const targets = cacheSummary.items.filter((item) => item.cleanable).map((item) => item.target);
+    if (targets.length === 0) {
+      message.info("暂无可清理缓存");
+      return;
+    }
+    setCacheLoading(true);
+    try {
+      await cacheClean(targets);
+      await loadCacheSummary();
+      message.success("缓存清理完成");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "缓存清理失败");
+    } finally {
+      setCacheLoading(false);
+    }
+  };
 
   return (
     <>
@@ -62,10 +105,8 @@ export function SettingsBasicPage() {
         />
         <CacheManagementCard
           value={cacheSummary}
-          onCleanCache={() => {
-            setCacheSummary({ ...cacheSummary, totalSize: "0 MB", tempSize: "0 MB" });
-            message.success("缓存清理完成");
-          }}
+          loading={cacheLoading}
+          onCleanCache={handleCleanCache}
         />
         <ProxySummaryCard value={initialProxySummary} onEditProxy={() => message.info("代理设置页待接入")} />
         <OtherSettingsCard
@@ -79,4 +120,39 @@ export function SettingsBasicPage() {
       <SettingsRiskNotice />
     </>
   );
+}
+
+function buildCacheSummary(stats: CacheStatsResult): CacheSummary {
+  const items = stats.items.map(normalizeCacheStatsItem);
+  const cleanableBytes = stats.items.reduce((sum, item) => sum + (item.cleanable === false ? 0 : Math.max(item.bytes, 0)), 0);
+  return {
+    totalSize: formatBytes(stats.total_bytes),
+    tempSize: formatBytes(cleanableBytes),
+    cacheDir: "由本地核心服务管理",
+    items,
+  };
+}
+
+function normalizeCacheStatsItem(item: CacheStatsItem): CacheSummary["items"][number] {
+  return {
+    target: item.target,
+    label: item.label || cacheTargetLabels[item.target] || item.target,
+    size: formatBytes(item.bytes),
+    cleanable: item.cleanable !== false,
+  };
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 MB";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const fractionDigits = unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`;
 }

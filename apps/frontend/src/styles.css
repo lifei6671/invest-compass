@@ -1350,6 +1350,18 @@ body {
   margin-bottom: 14px;
 }
 
+.settings-basic-cache-target-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.settings-basic-cache-target-list .settings-basic-kv-row {
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .settings-basic-kv-row {
   display: flex;
   align-items: center;

@@ -918,6 +918,23 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
   mockIPC((command, payload) => {
     calls.push({ command, payload });
+    if (command === "cache_stats") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          total_bytes: 1_572_864,
+          items: [
+            { target: "quote", bytes: 1_048_576, label: "行情缓存", cleanable: true },
+            { target: "task_logs", bytes: 524_288, label: "任务日志", cleanable: true },
+          ],
+        },
+      };
+    }
+    if (command === "cache_clean") {
+      const cleanPayload = payload as { payload?: { targets?: string[] } } | undefined;
+      return { code: 0, message: "ok", data: { cleaned_targets: cleanPayload?.payload?.targets ?? [] } };
+    }
     throw new Error(`unexpected command ${command}`);
   });
 
@@ -941,7 +958,11 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
   expect(screen.getByText("管理应用的工作区路径与数据存储位置")).toBeInTheDocument();
   expect(screen.getByText("配置任务与系统通知的接收方式")).toBeInTheDocument();
   expect(screen.getByText("配置桌面端行为与系统集成能力")).toBeInTheDocument();
-  expect(screen.getByText("512.7 MB")).toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.getAllByText("1.5 MB")).toHaveLength(2);
+  });
+  expect(screen.getByText("行情缓存")).toBeInTheDocument();
+  expect(screen.getByText("任务日志")).toBeInTheDocument();
   expect(screen.getByText("系统代理")).toBeInTheDocument();
   expect(screen.getByText("帮助我们改进产品（不会收集个人信息）")).toBeInTheDocument();
   expect(screen.getByText("敏感信息会脱敏保存；日志导出前将自动清理 API Key 与代理密码。")).toBeInTheDocument();
@@ -958,7 +979,9 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
   fireEvent.click(screen.getByRole("button", { name: "选择目录" }));
   fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
   fireEvent.click(screen.getByRole("button", { name: /清理缓存/ }));
-  expect(screen.getAllByText("0 MB")).toHaveLength(2);
+  await waitFor(() => {
+    expect(calls.filter((call) => call.command === "cache_clean")).toHaveLength(1);
+  });
   fireEvent.click(screen.getByRole("button", { name: /编辑代理设置/ }));
   fireEvent.click(screen.getByRole("tab", { name: "模型设置" }));
   expect(screen.getByRole("tab", { name: "模型设置" })).toHaveAttribute("aria-selected", "true");
@@ -1151,7 +1174,11 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
   expect(screen.queryByText("升级 Pro")).not.toBeInTheDocument();
   expect(screen.queryByText("立即更新")).not.toBeInTheDocument();
 
-  expect(calls).toEqual([]);
+  expect(calls).toEqual([
+    { command: "cache_stats", payload: {} },
+    { command: "cache_clean", payload: { payload: { targets: ["quote", "task_logs"] } } },
+    { command: "cache_stats", payload: {} },
+  ]);
 }, 10_000);
 
 test("任务调度页面读取真实调度接口并支持立即执行", async () => {

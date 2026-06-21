@@ -577,8 +577,8 @@ export type WorkspaceResult = {
 export type CacheStatsItem = {
   target: string;
   bytes: number;
-  label: string;
-  cleanable: boolean;
+  label?: string;
+  cleanable?: boolean;
 };
 
 export type CacheStatsResult = {

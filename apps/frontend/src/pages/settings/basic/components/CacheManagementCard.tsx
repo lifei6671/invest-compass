@@ -5,6 +5,7 @@ import type { CacheSummary } from "../types";
 
 type CacheManagementCardProps = {
   value: CacheSummary;
+  loading?: boolean;
   onCleanCache: () => void;
 };
 
@@ -14,7 +15,14 @@ export function CacheManagementCard(props: CacheManagementCardProps) {
       <CardHeader icon={<DatabaseOutlined />} title="缓存管理" description="管理本地缓存与临时文件" />
       <div className="settings-basic-kv-list">
         <KeyValue label="当前缓存大小" value={props.value.totalSize} />
-        <KeyValue label="临时文件大小" value={props.value.tempSize} />
+        <KeyValue label="可清理缓存" value={props.value.tempSize} />
+        {props.value.items.length > 0 ? (
+          <div className="settings-basic-cache-target-list">
+            {props.value.items.map((item) => (
+              <KeyValue key={item.target} label={item.label} value={item.size} />
+            ))}
+          </div>
+        ) : null}
         <div>
           <div className="settings-basic-small-label">缓存目录</div>
           <div className="settings-basic-path-text" title={props.value.cacheDir}>
@@ -22,7 +30,7 @@ export function CacheManagementCard(props: CacheManagementCardProps) {
           </div>
         </div>
       </div>
-      <Button className="settings-basic-outline-button" icon={<DeleteOutlined />} onClick={props.onCleanCache}>
+      <Button className="settings-basic-outline-button" icon={<DeleteOutlined />} loading={props.loading} onClick={props.onCleanCache}>
         清理缓存
       </Button>
     </section>

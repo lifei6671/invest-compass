@@ -41,6 +41,12 @@ export type CacheSummary = {
   totalSize: string;
   tempSize: string;
   cacheDir: string;
+  items: Array<{
+    target: string;
+    label: string;
+    size: string;
+    cleanable: boolean;
+  }>;
 };
 
 export type ProxySummary = {
@@ -87,9 +93,10 @@ export const initialDesktopSettings: DesktopSettingsState = {
 };
 
 export const initialCacheSummary: CacheSummary = {
-  totalSize: "512.7 MB",
-  tempSize: "128.3 MB",
-  cacheDir: "C:\\Users\\InvestCompass\\AppData\\Local\\InvestCompass\\cache",
+  totalSize: "—",
+  tempSize: "—",
+  cacheDir: "由本地核心服务管理",
+  items: [],
 };
 
 export const initialProxySummary: ProxySummary = {
