@@ -433,7 +433,7 @@ export function TaskLogDrawer({ open, task, onClose }: TaskLogDrawerProps) {
       placement="right"
       open={open && Boolean(task)}
       width={drawerWidth}
-      mask={!screens.md}
+      mask
       maskClosable
       keyboard
       closable={false}

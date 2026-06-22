@@ -227,6 +227,13 @@ describe("TaskLogDrawer", () => {
     expect(screen.getByText("运行中")).toBeInTheDocument();
   });
 
+  test("keeps drawer mask on wide screens", async () => {
+    renderDrawer();
+
+    expect(await screen.findByText("完整日志")).toBeInTheDocument();
+    expect(document.querySelector(".task-log-drawer-root .ant-drawer-mask")).toBeInTheDocument();
+  });
+
   test("loads log table", async () => {
     renderDrawer();
 
