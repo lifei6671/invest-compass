@@ -1,6 +1,6 @@
 import { InfoCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { App as AntApp } from "antd";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AboutHeroCard } from "./components/AboutHeroCard";
 import { AppInfoCard } from "./components/AppInfoCard";
 import { CheckUpdateCard } from "./components/CheckUpdateCard";
@@ -13,13 +13,27 @@ import { appInfoItems, licenseInfo, resourceLinks, updateInfo } from "./types";
 export function AboutAppPage() {
   const { message } = AntApp.useApp();
   const [checking, setChecking] = useState(false);
+  const checkTimerRef = useRef<number | null>(null);
   const licenseLink = resourceLinks.find((item) => item.type === "license")!;
   const manualLink = resourceLinks.find((item) => item.type === "manual")!;
   const logsLink = resourceLinks.find((item) => item.type === "logs")!;
 
+  useEffect(
+    () => () => {
+      if (checkTimerRef.current !== null) {
+        window.clearTimeout(checkTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const checkUpdate = () => {
     setChecking(true);
-    window.setTimeout(() => {
+    if (checkTimerRef.current !== null) {
+      window.clearTimeout(checkTimerRef.current);
+    }
+    checkTimerRef.current = window.setTimeout(() => {
+      checkTimerRef.current = null;
       setChecking(false);
       message.success("当前已是最新版本");
     }, 600);

@@ -432,7 +432,7 @@ export function TaskLogDrawer({ open, task, onClose }: TaskLogDrawerProps) {
       rootClassName="task-log-drawer-root"
       placement="right"
       open={open && Boolean(task)}
-      width={drawerWidth}
+      size={drawerWidth}
       mask
       maskClosable
       keyboard
@@ -539,7 +539,7 @@ function ExecutionLogsTab(props: ExecutionLogsTabProps) {
           className="task-log-error-alert"
           type="error"
           showIcon
-          message={`错误摘要：${props.diagnosisSummary || "任务执行失败，可检查代理、API Key 或更换模型后重试。"}`}
+          title={`错误摘要：${props.diagnosisSummary || "任务执行失败，可检查代理、API Key 或更换模型后重试。"}`}
         />
       ) : null}
 
@@ -548,7 +548,7 @@ function ExecutionLogsTab(props: ExecutionLogsTabProps) {
           className="task-log-load-alert"
           type="warning"
           showIcon
-          message="日志加载失败"
+          title="日志加载失败"
           description={props.loadError}
         />
       ) : null}
@@ -634,7 +634,7 @@ function DiagnosisTab({ diagnosis }: { diagnosis: TaskLogDiagnosisView }) {
 
   return (
     <section className="task-log-diagnosis">
-      <Alert type={diagnosis.retryable ? "warning" : "info"} showIcon message={diagnosis.summary} />
+      <Alert type={diagnosis.retryable ? "warning" : "info"} showIcon title={diagnosis.summary} />
       <div>
         <h3>可能原因</h3>
         <ol>

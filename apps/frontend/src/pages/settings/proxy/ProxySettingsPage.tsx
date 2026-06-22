@@ -1,6 +1,6 @@
 import { InfoCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { App as AntApp } from "antd";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ProxyBypassRulesCard } from "./components/ProxyBypassRulesCard";
 import { ProxyConfigCard } from "./components/ProxyConfigCard";
 import { ProxyConnectionTestCard } from "./components/ProxyConnectionTestCard";
@@ -10,6 +10,16 @@ import { initialHttpProxyConfig, initialProxyState, initialSocks5ProxyConfig, ty
 export function ProxySettingsPage() {
   const { message } = AntApp.useApp();
   const [state, setState] = useState<ProxySettingsState>(initialProxyState);
+  const testTimerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (testTimerRef.current !== null) {
+        window.clearTimeout(testTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const changeProxyMode = (proxyMode: ProxyMode) => {
     setState((current) => ({ ...current, proxyMode }));
@@ -22,7 +32,11 @@ export function ProxySettingsPage() {
 
   const testConnection = () => {
     setState((current) => ({ ...current, testing: true }));
-    window.setTimeout(() => {
+    if (testTimerRef.current !== null) {
+      window.clearTimeout(testTimerRef.current);
+    }
+    testTimerRef.current = window.setTimeout(() => {
+      testTimerRef.current = null;
       setState((current) => ({
         ...current,
         testing: false,

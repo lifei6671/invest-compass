@@ -1122,6 +1122,8 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
 
   fireEvent.click(screen.getByRole("tab", { name: "数据源设置" }));
   expect(screen.getByRole("tab", { name: "数据源设置" })).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(screen.getByRole("tab", { name: "数据源概览" }));
+  expect(screen.getByRole("tab", { name: "数据源概览" })).toHaveAttribute("aria-selected", "true");
   expect(screen.getByText("数据源基础设置")).toBeInTheDocument();
   expect(screen.getByText("默认行情源")).toBeInTheDocument();
   expect(screen.getByText("AkShare / EastMoney")).toBeInTheDocument();
@@ -1244,6 +1246,221 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
     { command: "search_status", payload: {} },
     { command: "cache_clean", payload: { payload: { targets: ["quote", "task_logs"] } } },
     { command: "cache_stats", payload: {} },
+  ]);
+}, 10_000);
+
+test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互", async () => {
+  window.location.hash = "#/settings";
+  const calls: Array<{ command: string; payload?: any }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    if (command === "cache_stats") {
+      return { code: 0, message: "ok", data: { total_bytes: 0, items: [] } };
+    }
+    if (command === "search_status") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          fts5_status: "available",
+          gse_status: "fallback",
+          search_status: "ready",
+          active_stock_batch_id: "",
+          active_document_batch_id: "",
+          running_rebuild_task_id: "",
+          stock_index_count: 0,
+          report_index_count: 0,
+          news_index_count: 0,
+          watchlist_note_index_count: 0,
+          last_rebuild_at: "",
+          tokenizer_name: "simple",
+          tokenizer_version: "1",
+          dictionary_hash: "builtin",
+        },
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  });
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(screen.getByText("应用基础设置")).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByRole("tab", { name: "数据源设置" }));
+
+  expect(screen.getByRole("tab", { name: "数据说明" })).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(screen.getByRole("tab", { name: "凭据管理" }));
+  expect(screen.getByRole("tab", { name: "凭据管理" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("Provider 列表")).toBeInTheDocument();
+  expect(screen.getByText("凭据配置")).toBeInTheDocument();
+  expect(screen.getByText("连接测试")).toBeInTheDocument();
+  expect(screen.getByText("安全与存储说明")).toBeInTheDocument();
+  expect(screen.getByText("已配置凭据概览")).toBeInTheDocument();
+  expect(screen.getByText("调用限制与健康状态")).toBeInTheDocument();
+  expect(screen.getByText("凭据操作日志")).toBeInTheDocument();
+
+  ["EastMoney", "AkShare", "Alpha Vantage", "财联社", "雪球", "Custom HTTP"].forEach((name) => {
+    expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+  });
+  expect(screen.getByDisplayValue("财联社")).toBeInTheDocument();
+  expect(screen.getByText("快讯 / 行业事件 / 日历")).toBeInTheDocument();
+  expect(screen.getByDisplayValue("https://www.cls.cn")).toBeInTheDocument();
+  expect(screen.getByPlaceholderText("2025-06-30 23:59")).toBeInTheDocument();
+  expect(screen.getByDisplayValue("uid=****; token=****; session=****")).toBeInTheDocument();
+  expect(screen.queryByText("Authorization")).not.toBeInTheDocument();
+  expect(screen.queryByText("Proxy-Authorization")).not.toBeInTheDocument();
+  expect(screen.queryByText("买入")).not.toBeInTheDocument();
+  expect(screen.queryByText("卖出")).not.toBeInTheDocument();
+  expect(screen.queryByText("券商账户")).not.toBeInTheDocument();
+  expect(screen.queryByText("授权激活")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByText("Alpha Vantage"));
+  expect(screen.getByDisplayValue("Alpha Vantage")).toBeInTheDocument();
+  expect(screen.getAllByText("海外行情").length).toBeGreaterThan(0);
+  fireEvent.mouseDown(screen.getAllByRole("combobox")[0]);
+  fireEvent.click(screen.getByRole("option", { name: "Cookie" }));
+  expect(screen.getAllByText("Cookie").length).toBeGreaterThan(0);
+  fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://api.example.test" } });
+  expect(screen.getByDisplayValue("https://api.example.test")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "保存凭据" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /测试连接/ })[0]);
+  fireEvent.click(screen.getByRole("button", { name: /重新测试/ }));
+  fireEvent.click(screen.getByRole("button", { name: "清除凭据" }));
+  expect(screen.getAllByText("确认清除 Alpha Vantage 的凭据？").length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole("button", { name: "确认清除" }));
+  await waitFor(() => {
+    expect(screen.getAllByText("未配置").length).toBeGreaterThan(0);
+  });
+
+  fireEvent.click(screen.getByRole("tab", { name: "数据源概览" }));
+  expect(screen.getByRole("tab", { name: "数据源概览" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("数据源基础设置")).toBeInTheDocument();
+  expect(screen.getByText("默认行情源")).toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: "Provider 配置" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: "同步策略" })).not.toBeInTheDocument();
+
+  expect(calls).toEqual([
+    { command: "cache_stats", payload: {} },
+    { command: "search_status", payload: {} },
+  ]);
+}, 10_000);
+
+test("数据源设置数据说明页展示说明模块并仅使用本地交互", async () => {
+  window.location.hash = "#/settings";
+  const calls: Array<{ command: string; payload?: any }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    if (command === "cache_stats") {
+      return { code: 0, message: "ok", data: { total_bytes: 0, items: [] } };
+    }
+    if (command === "search_status") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          fts5_status: "available",
+          gse_status: "fallback",
+          search_status: "ready",
+          active_stock_batch_id: "",
+          active_document_batch_id: "",
+          running_rebuild_task_id: "",
+          stock_index_count: 0,
+          report_index_count: 0,
+          news_index_count: 0,
+          watchlist_note_index_count: 0,
+          last_rebuild_at: "",
+          tokenizer_name: "simple",
+          tokenizer_version: "1",
+          dictionary_hash: "builtin",
+        },
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  });
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(screen.getByText("应用基础设置")).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByRole("tab", { name: "数据源设置" }));
+
+  expect(screen.getByRole("tab", { name: "数据说明" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("数据使用与来源说明")).toBeInTheDocument();
+  expect(screen.getByText("说明行情、资讯、缓存与 AI 上下文使用边界")).toBeInTheDocument();
+  expect(screen.getByText("适用范围：")).toBeInTheDocument();
+  expect(screen.getByText("总览 / 自选股 / 个股详情 / 资讯中心 / AI 分析")).toBeInTheDocument();
+  expect(screen.getByText("默认市场：")).toBeInTheDocument();
+  expect(screen.getByText("A股")).toBeInTheDocument();
+  expect(screen.getByText("行情来源：")).toBeInTheDocument();
+  expect(screen.getAllByText("AkShare / EastMoney").length).toBeGreaterThan(0);
+  expect(screen.getByText("资讯来源：")).toBeInTheDocument();
+  expect(screen.getByText("聚合新闻源 / 个股相关新闻")).toBeInTheDocument();
+  expect(screen.getByText("K线数据范围：")).toBeInTheDocument();
+  expect(screen.getAllByText("近 5 年").length).toBeGreaterThan(0);
+  expect(screen.getByText("数据用途：")).toBeInTheDocument();
+  expect(screen.getByText("本地研究展示 / 上下文构建 / 历史快照")).toBeInTheDocument();
+  expect(screen.getByText("明确说明：")).toBeInTheDocument();
+  expect(screen.getByText("不用于交易执行")).toBeInTheDocument();
+
+  ["A. 数据来源说明", "B. 更新时效说明", "C. AI 上下文说明", "D. 数据合规与边界", "E. 字段说明", "F. 常见问题"].forEach((title) => {
+    expect(screen.getByText(title)).toBeInTheDocument();
+  });
+  expect(screen.getAllByText("行情数据").length).toBeGreaterThan(0);
+  expect(screen.getByText("实时行情与分时/盘口数据")).toBeInTheDocument();
+  fireEvent.mouseEnter(screen.getByText("实时行情与分时/盘口数据"));
+  await waitFor(() => {
+    expect(screen.getByRole("tooltip")).toHaveTextContent("实时行情与分时/盘口数据");
+  });
+  expect(screen.getByText("扩展海外源")).toBeInTheDocument();
+  expect(screen.getByText("Alpha Vantage")).toBeInTheDocument();
+  expect(screen.getByText("受限")).toBeInTheDocument();
+  expect(screen.getByText("行情轮询频率")).toBeInTheDocument();
+  expect(screen.getByText("2 秒（盘中）/ 10 秒（非交易时段）")).toBeInTheDocument();
+  expect(screen.getByText("AI 分析会基于以下数据构建上下文，以生成研究结论与解读。")).toBeInTheDocument();
+  expect(screen.getByText("事实：")).toBeInTheDocument();
+  expect(screen.getByText("来自原始数据或公开信息，可直接验证")).toBeInTheDocument();
+  expect(screen.getByText("推断：")).toBeInTheDocument();
+  expect(screen.getByText("基于数据逻辑与模型推导，存在不确定性")).toBeInTheDocument();
+  expect(screen.getByText("观点：")).toBeInTheDocument();
+  expect(screen.getByText("模型综合判断与建议，不构成投资建议")).toBeInTheDocument();
+  expect(screen.getByText("现价")).toBeInTheDocument();
+  expect(screen.getByText("最新成交价格")).toBeInTheDocument();
+  expect(screen.getByText("换手率")).toBeInTheDocument();
+  expect(screen.getByText("当日成交量 / 流通股本")).toBeInTheDocument();
+  expect(screen.getByText("为什么不同页面时间不完全一致？")).toBeInTheDocument();
+  expect(screen.getByText("为什么 AI 报告与页面最新行情略有差异？")).toBeInTheDocument();
+  expect(screen.getByText("为什么部分资讯需要凭据？")).toBeInTheDocument();
+  expect(screen.getByText("敏感凭据仅保存在本地安全存储；日志导出前将自动清理 API Key 与代理密码。")).toBeInTheDocument();
+  expect(screen.getByText("仅供研究，不构成投资建议。")).toBeInTheDocument();
+
+  expect(screen.queryByText("买入")).not.toBeInTheDocument();
+  expect(screen.queryByText("卖出")).not.toBeInTheDocument();
+  expect(screen.queryByText("下单")).not.toBeInTheDocument();
+  expect(screen.queryByText("券商账户")).not.toBeInTheDocument();
+  expect(screen.queryByText("自动交易")).not.toBeInTheDocument();
+  expect(screen.queryByText("收益承诺")).not.toBeInTheDocument();
+  expect(screen.queryByText("授权激活")).not.toBeInTheDocument();
+  expect(screen.queryByText("真实 API Key")).not.toBeInTheDocument();
+  expect(screen.queryByText("真实 Cookie")).not.toBeInTheDocument();
+  expect(screen.queryByText("真实 Token")).not.toBeInTheDocument();
+  expect(screen.queryByText("Authorization")).not.toBeInTheDocument();
+  expect(screen.queryByText("Proxy-Authorization")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "查看数据源概览" }));
+  fireEvent.click(screen.getByRole("button", { name: "查看 Provider 配置" }));
+  fireEvent.click(screen.getByRole("button", { name: "查看凭据管理 >" }));
+  fireEvent.click(screen.getByRole("button", { name: "查看更多字段说明 >" }));
+  fireEvent.click(screen.getByRole("button", { name: "为什么部分资讯需要凭据？ right" }));
+  fireEvent.click(screen.getByRole("button", { name: "查看更多 FAQ >" }));
+  expect(screen.queryByRole("tab", { name: "Provider 配置" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: "同步策略" })).not.toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "数据说明" })).toHaveAttribute("aria-selected", "true");
+
+  expect(calls).toEqual([
+    { command: "cache_stats", payload: {} },
+    { command: "search_status", payload: {} },
   ]);
 }, 10_000);
 
