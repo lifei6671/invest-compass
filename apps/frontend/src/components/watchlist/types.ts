@@ -1,0 +1,18 @@
+export type WatchlistItem = {
+  id: number;
+  starred: boolean;
+  name: string;
+  code: string;
+  market: "沪市" | "深市" | "港股" | "美股";
+  price: string;
+  changeAmount: string;
+  changePercent: string;
+  amount: string;
+  turnoverRate: string;
+  pe: string;
+  industry: string;
+  tags: string[];
+  note: string;
+  updatedAt: string;
+  trend: "up" | "down";
+};

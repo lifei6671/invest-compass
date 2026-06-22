@@ -1,7 +1,7 @@
 import { App as AntApp, Button, Input, Modal, Table, Tag, type TableColumnsType } from "antd";
 import { CloseOutlined, DownOutlined, InfoCircleOutlined, SearchOutlined } from "@ant-design/icons";
-import { useMemo, useState, type CSSProperties } from "react";
-import { mockSearchResults, type StockSearchResult } from "./mockSearchResults";
+import { useState, type CSSProperties } from "react";
+import { stockSearch, type StockSearchResult } from "../../services/coreClient";
 
 type AddWatchlistModalProps = {
   open: boolean;
@@ -11,7 +11,7 @@ type AddWatchlistModalProps = {
 
 const defaultTags = ["核心标的", "长期跟踪", "消费"];
 
-const marketTagStyle: Record<StockSearchResult["market"], CSSProperties> = {
+const marketTagStyle: Record<string, CSSProperties> = {
   A股: { backgroundColor: "#eaf3ff", color: "#1677ff", borderColor: "#cfe3ff" },
   港股: { backgroundColor: "#fff3e0", color: "#d97706", borderColor: "#ffe1ad" },
   美股: { backgroundColor: "#e8f8ef", color: "#16a34a", borderColor: "#c8edd8" },
@@ -24,14 +24,8 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
   const [tags, setTags] = useState(defaultTags);
   const [tagInput, setTagInput] = useState("");
   const [note, setNote] = useState("");
-
-  const filteredResults = useMemo(() => {
-    const normalized = keyword.trim().toLowerCase();
-    if (!normalized) {
-      return mockSearchResults;
-    }
-    return mockSearchResults.filter((stock) => [stock.name, stock.code, stock.symbol, stock.pinyin].join(" ").toLowerCase().includes(normalized));
-  }, [keyword]);
+  const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   const resetState = () => {
     setKeyword("");
@@ -39,6 +33,8 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
     setTags(defaultTags);
     setTagInput("");
     setNote("");
+    setSearchResults([]);
+    setIsSearching(false);
   };
 
   const closeModal = () => {
@@ -51,12 +47,27 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
       message.warning("请先选择要添加的股票");
       return;
     }
-    if (selectedStock.isAdded) {
-      message.warning("该股票已在自选列表中");
-      return;
-    }
     props.onConfirm({ stock: selectedStock, tags, note });
     resetState();
+  };
+
+  const handleSearch = async () => {
+    const normalized = keyword.trim();
+    if (!normalized) {
+      setSearchResults([]);
+      message.info("请输入股票名称、代码或拼音后搜索");
+      return;
+    }
+    try {
+      setIsSearching(true);
+      const results = await stockSearch(normalized);
+      setSearchResults(results);
+      setSelectedStock(null);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "股票搜索失败");
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const addTag = () => {
@@ -87,28 +98,20 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
       title: "市场",
       dataIndex: "market",
       width: 70,
-      render: (value: StockSearchResult["market"]) => (
-        <Tag className="m-0 rounded px-2 py-0 text-[12px] font-medium leading-5" style={marketTagStyle[value]}>
+      render: (value: string) => (
+        <Tag className="m-0 rounded px-2 py-0 text-[12px] font-medium leading-5" style={marketTagStyle[value] ?? {}}>
           {value}
         </Tag>
       ),
     },
     { title: "交易所", dataIndex: "exchange", width: 116, ellipsis: true },
-    { title: "所属行业", dataIndex: "industry", width: 88, ellipsis: true },
     {
       title: "操作",
       key: "action",
       align: "center",
       width: 76,
       render: (_, record) => {
-        const selected = selectedStock?.id === record.id;
-        if (record.isAdded) {
-          return (
-            <Button disabled className="h-7 w-14 rounded-md border-0 bg-[#f3f4f6] px-0 text-[13px] text-[#6b7280]">
-              已自选
-            </Button>
-          );
-        }
+        const selected = selectedStock?.symbol === record.symbol;
         return (
           <Button className="h-7 w-14 rounded-md border-[#1677ff] bg-white px-0 text-[13px] font-medium text-[#1677ff] hover:!bg-[#eaf3ff]" onClick={() => setSelectedStock(record)}>
             {selected ? "已选择" : "添加"}
@@ -157,15 +160,17 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
             prefix={<SearchOutlined className="mr-2 text-[#8a94a6]" />}
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
+            onPressEnter={handleSearch}
           />
 
           <section className="mt-6">
             <h3 className="m-0 mb-2.5 text-[14px] font-semibold leading-5 text-[#1f2937]">搜索结果</h3>
             <Table
-              rowKey="id"
+              rowKey="symbol"
               className="add-watchlist-result-table overflow-hidden rounded-lg border border-[#edf1f7]"
               columns={columns}
-              dataSource={filteredResults}
+              dataSource={searchResults}
+              loading={isSearching}
               pagination={false}
               size="small"
               tableLayout="fixed"

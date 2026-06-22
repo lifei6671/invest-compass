@@ -150,6 +150,7 @@ func (writer *NDJSONWriter) ApplyRetention(ctx context.Context) error {
 	return nil
 }
 
+// nextWritablePath 选择当前批次可写入的 NDJSON 文件路径。
 func (writer *NDJSONWriter) nextWritablePath(value time.Time, incomingBytes int64) (string, error) {
 	date := value
 	if date.IsZero() {
@@ -174,6 +175,7 @@ func (writer *NDJSONWriter) nextWritablePath(value time.Time, incomingBytes int6
 	}
 }
 
+// ndjsonRecord 将任务日志转换为脱敏 NDJSON 记录。
 func (writer *NDJSONWriter) ndjsonRecord(entry model.TaskLogEntry) map[string]any {
 	timestamp := entry.Ts
 	if timestamp.IsZero() {
@@ -206,6 +208,7 @@ func (writer *NDJSONWriter) ndjsonRecord(entry model.TaskLogEntry) map[string]an
 	return record
 }
 
+// logFiles 枚举当前日志目录中受管理的 NDJSON 文件。
 func (writer *NDJSONWriter) logFiles() ([]ndjsonLogFile, error) {
 	entries, err := os.ReadDir(writer.config.LogDir)
 	if err != nil {

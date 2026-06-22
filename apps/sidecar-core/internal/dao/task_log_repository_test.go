@@ -393,6 +393,7 @@ func TestTaskErrorDiagnosisRepositoryRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+// seedTaskLogFilterFixture 写入任务日志筛选测试所需的多级别样本。
 func seedTaskLogFilterFixture(t *testing.T) (*Store, context.Context, []model.TaskLogEntry) {
 	t.Helper()
 	store := newTestStore(t)

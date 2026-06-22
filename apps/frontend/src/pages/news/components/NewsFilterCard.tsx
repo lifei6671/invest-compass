@@ -8,6 +8,7 @@ type NewsFilterCardProps = {
   onChange: (patch: Partial<NewsFilters>) => void;
   onHotKeywordClick: (keyword: string) => void;
   onRefresh: () => void;
+  isRefreshing?: boolean;
 };
 
 export function NewsFilterCard(props: NewsFilterCardProps) {
@@ -65,7 +66,7 @@ export function NewsFilterCard(props: NewsFilterCardProps) {
             onChange={(timeRange) => props.onChange({ timeRange })}
           />
         </label>
-        <Button type="primary" className="news-refresh-button" icon={<ReloadOutlined />} onClick={props.onRefresh}>
+        <Button type="primary" className="news-refresh-button" icon={<ReloadOutlined />} loading={props.isRefreshing} onClick={props.onRefresh}>
           刷新资讯
         </Button>
       </div>
@@ -80,4 +81,3 @@ export function NewsFilterCard(props: NewsFilterCardProps) {
     </section>
   );
 }
-

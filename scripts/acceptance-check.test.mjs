@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 const packageJson = JSON.parse(
   await readFile(new URL("../apps/package.json", import.meta.url), "utf8"),
 );
+const makefile = await readFile(new URL("../Makefile", import.meta.url), "utf8");
 
 test("apps workspace exposes one local release acceptance check command", () => {
   const script = packageJson.scripts?.["acceptance:check"] ?? "";
@@ -45,7 +46,15 @@ test("apps workspace exposes desktop Rust unit test command", () => {
 test("apps workspace sidecar tests do not modify Go module files", () => {
   const script = packageJson.scripts?.["sidecar:test"] ?? "";
 
-  assert.match(script, /\bgo\s+test\s+-mod=readonly\s+\.\//, "sidecar:test 必须禁止 go test 自动改写 go.mod/go.sum");
+  assert.match(script, /\bgo\s+test\s+-mod=readonly\s+-tags\s+sqlite_fts5\s+\.\//, "sidecar:test 必须禁止 go test 自动改写 go.mod/go.sum，并启用 SQLite FTS5");
+});
+
+test("Makefile go-test target uses SQLite FTS5 tag", () => {
+  assert.match(
+    makefile,
+    /go-test:[\s\S]*cd\s+\$\(SIDECAR_DIR\)\s+&&\s+go\s+test\s+-tags\s+sqlite_fts5\s+\.\/\.\.\./,
+    "make go-test 必须启用 SQLite FTS5，否则迁移测试会在默认 go test 下失败",
+  );
 });
 
 test("apps workspace exposes packaged sidecar runtime smoke command", () => {
@@ -83,8 +92,8 @@ test("apps workspace exposes SQLite upgrade rehearsal command", () => {
 
   assert.match(
     script,
-    /cd\s+sidecar-core\s+&&\s+go\s+test\s+-mod=readonly\s+\.\//,
-    "sqlite:upgrade-rehearsal 必须在 Go module 根目录运行且禁止改写 go.mod/go.sum",
+    /cd\s+sidecar-core\s+&&\s+go\s+test\s+-mod=readonly\s+-tags\s+sqlite_fts5\s+\.\//,
+    "sqlite:upgrade-rehearsal 必须在 Go module 根目录运行、禁止改写 go.mod/go.sum，并启用 SQLite FTS5",
   );
   assert.match(
     script,

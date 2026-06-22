@@ -1,4 +1,4 @@
-class MockResizeObserver implements ResizeObserver {
+class TestResizeObserver implements ResizeObserver {
   observe() {}
 
   unobserve() {}
@@ -7,9 +7,9 @@ class MockResizeObserver implements ResizeObserver {
 }
 
 if (typeof window !== "undefined" && typeof window.ResizeObserver === "undefined") {
-  window.ResizeObserver = MockResizeObserver;
+  window.ResizeObserver = TestResizeObserver;
 }
 
 if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = MockResizeObserver;
+  globalThis.ResizeObserver = TestResizeObserver;
 }

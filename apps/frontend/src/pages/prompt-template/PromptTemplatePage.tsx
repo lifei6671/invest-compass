@@ -15,7 +15,7 @@ import {
   initialPromptEditorState,
   promptCategories,
   promptVariables,
-} from "./mock";
+} from "./defaults";
 import type {
   PromptCategoryIconType,
   PromptEditorState,
@@ -173,6 +173,7 @@ export function PromptTemplatePage() {
           <VariableReferencePanel variables={promptVariables} />
           <OutputPreviewPanel
             format={editorState.previewFormat}
+            content={editorState.promptContent}
             onFormatChange={(previewFormat) => setEditorState((current) => ({ ...current, previewFormat }))}
             onFullscreen={() => message.info("全屏预览待接入")}
           />

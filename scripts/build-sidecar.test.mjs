@@ -38,6 +38,8 @@ test("buildGoCommand uses GUI subsystem for Windows sidecar", () => {
   assert.deepEqual(command.args, [
     "build",
     "-mod=readonly",
+    "-tags",
+    "sqlite_fts5",
     "-ldflags",
     "-H windowsgui",
     "-o",
@@ -53,10 +55,26 @@ test("buildGoCommand does not modify Go module files", () => {
   assert.deepEqual(command.args, [
     "build",
     "-mod=readonly",
+    "-tags",
+    "sqlite_fts5",
     "-o",
     "/tmp/invest-compas-core",
     "./cmd/invest-compass-core",
   ]);
+});
+
+test("buildGoCommand enables SQLite FTS5 for every sidecar target", () => {
+  const targets = selectBuildTargets(["--all-targets"], "darwin", "arm64");
+
+  for (const target of targets) {
+    const command = buildGoCommand(target, `/tmp/${target.fileName}`);
+
+    assert.deepEqual(
+      command.args.slice(0, 4),
+      ["build", "-mod=readonly", "-tags", "sqlite_fts5"],
+      `${target.triple} sidecar build must enable SQLite FTS5`,
+    );
+  }
 });
 
 test("buildGoEnvironment enables CGO for sqlite-backed sidecar targets", () => {
@@ -66,7 +84,31 @@ test("buildGoEnvironment enables CGO for sqlite-backed sidecar targets", () => {
   assert.equal(env.GOOS, "windows");
   assert.equal(env.GOARCH, "amd64");
   assert.equal(env.CGO_ENABLED, "1");
+  assert.equal(env.CC, "x86_64-w64-mingw32-gcc");
   assert.equal(env.PATH, "/usr/bin");
+});
+
+test("buildGoEnvironment preserves explicit Windows CGO compiler override", () => {
+  const [target] = selectBuildTargets(["--target=x86_64-pc-windows-msvc"], "darwin", "arm64");
+  const env = buildGoEnvironment(target, { PATH: "/usr/bin", CC: "custom-windows-gcc" });
+
+  assert.equal(env.CC, "custom-windows-gcc");
+});
+
+test("buildGoEnvironment configures macOS CGO arch flags for cross-arch sidecar targets", () => {
+  const [target] = selectBuildTargets(["--target=x86_64-apple-darwin"], "darwin", "arm64");
+  const env = buildGoEnvironment(
+    target,
+    { PATH: "/usr/bin", CGO_CFLAGS: "-O2", CGO_LDFLAGS: "-s" },
+    "darwin",
+    "arm64",
+  );
+
+  assert.equal(env.CC, "clang");
+  assert.match(env.CGO_CFLAGS, /-arch x86_64\b/);
+  assert.match(env.CGO_CFLAGS, /-O2\b/);
+  assert.match(env.CGO_LDFLAGS, /-arch x86_64\b/);
+  assert.match(env.CGO_LDFLAGS, /-s\b/);
 });
 
 test("Makefile delegates sidecar build to target-aware script", async () => {

@@ -20,8 +20,8 @@
     "provider:smoke": "node ../scripts/provider-smoke.mjs",
     "sidecar:smoke": "node ../scripts/verify-sidecar-runtime.mjs -- --platform=darwin --target=aarch64-apple-darwin \"desktop/src-tauri/target/release/bundle/macos/投研罗盘.app\"",
     "scripts:test": "node --test ../scripts/*.test.mjs",
-    "sqlite:upgrade-rehearsal": "cd sidecar-core && go test -mod=readonly ./internal/dao -run TestBackupBeforeMigrationBackupCanBeRestoredAndMigrated -count=1",
-    "sidecar:test": "cd sidecar-core && go test -mod=readonly ./...",
+    "sqlite:upgrade-rehearsal": "cd sidecar-core && go test -mod=readonly -tags sqlite_fts5 ./internal/dao -run TestBackupBeforeMigrationBackupCanBeRestoredAndMigrated -count=1",
+    "sidecar:test": "cd sidecar-core && go test -mod=readonly -tags sqlite_fts5 ./...",
     "desktop:check": "cargo check --manifest-path desktop/src-tauri/Cargo.toml",
     "desktop:test": "cargo test --manifest-path desktop/src-tauri/Cargo.toml"
   }

@@ -1,8 +1,18 @@
 import { InfoCircleOutlined } from "@ant-design/icons";
-import { watchlistDistribution } from "../mock";
+import type { WatchlistDistribution } from "../types";
+
+const emptyDistribution: WatchlistDistribution = {
+  total: 0,
+  up: { count: 0, percent: 0 },
+  down: { count: 0, percent: 0 },
+  flat: { count: 0, percent: 0 },
+  avgChangePercent: "--",
+  upProbability: "--",
+  changeFromYesterday: "--",
+};
 
 export function WatchlistDistributionCard() {
-  const data = watchlistDistribution;
+  const data = emptyDistribution;
 
   return (
     <section className="dashboard-surface dashboard-distribution-card">
@@ -32,7 +42,7 @@ export function WatchlistDistributionCard() {
 }
 
 function DonutChart() {
-  const { up, down, flat, total } = watchlistDistribution;
+  const { up, down, flat, total } = emptyDistribution;
   const segments = [
     { value: up.percent, color: "#ff4d4f" },
     { value: down.percent, color: "#16a34a" },

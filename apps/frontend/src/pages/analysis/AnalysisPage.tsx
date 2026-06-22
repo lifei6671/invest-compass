@@ -7,7 +7,7 @@ import { AnalysisConfigCard } from "./components/AnalysisConfigCard";
 import { DataContextPreview } from "./components/DataContextPreview";
 import { OptionalContextCard } from "./components/OptionalContextCard";
 import { OutputPreviewCard } from "./components/OutputPreviewCard";
-import { contextSummary, initialAnalysisConfig, initialHoldingContext, mockMarkdown, mockPlainText } from "./mock";
+import { emptyContextSummary, initialAnalysisConfig, initialHoldingContext } from "./defaults";
 import type { AnalysisConfig, OptionalHoldingContext, OutputFormat } from "./types";
 
 export function AnalysisPage() {
@@ -19,11 +19,7 @@ export function AnalysisPage() {
   const [generating, setGenerating] = useState(false);
 
   const copyMarkdown = () => {
-    const writer = navigator.clipboard?.writeText;
-    const request = writer ? writer.call(navigator.clipboard, mockMarkdown) : Promise.resolve();
-    request
-      .then(() => message.success("Markdown 已复制"))
-      .catch(() => message.success("Markdown 已复制"));
+    message.info("暂无可复制的分析报告");
   };
 
   return (
@@ -42,10 +38,10 @@ export function AnalysisPage() {
           <AnalysisConfigCard value={config} onChange={setConfig} onManageTemplate={() => message.info("Prompt 模板管理待接入")} />
           <OptionalContextCard value={holdingContext} onChange={setHoldingContext} />
         </div>
-        <DataContextPreview value={contextSummary} onViewMoreNews={() => message.info("资讯中心待接入")} />
+        <DataContextPreview value={emptyContextSummary} onViewMoreNews={() => message.info("资讯中心待接入")} />
         <OutputPreviewCard
-          markdown={mockMarkdown}
-          plainText={mockPlainText}
+          markdown=""
+          plainText=""
           format={outputFormat}
           onFormatChange={setOutputFormat}
           onFullscreen={() => message.info("全屏预览待接入")}
@@ -62,7 +58,7 @@ export function AnalysisPage() {
           setGenerating(false);
           message.info("已停止生成");
         }}
-        onSave={() => message.success("报告已保存到本地 mock 历史")}
+        onSave={() => message.info("暂无可保存的分析报告")}
         onCopy={copyMarkdown}
         onExport={() => message.info("导出 Markdown 待接入")}
       />

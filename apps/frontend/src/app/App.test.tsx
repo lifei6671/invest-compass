@@ -172,7 +172,7 @@ test("App 提供基础路由外壳和错误边界", async () => {
   });
 });
 
-test("Dashboard 首页按截图结构展示总览桌面", async () => {
+test("Dashboard 首页展示真实数据空态且不拉取伪数据", async () => {
   const calls: Array<{ command: string; payload?: unknown }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
@@ -190,21 +190,18 @@ test("Dashboard 首页按截图结构展示总览桌面", async () => {
     expect(screen.getByText("自选股涨跌分布")).toBeInTheDocument();
   });
   expect(screen.getByPlaceholderText("搜索股票名称 / 代码 / 拼音")).toBeInTheDocument();
-  expect(screen.getByText("A股 已收盘")).toBeInTheDocument();
-  expect(screen.getByText("上证指数")).toBeInTheDocument();
-  expect(screen.getByText("深证成指")).toBeInTheDocument();
-  expect(screen.getByText("创业板指")).toBeInTheDocument();
-  expect(screen.getByText("恒生指数")).toBeInTheDocument();
   expect(screen.getByText("今日热点")).toBeInTheDocument();
   expect(screen.getByText("最近分析报告")).toBeInTheDocument();
   expect(screen.getByText("最近任务状态")).toBeInTheDocument();
   expect(screen.getByText("上涨")).toBeInTheDocument();
   expect(screen.getByText("下跌")).toBeInTheDocument();
   expect(screen.getByText("平盘")).toBeInTheDocument();
-  expect(screen.getByText("行业热点")).toBeInTheDocument();
-  expect(screen.getByText("半导体")).toBeInTheDocument();
-  expect(screen.getByText("宁德时代（300750）深度分析报告")).toBeInTheDocument();
-  expect(screen.getByText("宁德时代深度分析")).toBeInTheDocument();
+  expect(screen.queryByText("暂无市场指数数据")).not.toBeInTheDocument();
+  expect(screen.getByText("暂无热点数据")).toBeInTheDocument();
+  expect(screen.queryByText("宁德时代深度分析")).not.toBeInTheDocument();
+  expect(screen.queryByText("A股 已收盘")).not.toBeInTheDocument();
+  expect(screen.queryByText("上证指数")).not.toBeInTheDocument();
+  expect(screen.queryByText("宁德时代（300750）深度分析报告")).not.toBeInTheDocument();
   expect(screen.getByText("仅供研究，不构成投资建议。")).toBeInTheDocument();
   expect(screen.getByText("AI 生成内容仅供研究参考，请结合公开披露信息独立判断。")).toBeInTheDocument();
   expect(document.querySelector(".ant-badge-count")).not.toBeInTheDocument();
@@ -213,7 +210,7 @@ test("Dashboard 首页按截图结构展示总览桌面", async () => {
   expect(calls.map((call) => call.command)).not.toContain("market_kline");
 });
 
-test("Dashboard 首页使用本地 mock 状态驱动顶部市场状态", async () => {
+test("Dashboard 首页默认不展示伪造市场状态时间", async () => {
   mockIPC((command) => {
     switch (command) {
       case "core_health":
@@ -228,9 +225,8 @@ test("Dashboard 首页使用本地 mock 状态驱动顶部市场状态", async (
   await waitFor(() => {
     expect(screen.getByText("自选股涨跌分布")).toBeInTheDocument();
   });
-  expect(screen.getByText("A股 已收盘")).toBeInTheDocument();
-  expect(screen.getByText("数据更新：")).toBeInTheDocument();
-  expect(screen.getByText((content) => content.includes("2025") && content.includes("15:30:00"))).toBeInTheDocument();
+  expect(screen.queryByText("A股 已收盘")).not.toBeInTheDocument();
+  expect(screen.queryByText((content) => content.includes("2025") && content.includes("15:30:00"))).not.toBeInTheDocument();
 });
 
 test("顶部搜索通过后端股票搜索跳转到首个真实结果", async () => {
@@ -275,8 +271,13 @@ test("顶部搜索通过后端股票搜索跳转到首个真实结果", async ()
     expect(window.location.hash).toBe("#/stocks/600000.SH");
   });
   expect(calls).toContainEqual({ command: "stock_search", payload: { keyword: "浦发银行" } });
+  expect(calls.map((call) => call.command)).not.toContain("search_reports");
+  expect(calls.map((call) => call.command)).not.toContain("search_news");
+  expect(calls.map((call) => call.command)).not.toContain("search_watchlist_notes");
+  expect(calls.map((call) => call.command)).not.toContain("search_global");
+  expect(screen.queryByText("查看全部搜索结果")).not.toBeInTheDocument();
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "生益科技" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "未选择股票" })).toBeInTheDocument();
   });
   fireEvent.click(screen.getByRole("button", { name: /返回/ }));
   await waitFor(() => {
@@ -308,11 +309,31 @@ test("Dashboard 首页不展示旧版 Provider 异常空态", async () => {
   expect(screen.queryByText("provider_unconfigured")).not.toBeInTheDocument();
 });
 
-test("自选股页面展示本地 mock 卡片并支持筛选和本地删除", async () => {
+test("自选股页面默认展示空态并支持备注范围搜索", async () => {
   window.location.hash = "#/watchlist";
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
+    if (command === "search_watchlist_notes") {
+      return {
+        code: 0,
+        message: "ok",
+        data: [
+          {
+            doc_uid: "watchlist_note:1",
+            doc_type: "watchlist_note",
+            ref_id: "1",
+            symbol: "CN:SZ:300308",
+            title: "中际旭创",
+            summary: "北美客户订单",
+            source: "watchlist_note",
+            source_time: "2026-06-22T10:22:00Z",
+            score: 1,
+            highlights: ["光模块"],
+          },
+        ],
+      };
+    }
     throw new Error(`unexpected command ${command}`);
   });
 
@@ -322,26 +343,29 @@ test("自选股页面展示本地 mock 卡片并支持筛选和本地删除", as
     expect(screen.getByRole("heading", { name: "自选股" })).toBeInTheDocument();
   });
   expect(screen.getByRole("radio", { name: /卡片视图/ })).toBeChecked();
-  expect(screen.getByText("贵州茅台")).toBeInTheDocument();
-  expect(screen.getByText("600519.SH")).toBeInTheDocument();
-  expect(screen.getByText("宁德时代")).toBeInTheDocument();
-  expect(screen.getByText("共 56 条")).toBeInTheDocument();
+  expect(screen.getByText("暂无匹配自选股")).toBeInTheDocument();
+  expect(screen.queryByText("贵州茅台")).not.toBeInTheDocument();
+  expect(screen.queryByText("宁德时代")).not.toBeInTheDocument();
   expect(screen.getByText("自选概览")).toBeInTheDocument();
   expect(screen.getByText("市场分布")).toBeInTheDocument();
   expect(screen.queryByText("买入")).not.toBeInTheDocument();
   expect(screen.queryByText("卖出")).not.toBeInTheDocument();
 
-  fireEvent.change(screen.getByPlaceholderText("搜索自选股"), { target: { value: "光模块" } });
-  expect(screen.getByText("新易盛")).toBeInTheDocument();
-  expect(screen.getByText("中际旭创")).toBeInTheDocument();
-  expect(screen.queryByText("贵州茅台")).not.toBeInTheDocument();
-
-  fireEvent.change(screen.getByPlaceholderText("搜索自选股"), { target: { value: "" } });
-  const maotaiCard = screen.getByText("贵州茅台").closest("article");
-  expect(maotaiCard).toBeTruthy();
-  fireEvent.click(within(maotaiCard as HTMLElement).getByRole("button", { name: /删除/ }));
-  expect(screen.queryByText("贵州茅台")).not.toBeInTheDocument();
-  expect(calls).toEqual([]);
+  const searchInput = screen.getByPlaceholderText("搜索自选股");
+  fireEvent.change(searchInput, { target: { value: "北美客户" } });
+  fireEvent.keyDown(searchInput, { key: "Enter", code: "Enter" });
+  await waitFor(() => {
+    expect(screen.getByText("中际旭创")).toBeInTheDocument();
+  });
+  expect(screen.getByText("北美客户订单")).toBeInTheDocument();
+  expect(calls).toEqual([
+    {
+      command: "search_watchlist_notes",
+      payload: { payload: { keyword: "北美客户", symbols: [], limit: 20, offset: 0, sort: "relevance" } },
+    },
+  ]);
+  expect(calls.map((call) => call.command)).not.toContain("search_global");
+  expect(calls.map((call) => call.command)).not.toContain("search_news");
 });
 
 test("自选股页面可切换表格视图且不暴露交易入口", async () => {
@@ -363,7 +387,7 @@ test("自选股页面可切换表格视图且不暴露交易入口", async () =>
   expect(screen.queryByText("下单")).not.toBeInTheDocument();
 });
 
-test("个股详情页展示本地 mock 工作台且不作为左侧菜单入口", async () => {
+test("个股详情页展示空态工作台且不作为左侧菜单入口", async () => {
   window.location.hash = "#/stocks/CN%3ASH%3A600183";
   mockIPC((command) => {
     throw new Error(`unexpected command ${command}`);
@@ -372,19 +396,17 @@ test("个股详情页展示本地 mock 工作台且不作为左侧菜单入口",
   render(<App />);
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "生益科技" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "未选择股票" })).toBeInTheDocument();
   });
   expect(screen.queryByRole("link", { name: /个股详情/ })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /返回/ })).toBeInTheDocument();
-  expect(screen.getByText("CN:SH:600183")).toBeInTheDocument();
-  expect(screen.getByText("25.68")).toBeInTheDocument();
-  expect(screen.getByText("+1.42%")).toBeInTheDocument();
+  expect(screen.getAllByText("暂无").length).toBeGreaterThan(0);
   expect(screen.getByRole("heading", { name: "K线图" })).toBeInTheDocument();
-  expect(screen.getByText("MA5")).toBeInTheDocument();
-  expect(screen.getByText("基础信息")).toBeInTheDocument();
-  expect(screen.getByText("我的标签与备注")).toBeInTheDocument();
-  expect(screen.getByText("研究快捷入口")).toBeInTheDocument();
-  expect(screen.getByText("生益科技：一季度归母净利润同比增长18.35% 产品结构持续优化")).toBeInTheDocument();
+  expect(screen.getByText("暂无K线数据")).toBeInTheDocument();
+  expect(screen.getByText("暂无基础信息")).toBeInTheDocument();
+  expect(screen.getByText("暂无技术指标")).toBeInTheDocument();
+  expect(screen.getByText("暂无新闻资讯")).toBeInTheDocument();
+  expect(screen.queryByText("生益科技：一季度归母净利润同比增长18.35% 产品结构持续优化")).not.toBeInTheDocument();
   expect(screen.queryByText("买入")).not.toBeInTheDocument();
   expect(screen.queryByText("卖出")).not.toBeInTheDocument();
   expect(screen.queryByText("下单")).not.toBeInTheDocument();
@@ -400,7 +422,7 @@ test("个股详情页本地交互只展示占位提示状态", async () => {
   render(<App />);
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "生益科技" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "未选择股票" })).toBeInTheDocument();
   });
   fireEvent.click(screen.getByRole("button", { name: "周K" }));
   expect(screen.getByRole("button", { name: "周K" })).toHaveClass("text-[#1677ff]");
@@ -540,7 +562,7 @@ test("Prompt 模板页拒绝未支持变量且不会提交创建 command", async
   expect(calls.some((call) => call.command === "prompt_templates_create")).toBe(false);
 });
 
-test("AI 分析页展示静态工作台并只使用本地交互", async () => {
+test("AI 分析页展示空态工作台并只使用本地交互", async () => {
   window.location.hash = "#/analysis";
   const calls: Array<{ command: string; payload?: any }> = [];
   const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
@@ -561,16 +583,9 @@ test("AI 分析页展示静态工作台并只使用本地交互", async () => {
 
   expect(screen.getByText("分析配置")).toBeInTheDocument();
   expect(screen.getByText("股票选择")).toBeInTheDocument();
-  const stockInput = screen.getByDisplayValue(/生益科技\s+CN:SH:600183/);
-  fireEvent.change(stockInput, { target: { value: "茅台" } });
-  await waitFor(() => {
-    expect(screen.getByText("贵州茅台")).toBeInTheDocument();
-  });
-  fireEvent.click(screen.getByText("贵州茅台"));
-  expect(screen.getByDisplayValue(/贵州茅台\s+CN:SH:600519/)).toBeInTheDocument();
+  expect(screen.queryByDisplayValue(/生益科技/)).not.toBeInTheDocument();
   expect(screen.getByText("个股综合分析")).toBeInTheDocument();
   expect(screen.getByText("DeepSeek (DeepSeek-V3)")).toBeInTheDocument();
-  expect(screen.getByText("默认个股分析模板")).toBeInTheDocument();
   expect(screen.getByText("管理模板")).toBeInTheDocument();
 
   expect(screen.getByText("可选持仓上下文")).toBeInTheDocument();
@@ -581,31 +596,24 @@ test("AI 分析页展示静态工作台并只使用本地交互", async () => {
 
   expect(screen.getByText("数据上下文预览")).toBeInTheDocument();
   expect(screen.getByText("基础信息摘要")).toBeInTheDocument();
-  expect(screen.getByText("广东生益科技股份有限公司")).toBeInTheDocument();
   expect(screen.getByText("最新行情摘要")).toBeInTheDocument();
-  expect(screen.getByText("25.68")).toBeInTheDocument();
-  expect(screen.getAllByText("+1.42%").length).toBeGreaterThan(0);
   expect(screen.getByText("K线概况（日K）")).toBeInTheDocument();
-  expect(screen.getByText("+18.65%")).toBeInTheDocument();
   expect(screen.getByText("技术指标摘要")).toBeInTheDocument();
   expect(screen.getByText("相关新闻摘要")).toBeInTheDocument();
-  expect(screen.getByText("生益科技：一季度归母净利润同比增长18.35%，产品结构持续优化")).toBeInTheDocument();
+  expect(screen.queryByText("广东生益科技股份有限公司")).not.toBeInTheDocument();
+  expect(screen.queryByText("生益科技：一季度归母净利润同比增长18.35%，产品结构持续优化")).not.toBeInTheDocument();
 
   expect(screen.getByText("输出预览")).toBeInTheDocument();
-  expect(screen.getByText("生益科技（600183.SH）个股综合分析报告（示例）")).toBeInTheDocument();
-  expect(screen.getByText("1. 核心结论")).toBeInTheDocument();
-  expect(screen.getByText("6. 后续观察指标")).toBeInTheDocument();
+  expect(screen.getAllByText("暂无输出内容").length).toBeGreaterThan(0);
   fireEvent.mouseDown(screen.getByText("Markdown"));
   fireEvent.click(screen.getAllByRole("option", { name: "纯文本" })[0]);
-  expect(screen.getByText(/核心结论/)).toBeInTheDocument();
+  expect(screen.getAllByText("暂无输出内容").length).toBeGreaterThan(0);
 
   const stopButton = screen.getByRole("button", { name: /停止生成/ });
   expect(stopButton).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: /保存报告/ }));
   fireEvent.click(screen.getByRole("button", { name: /复制 Markdown/ }));
-  await waitFor(() => {
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("个股综合分析报告"));
-  });
+  expect(writeText).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: /导出 Markdown/ }));
   fireEvent.click(screen.getByText("管理模板"));
   fireEvent.click(screen.getByText("查看更多新闻 >"));
@@ -617,7 +625,7 @@ test("AI 分析页展示静态工作台并只使用本地交互", async () => {
   fireEvent.click(screen.getByRole("button", { name: /开始分析/ }));
   await waitFor(() => {
     expect(window.location.hash).toBe("#/analysis/running");
-    expect(screen.getByRole("heading", { name: "正在生成：生益科技 个股综合分析" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "AI 分析任务" })).toBeInTheDocument();
   });
 
   expect(screen.queryByText("下单")).not.toBeInTheDocument();
@@ -626,7 +634,7 @@ test("AI 分析页展示静态工作台并只使用本地交互", async () => {
   expect(calls).toEqual([]);
 });
 
-test("AI 分析生成中页面展示 mock 运行态并只使用本地交互", async () => {
+test("AI 分析生成中页面展示空任务态并只使用本地交互", async () => {
   window.location.hash = "#/analysis/running";
   const calls: Array<{ command: string; payload?: any }> = [];
   const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
@@ -639,42 +647,23 @@ test("AI 分析生成中页面展示 mock 运行态并只使用本地交互", as
   render(<App />);
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "正在生成：生益科技 个股综合分析" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "AI 分析任务" })).toBeInTheDocument();
   });
   expect(screen.getByRole("link", { name: "AI 分析" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByText("AI 分析任务进行中，请稍候...")).toBeInTheDocument();
-  expect(screen.getByText("RUNNING")).toBeInTheDocument();
-  expect(screen.getByText("task_20250520_153012_abcd1234")).toBeInTheDocument();
-  expect(screen.getByText("00:01:42")).toBeInTheDocument();
-  expect(screen.getByText("DeepSeek-V3")).toBeInTheDocument();
+  expect(screen.getByText("CANCELLED")).toBeInTheDocument();
+  expect(screen.getAllByText("暂无").length).toBeGreaterThan(0);
   expect(screen.getByRole("button", { name: /返回/ })).toBeInTheDocument();
 
   expect(screen.getByText("任务步骤")).toBeInTheDocument();
-  expect(screen.getByText("校验股票代码")).toBeInTheDocument();
-  expect(screen.getByText("拉取基础信息")).toBeInTheDocument();
-  expect(screen.getByText("拉取行情与K线")).toBeInTheDocument();
-  expect(screen.getByText("计算技术指标")).toBeInTheDocument();
-  expect(screen.getByText("计算中...（约 20%）")).toBeInTheDocument();
-  expect(screen.getAllByText("拉取新闻资讯").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("构建 Prompt").length).toBeGreaterThan(0);
-  expect(screen.getByText("调用 AI 模型")).toBeInTheDocument();
-  expect(screen.getByText("保存分析报告")).toBeInTheDocument();
+  expect(screen.queryByText("校验股票代码")).not.toBeInTheDocument();
 
   expect(screen.getByText("流式输出")).toBeInTheDocument();
-  expect(screen.getByText("（正在生成中...）")).toBeInTheDocument();
   expect(screen.getByText("自动滚动")).toBeInTheDocument();
-  expect(screen.getByText("生益科技（600183.SH）个股综合分析")).toBeInTheDocument();
-  expect(screen.getByText("1. 核心结论（生成中...）")).toBeInTheDocument();
-  expect(screen.getByText("3. 技术面观察（生成中...）")).toBeInTheDocument();
-  expect(screen.getByText("内容持续生成中...")).toBeInTheDocument();
+  expect(screen.getByText("暂无流式输出")).toBeInTheDocument();
 
   expect(screen.getByText("任务日志")).toBeInTheDocument();
-  expect(screen.getByText("TASK_STARTED")).toBeInTheDocument();
-  expect(screen.getAllByText("TASK_PROGRESS").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("TASK_CHUNK").length).toBe(3);
-  expect(screen.getByText("任务已创建，准备开始执行分析")).toBeInTheDocument();
-  expect(screen.getByText("流式输出：技术面观察段落")).toBeInTheDocument();
-  expect(screen.getByText("+512 字")).toBeInTheDocument();
+  expect(screen.queryByText("TASK_STARTED")).not.toBeInTheDocument();
 
   const autoScrollSwitch = screen.getByRole("switch");
   expect(autoScrollSwitch).toBeChecked();
@@ -685,14 +674,12 @@ test("AI 分析生成中页面展示 mock 运行态并只使用本地交互", as
   fireEvent.click(screen.getByRole("button", { name: /返回/ }));
 
   const stopButton = screen.getByRole("button", { name: /停止生成/ });
-  expect(stopButton).not.toBeDisabled();
+  expect(stopButton).toBeDisabled();
   fireEvent.click(stopButton);
   expect(stopButton).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: /后台运行/ }));
   fireEvent.click(screen.getByRole("button", { name: /复制当前内容/ }));
-  await waitFor(() => {
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("生益科技（600183.SH）个股综合分析"));
-  });
+  expect(writeText).not.toHaveBeenCalled();
 
   expect(screen.getByText("任务完成后可在报告历史中查看完整内容。")).toBeInTheDocument();
   expect(screen.getByText("AI 输出需区分事实、推断和观点，仅供研究参考，不构成投资建议。")).toBeInTheDocument();
@@ -703,11 +690,39 @@ test("AI 分析生成中页面展示 mock 运行态并只使用本地交互", as
   expect(calls).toEqual([]);
 });
 
-test("分析报告历史页面展示筛选表格统计并支持本地交互", async () => {
+test("分析报告历史页面展示空态并按报告范围搜索", async () => {
   window.location.hash = "#/reports";
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
+    if (command === "search_reports") {
+      return {
+        code: 0,
+        message: "ok",
+        data: [
+          {
+            doc_uid: "report:2",
+            doc_type: "report",
+            ref_id: "2",
+            symbol: "CN:SZ:002409",
+            title: "雅克科技 技术面分析",
+            summary: "趋势反转失败；量能不足；关键位失守",
+            source: "analysis_report",
+            source_time: "2025-05-20T14:42:00Z",
+            score: 1,
+            highlights: ["雅克科技"],
+          },
+        ],
+      };
+    }
+    if (command === "report_delete") {
+      const deletePayload = payload as { id: number };
+      return {
+        code: 0,
+        message: "ok",
+        data: { id: deletePayload.id },
+      };
+    }
     throw new Error(`unexpected command ${command}`);
   });
 
@@ -717,10 +732,9 @@ test("分析报告历史页面展示筛选表格统计并支持本地交互", as
     expect(screen.getByRole("heading", { name: "分析报告历史" })).toBeInTheDocument();
   });
 
-  expect(screen.getByText("查看、筛选、复制和导出历史投研报告")).toBeInTheDocument();
   expect(screen.getByText("报告列表")).toBeInTheDocument();
-  expect(screen.getAllByText("生益科技 个股综合分析").length).toBeGreaterThan(0);
-  expect(screen.getByText("雅克科技 技术面分析")).toBeInTheDocument();
+  expect(screen.queryByText("生益科技 个股综合分析")).not.toBeInTheDocument();
+  expect(screen.queryByText("雅克科技 技术面分析")).not.toBeInTheDocument();
   expect(screen.getByText("报告统计")).toBeInTheDocument();
   expect(screen.getByText("常用模型 TOP 5")).toBeInTheDocument();
   expect(screen.getByText("分析类型分布")).toBeInTheDocument();
@@ -738,33 +752,58 @@ test("分析报告历史页面展示筛选表格统计并支持本地交互", as
 
   fireEvent.change(screen.getByPlaceholderText("输入股票名称 / 代码 / 拼音"), { target: { value: "雅克" } });
   fireEvent.click(screen.getByLabelText("查询报告"));
-  expect(screen.getByText("雅克科技 技术面分析")).toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.getByText("雅克科技 技术面分析")).toBeInTheDocument();
+  });
+  expect(screen.getByText("趋势反转失败；量能不足；关键位失守")).toBeInTheDocument();
   expect(screen.queryByText("生益科技 个股综合分析")).not.toBeInTheDocument();
-
-  const startDateInput = screen.getByPlaceholderText("2025-04-20");
-  fireEvent.input(startDateInput, { target: { value: "2025-05-21" } });
-  fireEvent.click(screen.getByLabelText("查询报告"));
-  expect(screen.queryByText("雅克科技 技术面分析")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("删除 雅克科技 技术面分析"));
+  await waitFor(() => {
+    expect(screen.queryByText("雅克科技 技术面分析")).not.toBeInTheDocument();
+  });
 
   fireEvent.click(screen.getByLabelText("重置筛选"));
-  expect(screen.getAllByText("生益科技 个股综合分析").length).toBeGreaterThan(0);
+  await waitFor(() => {
+    expect(screen.queryByText("雅克科技 技术面分析")).not.toBeInTheDocument();
+  });
 
   expect(screen.queryByRole("button", { name: "复制 生益科技 个股综合分析" })).not.toBeInTheDocument();
-
-  fireEvent.click(screen.getByRole("button", { name: "删除 生益科技 个股综合分析" }));
-  await waitFor(() => {
-    expect(screen.queryByText("生益科技 个股综合分析")).not.toBeInTheDocument();
-  });
-  expect(calls).toEqual([]);
+  expect(calls).toEqual([
+    {
+      command: "search_reports",
+      payload: { payload: { keyword: "雅克", symbols: [], limit: 20, offset: 0, sort: "relevance" } },
+    },
+    { command: "report_delete", payload: { id: 2 } },
+  ]);
 });
 
-test("资讯中心页面展示筛选列表右侧观察并支持本地交互", async () => {
+test("资讯中心页面展示空态并按资讯范围搜索", async () => {
   window.location.hash = "#/news";
   const writeText = vi.fn(() => Promise.resolve());
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
+    if (command === "search_news") {
+      return {
+        code: 0,
+        message: "ok",
+        data: [
+          {
+            doc_uid: "news:optical",
+            doc_type: "news",
+            ref_id: "https://news.example.com/optical",
+            symbol: "CN:SZ:300308",
+            title: "光模块厂商订单增长，AI 算力需求延续",
+            summary: "机构认为北美 AI 算力资本开支仍处高位。",
+            source: "同花顺资讯",
+            source_time: "2026-06-22T10:22:00Z",
+            score: 1,
+            highlights: ["光模块"],
+          },
+        ],
+      };
+    }
     throw new Error(`unexpected command ${command}`);
   });
 
@@ -776,35 +815,39 @@ test("资讯中心页面展示筛选列表右侧观察并支持本地交互", as
 
   expect(screen.getByText("聚合个股新闻、市场新闻、行业事件与研究线索")).toBeInTheDocument();
   expect(screen.getByText("资讯列表")).toBeInTheDocument();
-  expect(screen.getByText("（共 218 条）")).toBeInTheDocument();
+  expect(screen.getByText("（共 0 条）")).toBeInTheDocument();
   expect(screen.getByText("热点观察")).toBeInTheDocument();
   expect(screen.getByText("数据源状态")).toBeInTheDocument();
-  expect(screen.getByText("生益科技：公司高端覆铜板产品订单饱满，持续提升 AI 服务器领域份额")).toBeInTheDocument();
-  expect(screen.getByText("英伟达 Blackwell 需求强劲，光模块厂商迎来新一轮订单增长")).toBeInTheDocument();
+  expect(screen.getByText("仅搜索资讯中心，暂无匹配资讯")).toBeInTheDocument();
+  expect(screen.queryByText("生益科技：公司高端覆铜板产品订单饱满，持续提升 AI 服务器领域份额")).not.toBeInTheDocument();
   expect(screen.queryByText("下单")).not.toBeInTheDocument();
   expect(screen.queryByText("券商账户")).not.toBeInTheDocument();
   expect(screen.queryByText("公告专用入口")).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByPlaceholderText("输入关键词，支持标题/摘要"), { target: { value: "光模块" } });
-  expect(screen.getByText("英伟达 Blackwell 需求强劲，光模块厂商迎来新一轮订单增长")).toBeInTheDocument();
-  expect(screen.queryByText("生益科技：公司高端覆铜板产品订单饱满，持续提升 AI 服务器领域份额")).not.toBeInTheDocument();
-
-  fireEvent.click(screen.getByText("PCB"));
-  expect(screen.getByText("PCB 板块震荡走强，服务器需求拉动高端板材景气度")).toBeInTheDocument();
-
   fireEvent.click(screen.getByRole("button", { name: /刷新资讯/ }));
+  await waitFor(() => {
+    expect(screen.getByText("光模块厂商订单增长，AI 算力需求延续")).toBeInTheDocument();
+  });
   fireEvent.click(screen.getAllByRole("button", { name: /查看原文/ })[0]);
   fireEvent.click(screen.getAllByRole("button", { name: /加入上下文/ })[0]);
   fireEvent.click(screen.getAllByRole("button", { name: /复制摘要/ })[0]);
   await waitFor(() => {
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("AI 服务器"));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("北美 AI 算力"));
   });
   fireEvent.click(screen.getByRole("button", { name: /清理缓存/ }));
 
-  expect(calls).toEqual([]);
+  await waitFor(() => {
+    expect(calls.filter((call) => call.command === "search_news")).toEqual([
+      {
+        command: "search_news",
+        payload: { payload: { keyword: "光模块", symbols: [], limit: 20, offset: 0, sort: "relevance" } },
+      },
+    ]);
+  });
 });
 
-test("分析报告详情页面展示报告正文、输入快照并支持本地交互", async () => {
+test("分析报告详情页面无报告时展示空态并可返回列表", async () => {
   window.location.hash = "#/reports/report-1";
   const writeText = vi.fn(() => Promise.resolve());
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
@@ -817,27 +860,16 @@ test("分析报告详情页面展示报告正文、输入快照并支持本地�
   render(<App />);
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "生益科技 CN:SH:600183 投研分析" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "报告详情" })).toBeInTheDocument();
   });
 
-  expect(screen.getByText("目录")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "1. 核心结论" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "1. 核心结论" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "4. 基本面观察" })).toBeInTheDocument();
-  expect(screen.getByText("输入快照")).toBeInTheDocument();
+  expect(screen.getByText("暂无报告详情，请从报告历史选择已生成的报告")).toBeInTheDocument();
+  expect(screen.queryByText("核心结论")).not.toBeInTheDocument();
   expect(screen.getByText("风险声明")).toBeInTheDocument();
   expect(screen.queryByText("下单")).not.toBeInTheDocument();
   expect(screen.queryByText("券商账户")).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByLabelText("收藏报告"));
-  fireEvent.click(screen.getByRole("button", { name: /复制 Markdown/ }));
-  await waitFor(() => {
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("核心结论"));
-  });
-  fireEvent.click(screen.getByRole("button", { name: /导出 Markdown/ }));
-  fireEvent.click(screen.getByRole("button", { name: /重新分析/ }));
-  fireEvent.click(screen.getByRole("button", { name: /删除/ }));
-  fireEvent.click(screen.getByRole("button", { name: "2. 当前行情状态" }));
+  expect(writeText).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: /返回列表/ }));
 
   await waitFor(() => {
@@ -847,7 +879,44 @@ test("分析报告详情页面展示报告正文、输入快照并支持本地�
   expect(calls).toEqual([]);
 });
 
-test("任务历史页面展示本地 mock 并支持详情切换", async () => {
+test("分析报告详情页面按路由 ID 读取真实报告", async () => {
+  window.location.hash = "#/reports/3";
+  const calls: Array<{ command: string; payload?: any }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    if (command === "report_get") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          id: 3,
+          task_id: "task-report-3",
+          symbol: "CN:SH:600519",
+          title: "贵州茅台 个股综合分析",
+          analysis_type: "stock_full",
+          model_name: "gpt-4.1-mini",
+          content_markdown: "## 核心结论\n\n仅作研究辅助，不构成投资建议。",
+          risk_summary: "估值波动风险",
+          created_at: "2026-06-22T09:00:00Z",
+          updated_at: "2026-06-22T10:00:00Z",
+        },
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  });
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { name: "贵州茅台 个股综合分析" })).toBeInTheDocument();
+  });
+  expect(screen.getAllByText(/核心结论/).length).toBeGreaterThan(0);
+  expect(screen.getByText(/仅作研究辅助，不构成投资建议/)).toBeInTheDocument();
+  expect(screen.getByText(/估值波动风险/)).toBeInTheDocument();
+  expect(calls).toEqual([{ command: "report_get", payload: { id: 3 } }]);
+});
+
+test("任务历史页面默认展示空态且不暴露假任务", async () => {
   window.location.hash = "#/tasks";
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {
@@ -864,23 +933,13 @@ test("任务历史页面展示本地 mock 并支持详情切换", async () => {
   expect(screen.getByText("运行中任务")).toBeInTheDocument();
   expect(screen.getByText("今日成功")).toBeInTheDocument();
   expect(screen.getByText("失败任务")).toBeInTheDocument();
-  expect(screen.getAllByText("task_20250520_152834_abcd1234").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("生益科技 个股综合分析").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("运行中").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("成功").length).toBeGreaterThan(0);
+  expect(screen.queryByText("task_20250520_152834_abcd1234")).not.toBeInTheDocument();
+  expect(screen.queryByText("生益科技 个股综合分析")).not.toBeInTheDocument();
   expect(screen.queryByText("事件流")).not.toBeInTheDocument();
-
-  fireEvent.click(screen.getAllByText("生益科技 个股综合分析")[0]);
-  expect(screen.getByText("事件流")).toBeInTheDocument();
-  expect(screen.getByText("TASK_CREATED")).toBeInTheDocument();
-
-  fireEvent.click(screen.getByText("泰晶科技 个股综合分析"));
-  expect(screen.getAllByText("task_20250520_123501_pqr2345").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("模型调用超时").length).toBeGreaterThan(0);
   expect(calls).toEqual([]);
 });
 
-test("任务历史页面支持本地筛选、重置和取消任务", async () => {
+test("任务历史页面筛选和重置保持空态", async () => {
   window.location.hash = "#/tasks";
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {
@@ -898,20 +957,18 @@ test("任务历史页面支持本地筛选、重置和取消任务", async () =>
     target: { value: "雅克科技" },
   });
   fireEvent.click(screen.getByRole("button", { name: /查\s*询/ }));
-  expect(screen.getByText("雅克科技 技术面分析")).toBeInTheDocument();
+  expect(screen.queryByText("雅克科技 技术面分析")).not.toBeInTheDocument();
 
   expect(appDatePickerLocale.lang.shortWeekDays).toEqual(["日", "一", "二", "三", "四", "五", "六"]);
   expect(appDatePickerLocale.lang.shortMonths).toContain("6月");
 
   fireEvent.click(screen.getByRole("button", { name: /重\s*置/ }));
-  expect(screen.getAllByText("生益科技 个股综合分析").length).toBeGreaterThan(0);
-
-  fireEvent.click(screen.getAllByRole("button", { name: /取消/ })[0]);
-  expect(screen.getAllByText("已取消").length).toBeGreaterThan(0);
+  expect(screen.queryByText("生益科技 个股综合分析")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /取消/ })).not.toBeInTheDocument();
   expect(calls).toEqual([]);
 });
 
-test("设置中心基础设置页展示本地 mock 并支持基础交互", async () => {
+test("设置中心基础设置页展示真实空态并支持基础交互", async () => {
   window.location.hash = "#/settings";
   const calls: Array<{ command: string; payload?: any }> = [];
   const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
@@ -934,6 +991,28 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
     if (command === "cache_clean") {
       const cleanPayload = payload as { payload?: { targets?: string[] } } | undefined;
       return { code: 0, message: "ok", data: { cleaned_targets: cleanPayload?.payload?.targets ?? [] } };
+    }
+    if (command === "search_status") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          fts5_status: "available",
+          gse_status: "fallback",
+          search_status: "ready",
+          active_stock_batch_id: "stock-ready-1",
+          active_document_batch_id: "doc-ready-1",
+          running_rebuild_task_id: "",
+          stock_index_count: 12,
+          report_index_count: 3,
+          news_index_count: 4,
+          watchlist_note_index_count: 5,
+          last_rebuild_at: "2026-06-22T13:30:00Z",
+          tokenizer_name: "simple",
+          tokenizer_version: "1",
+          dictionary_hash: "builtin",
+        },
+      };
     }
     throw new Error(`unexpected command ${command}`);
   });
@@ -963,6 +1042,10 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
   });
   expect(screen.getByText("行情缓存")).toBeInTheDocument();
   expect(screen.getByText("任务日志")).toBeInTheDocument();
+  expect(screen.getByText("搜索索引")).toBeInTheDocument();
+  expect(screen.getByText("simple@1")).toBeInTheDocument();
+  expect(screen.getByText("stock-ready-1")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /重建报告索引/ })).toBeInTheDocument();
   expect(screen.getByText("系统代理")).toBeInTheDocument();
   expect(screen.getByText("帮助我们改进产品（不会收集个人信息）")).toBeInTheDocument();
   expect(screen.getByText("敏感信息会脱敏保存；日志导出前将自动清理 API Key 与代理密码。")).toBeInTheDocument();
@@ -987,7 +1070,7 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
   expect(screen.getByRole("tab", { name: "模型设置" })).toHaveAttribute("aria-selected", "true");
   expect(screen.getByText("Provider 列表")).toBeInTheDocument();
   expect(screen.getByText("模型配置列表")).toBeInTheDocument();
-  expect(screen.getByText("默认 OpenAI")).toBeInTheDocument();
+  expect(screen.queryByText("默认 OpenAI")).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("tab", { name: "Prompt 配置" }));
   expect(screen.getByRole("tab", { name: "Prompt 配置" })).toHaveAttribute("aria-selected", "true");
@@ -995,35 +1078,12 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
   expect(screen.getByRole("heading", { name: "Prompt 模板" })).toBeInTheDocument();
   expect(screen.getByText("管理系统提示词与投研分析模板")).toBeInTheDocument();
   expect(screen.getByText("模板分类")).toBeInTheDocument();
-  expect(screen.getByText("系统模板")).toBeInTheDocument();
-  expect(screen.getAllByText("个股分析模板").length).toBeGreaterThan(0);
-  expect(screen.getByText("默认个股分析模板")).toBeInTheDocument();
-  expect(screen.getByText("深度个股分析模板")).toBeInTheDocument();
-  expect(screen.getByText("技术分析模板")).toBeInTheDocument();
-  expect(screen.getByText("财务分析模板")).toBeInTheDocument();
-  expect(screen.getByText("持仓分析模板")).toBeInTheDocument();
-  expect(screen.getByText("市场复盘模板")).toBeInTheDocument();
-  expect(screen.getByText("自定义模板")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("默认个股分析模板")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("面向个股的综合分析模板，包含基本面、技术面与消息面分析框架。")).toBeInTheDocument();
-  expect((screen.getByLabelText("Prompt 内容") as HTMLTextAreaElement).value).toContain("{{stock_name}}");
+  expect(screen.queryByText("默认个股分析模板")).not.toBeInTheDocument();
   expect(screen.getByText("变量说明")).toBeInTheDocument();
   expect(screen.getByText("{{stock_name}}")).toBeInTheDocument();
   expect(screen.getByText("{{analysis_language}}")).toBeInTheDocument();
   expect(screen.getByText("输出预览")).toBeInTheDocument();
-  expect(screen.getByText("生益科技（600183.SH）个股综合分析")).toBeInTheDocument();
-  fireEvent.click(screen.getByText("深度个股分析模板"));
-  expect(screen.getByDisplayValue("深度个股分析模板")).toBeInTheDocument();
-  fireEvent.change(screen.getByDisplayValue("深度个股分析模板"), { target: { value: "自定义个股分析模板" } });
-  expect(screen.getByDisplayValue("自定义个股分析模板")).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Prompt 内容"), { target: { value: "# 测试模板\n{{stock_code}}" } });
-  fireEvent.click(screen.getByRole("button", { name: /保存/ }));
-  fireEvent.click(screen.getByRole("button", { name: /复制/ }));
-  await waitFor(() => {
-    expect(writeText).toHaveBeenCalledWith("# 测试模板\n{{stock_code}}");
-  });
-  fireEvent.click(screen.getByRole("button", { name: /恢复默认/ }));
-  fireEvent.click(screen.getByRole("button", { name: /delete\s+删除/ }));
+  expect(screen.getAllByText("暂无预览内容").length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole("button", { name: "新增分类" }));
   let dialog = screen.getByText("新建分类").closest(".ant-modal") as HTMLElement;
   expect(dialog).toBeTruthy();
@@ -1046,11 +1106,16 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
     expect(screen.getByText("技术突破模板")).toBeInTheDocument();
     expect(screen.getAllByDisplayValue("技术突破模板").length).toBeGreaterThan(0);
   });
+  fireEvent.change(screen.getByLabelText("Prompt 内容"), { target: { value: "# 测试模板\n{{stock_code}}" } });
+  fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+  fireEvent.click(screen.getByRole("button", { name: /复制/ }));
+  await waitFor(() => {
+    expect(writeText).toHaveBeenCalledWith("# 测试模板\n{{stock_code}}");
+  });
   fireEvent.click(screen.getByRole("button", { name: "格式化" }));
   fireEvent.click(screen.getByRole("button", { name: "全屏编辑" }));
   fireEvent.mouseDown(screen.getByText("Markdown"));
   fireEvent.click(screen.getAllByRole("option", { name: "纯文本" })[0]);
-  expect(screen.getByText(/核心结论/)).toBeInTheDocument();
   expect(screen.queryByText("输入激活码")).not.toBeInTheDocument();
   expect(screen.queryByText("下单")).not.toBeInTheDocument();
   expect(screen.queryByText("券商账户")).not.toBeInTheDocument();
@@ -1116,7 +1181,7 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
   expect(screen.getByText("HTTP / HTTPS")).toBeInTheDocument();
   expect(screen.getByText("身份认证")).toBeInTheDocument();
   expect(screen.getByText("用户名")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("invest_user")).toBeInTheDocument();
+  expect(screen.queryByDisplayValue("invest_user")).not.toBeInTheDocument();
   expect(screen.getByText("密码")).toBeInTheDocument();
   expect(screen.getByText("连接超时")).toBeInTheDocument();
   expect(screen.getByDisplayValue("10")).toBeInTheDocument();
@@ -1128,7 +1193,7 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
   expect(screen.getByText("SOCKS 版本")).toBeInTheDocument();
   expect(screen.getAllByText("SOCKS5").length).toBeGreaterThan(0);
   expect(screen.getByText("身份认证")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("invest_user")).toBeInTheDocument();
+  expect(screen.queryByDisplayValue("invest_user")).not.toBeInTheDocument();
   expect(screen.getByText("密码")).toBeInTheDocument();
   expect(screen.getByText("连接超时")).toBeInTheDocument();
   expect(screen.getByDisplayValue("10")).toBeInTheDocument();
@@ -1176,6 +1241,7 @@ test("设置中心基础设置页展示本地 mock 并支持基础交互", async
 
   expect(calls).toEqual([
     { command: "cache_stats", payload: {} },
+    { command: "search_status", payload: {} },
     { command: "cache_clean", payload: { payload: { targets: ["quote", "task_logs"] } } },
     { command: "cache_stats", payload: {} },
   ]);

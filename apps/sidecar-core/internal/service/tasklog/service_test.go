@@ -23,12 +23,14 @@ type serviceTestStore struct {
 	diagnosisOK bool
 }
 
+// AppendTaskLogs 捕获 service 写入的任务日志。
 func (store *serviceTestStore) AppendTaskLogs(_ context.Context, entries []model.TaskLogEntry) error {
 	store.appended = append(store.appended, entries...)
 	store.logs = append(store.logs, entries...)
 	return nil
 }
 
+// ListTaskLogs 按测试查询条件过滤内存日志。
 func (store *serviceTestStore) ListTaskLogs(_ context.Context, query dao.TaskLogQuery) (dao.TaskLogListResult, error) {
 	limit := query.Limit
 	if limit == 0 {
@@ -66,6 +68,7 @@ func (store *serviceTestStore) ListTaskLogs(_ context.Context, query dao.TaskLog
 	return dao.TaskLogListResult{Entries: entries, NextID: nextID}, nil
 }
 
+// GetTaskLog 从内存日志中读取指定 ID。
 func (store *serviceTestStore) GetTaskLog(_ context.Context, id int64) (model.TaskLogEntry, bool, error) {
 	for _, entry := range store.logs {
 		if entry.ID == id {
@@ -75,12 +78,14 @@ func (store *serviceTestStore) GetTaskLog(_ context.Context, id int64) (model.Ta
 	return model.TaskLogEntry{}, false, nil
 }
 
+// UpsertTaskErrorDiagnosis 保存测试诊断结果。
 func (store *serviceTestStore) UpsertTaskErrorDiagnosis(_ context.Context, diagnosis model.TaskErrorDiagnosis) error {
 	store.diagnosis = diagnosis
 	store.diagnosisOK = true
 	return nil
 }
 
+// GetTaskErrorDiagnosis 读取测试诊断结果。
 func (store *serviceTestStore) GetTaskErrorDiagnosis(_ context.Context, taskID string) (model.TaskErrorDiagnosis, bool, error) {
 	if store.diagnosisOK && store.diagnosis.TaskID == taskID {
 		return store.diagnosis, true, nil
@@ -88,6 +93,7 @@ func (store *serviceTestStore) GetTaskErrorDiagnosis(_ context.Context, taskID s
 	return model.TaskErrorDiagnosis{}, false, nil
 }
 
+// GetTask 返回测试预设任务。
 func (store *serviceTestStore) GetTask(_ context.Context, taskID string) (model.Task, bool, error) {
 	if store.taskOK && store.task.ID == taskID {
 		return store.task, true, nil
@@ -95,6 +101,7 @@ func (store *serviceTestStore) GetTask(_ context.Context, taskID string) (model.
 	return model.Task{}, false, nil
 }
 
+// ListTaskEventsAfter 返回指定任务的后续事件。
 func (store *serviceTestStore) ListTaskEventsAfter(_ context.Context, taskID string, afterID int64) ([]model.TaskEvent, error) {
 	var events []model.TaskEvent
 	for _, event := range store.events {
@@ -105,6 +112,7 @@ func (store *serviceTestStore) ListTaskEventsAfter(_ context.Context, taskID str
 	return events, nil
 }
 
+// GetAnalysisReportByTaskID 返回指定任务关联的测试报告。
 func (store *serviceTestStore) GetAnalysisReportByTaskID(_ context.Context, taskID string) (model.AnalysisReport, bool, error) {
 	if store.reportOK && store.report.TaskID == taskID {
 		return store.report, true, nil

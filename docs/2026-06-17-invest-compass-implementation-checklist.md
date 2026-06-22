@@ -85,6 +85,16 @@ P7 跨平台桌面能力、打包、发布验收
   - 停止线：远程日志平台、日志上传、公网指标服务、复杂统计图表、完整 AI 输出重复入库和用户隐私输入入库不随任务日志 MVP 自动完成。
   - 状态：专题清单 SL00-SL32 已完成并通过 Go、Rust、前端自动化验证；FTS5 保持延期停止线。
 
+- 范围搜索专题：`docs/2026-06-22-invest-compass-gse-sqlite-fts-search-implementation-checklist.md`
+  - 范围：GSE 预分词、SQLite FTS5、股票专用搜索索引、拼音字段、菜单范围搜索、索引 outbox、batch 化无损重建和设置中心索引管理。
+  - 停止线：不做跨菜单全局搜索、不做独立 `/search` 页面、不开放任意 `doc_types` 组合、不索引未脱敏报告正文或 `input_snapshot`。
+  - 状态：专题清单 GS00-GS35 已完成并通过 Go、Rust、前端、跨目标 sidecar 和本机 release 自动化验收；顶部搜索只搜股票，菜单搜索只搜当前菜单范围。
+
+- 前后端对接专题：`docs/2026-06-22-invest-compass-frontend-backend-integration-checklist.md`
+  - 范围：React typed invoke service、Rust 白名单 command、Go API、页面真实数据接入、AI 分析 SSE、报告/任务历史回放、mock 清理和对接验收。
+  - 停止线：不新增首版范围，不绕过 Rust 白名单，不让前端直连 Go sidecar，不用假数据伪装真实能力；界面功能如发现数据库、Go API、Rust command 或后端 service 不支持，必须标记阻塞并找用户确认处理方案，不能忽略或继续 mock 接口/数据；不把真实 Provider、外部模型和跨平台桌面验收缺口写成已完成。
+  - 状态：专题清单 FE00-FE28 用于后续对接推进；FE00-FE01 已完成文档入口落地，业务对接任务按实际实现和验证结果逐项标记。
+
 ---
 
 ## 4. P0：规划与仓库基线
@@ -127,7 +137,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 建立 shared API schema 目录。
 - 验证：
   - `cd apps && pnpm install`
-  - `go test ./...`
+  - `go test -tags sqlite_fts5 ./...`
   - `cargo check` 或项目定义的 Tauri Rust 检查命令。
 - 退出条件：
   - 三端项目均可独立执行最小构建/检查命令。
@@ -332,7 +342,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 重要写操作使用事务。
   - 不写手拼 SQL 到业务 handler。
 - 验证：
-  - `go test ./...`
+  - `go test -tags sqlite_fts5 ./...`
   - Go 单测覆盖 CRUD、唯一约束、软删除。
 - 退出条件：
   - 数据访问层类型安全且可测试。
@@ -1670,7 +1680,7 @@ git diff --check
 cd apps && pnpm install
 cd apps && pnpm build
 cd apps && pnpm test
-cd apps/sidecar-core && go test ./...
+cd apps/sidecar-core && go test -tags sqlite_fts5 ./...
 cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
 cd apps/desktop && pnpm tauri build
 ```

@@ -20,6 +20,7 @@ import (
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/providers"
 	reportaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/reports"
 	scheduleraction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/scheduler"
+	searchaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/search"
 	settingsaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/settings"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/stocks"
 	tasklogaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/tasklog"
@@ -31,6 +32,7 @@ import (
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
 	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
+	searchservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/search"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
 )
 
@@ -42,7 +44,10 @@ type Config struct {
 	Ready                 bool
 	MarketProvider        market.MarketProvider
 	NewsProvider          newsservice.Provider
-	StockStore            stocks.Store
+	StockStore            searchservice.StockSearchStore
+	StockSearchService    stocks.Service
+	DocumentSearchStore   searchservice.DocumentSearchStore
+	DocumentSearchService searchaction.Service
 	MarketStore           marketaction.Store
 	NewsStore             newsaction.Store
 	WatchlistStore        watchlistaction.Store
@@ -96,9 +101,12 @@ func Routes(config Config) []httpx.Route {
 		OnShutdown: config.OnShutdown,
 	})...)
 	routes = append(routes, stocks.Routes(stocks.Config{
-		Security:       security,
-		MarketProvider: config.MarketProvider,
-		Store:          config.StockStore,
+		Security: security,
+		Service:  stockSearchService(config),
+	})...)
+	routes = append(routes, searchaction.Routes(searchaction.Config{
+		Security: security,
+		Service:  documentSearchService(config),
 	})...)
 	routes = append(routes, marketaction.Routes(marketaction.Config{
 		Security:       security,
@@ -181,6 +189,33 @@ func Routes(config Config) []httpx.Route {
 		Fetcher:     config.UpdateManifestFetcher,
 	})...)
 	return routes
+}
+
+// stockSearchService 返回股票搜索 service；测试或特殊场景可显式注入，默认用本地 store 和 Provider 构造。
+func stockSearchService(config Config) stocks.Service {
+	if config.StockSearchService != nil {
+		return config.StockSearchService
+	}
+	if config.StockStore == nil && config.MarketProvider == nil {
+		return nil
+	}
+	return searchservice.NewStockSearchService(searchservice.StockSearchConfig{
+		Store:    config.StockStore,
+		Provider: config.MarketProvider,
+	})
+}
+
+// documentSearchService 返回菜单范围文档搜索 service；默认用本地 store 构造固定范围搜索。
+func documentSearchService(config Config) searchaction.Service {
+	if config.DocumentSearchService != nil {
+		return config.DocumentSearchService
+	}
+	if config.DocumentSearchStore == nil {
+		return nil
+	}
+	return searchservice.NewScopedDocumentSearchService(searchservice.DocumentSearchConfig{
+		Store: config.DocumentSearchStore,
+	})
 }
 
 // RegisterRoutes 将 action 路由定义注册到 Gin，引导子包避免直接依赖 Gin 注册 API。

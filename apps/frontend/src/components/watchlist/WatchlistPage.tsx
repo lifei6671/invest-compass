@@ -6,20 +6,27 @@ import { AddWatchlistModal } from "./AddWatchlistModal";
 import { SummaryPanel } from "./SummaryPanel";
 import { WatchlistCardGrid } from "./WatchlistCardGrid";
 import { WatchlistTableCard } from "./WatchlistTableCard";
-import { watchlistMockItems, type WatchlistItem } from "./mock";
-import type { StockSearchResult } from "./mockSearchResults";
+import type { WatchlistItem } from "./types";
+import { searchWatchlistNotes, type DocumentSearchItem, type StockSearchResult } from "../../services/coreClient";
 
 type ViewMode = "table" | "card";
+const localWatchlistTotalCount = 0;
 
 export function WatchlistPage() {
   const { message } = AntApp.useApp();
   const navigate = useNavigate();
-  const [items, setItems] = useState<WatchlistItem[]>(watchlistMockItems);
+  const [items, setItems] = useState<WatchlistItem[]>([]);
   const [keyword, setKeyword] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("card");
   const [addOpen, setAddOpen] = useState(false);
+  const [remoteSearchMode, setRemoteSearchMode] = useState(false);
+  const [searchItems, setSearchItems] = useState<WatchlistItem[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   const filteredItems = useMemo(() => {
+    if (remoteSearchMode) {
+      return searchItems;
+    }
     const normalized = keyword.trim().toLowerCase();
     if (!normalized) {
       return items;
@@ -28,10 +35,18 @@ export function WatchlistPage() {
       const haystack = [item.name, item.code, item.market, item.industry, item.note, ...item.tags].join(" ").toLowerCase();
       return haystack.includes(normalized);
     });
-  }, [items, keyword]);
+  }, [items, keyword, remoteSearchMode, searchItems]);
+  const totalCount = remoteSearchMode ? filteredItems.length : localWatchlistTotalCount;
+
+  const handleKeywordChange = (value: string) => {
+    setKeyword(value);
+    setRemoteSearchMode(false);
+    setSearchItems([]);
+  };
 
   const removeItem = (item: WatchlistItem) => {
     setItems((current) => current.filter((value) => value.id !== item.id));
+    setSearchItems((current) => current.filter((value) => value.id !== item.id));
     message.success("已从自选股移除");
   };
 
@@ -49,7 +64,7 @@ export function WatchlistPage() {
         amount: "--",
         turnoverRate: "--",
         pe: "--",
-        industry: payload.stock.industry,
+        industry: "未分类",
         tags: payload.tags,
         note: payload.note,
         updatedAt: "等待刷新",
@@ -57,12 +72,41 @@ export function WatchlistPage() {
       },
       ...current,
     ]);
+    setRemoteSearchMode(false);
+    setSearchItems([]);
     setAddOpen(false);
     message.success("已添加到自选股");
   };
 
   const viewDetail = (item: WatchlistItem) => {
     navigate(`/stocks/${encodeURIComponent(detailSymbolFromWatchlist(item))}`, { state: { from: "/watchlist" } });
+  };
+
+  const searchNotes = async () => {
+    const normalized = keyword.trim();
+    if (!normalized) {
+      setRemoteSearchMode(false);
+      setSearchItems([]);
+      message.info("请输入关键词后搜索自选备注和标签");
+      return;
+    }
+    try {
+      setIsSearching(true);
+      const results = await searchWatchlistNotes({
+        keyword: normalized,
+        symbols: [],
+        limit: 20,
+        offset: 0,
+        sort: "relevance",
+      });
+      setSearchItems(results.filter((item) => item.doc_type === "watchlist_note").map(mapWatchlistNoteSearchItem));
+      setRemoteSearchMode(true);
+      message.success("自选备注搜索已更新");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "自选备注搜索失败");
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   return (
@@ -106,21 +150,29 @@ export function WatchlistPage() {
           <WatchlistTableCard
             items={filteredItems}
             keyword={keyword}
-            onKeywordChange={setKeyword}
+            onKeywordChange={handleKeywordChange}
             onAdd={() => setAddOpen(true)}
             onDelete={removeItem}
             onView={viewDetail}
-            onRefresh={() => message.success("已刷新本地 mock 数据")}
+            onRefresh={() => message.info("自选股刷新待接入真实列表接口")}
+            onSearch={searchNotes}
+            isSearching={isSearching}
+            emptyDescription={remoteSearchMode ? "仅搜索自选备注和标签，暂无匹配自选项" : undefined}
+            totalCount={totalCount}
           />
         ) : (
           <WatchlistCardGrid
             items={filteredItems}
             keyword={keyword}
-            onKeywordChange={setKeyword}
+            onKeywordChange={handleKeywordChange}
             onAdd={() => setAddOpen(true)}
             onDelete={removeItem}
             onView={viewDetail}
-            onRefresh={() => message.success("已刷新本地 mock 数据")}
+            onRefresh={() => message.info("自选股刷新待接入真实列表接口")}
+            onSearch={searchNotes}
+            isSearching={isSearching}
+            emptyDescription={remoteSearchMode ? "仅搜索自选备注和标签，暂无匹配自选项" : undefined}
+            totalCount={totalCount}
           />
         )}
         <SummaryPanel />
@@ -131,15 +183,65 @@ export function WatchlistPage() {
   );
 }
 
+function mapWatchlistNoteSearchItem(item: DocumentSearchItem, index: number): WatchlistItem {
+  const parsedID = Number(item.ref_id);
+  const { code, market } = watchlistDisplaySymbol(item.symbol);
+  return {
+    id: Number.isFinite(parsedID) && parsedID > 0 ? parsedID : 100000 + index,
+    starred: true,
+    name: item.title || item.symbol,
+    code,
+    market,
+    price: "--",
+    changeAmount: "--",
+    changePercent: "--",
+    amount: "--",
+    turnoverRate: "--",
+    pe: "--",
+    industry: "自选备注",
+    tags: Array.from(new Set((item.highlights.length > 0 ? item.highlights : ["备注"]).filter(Boolean))),
+    note: item.summary,
+    updatedAt: formatWatchlistSearchTime(item.source_time),
+    trend: "up",
+  };
+}
+
+function watchlistDisplaySymbol(symbol: string): Pick<WatchlistItem, "code" | "market"> {
+  const parts = symbol.split(":");
+  if (parts.length === 3 && parts[0] === "CN") {
+    return {
+      code: `${parts[2]}.${parts[1]}`,
+      market: parts[1] === "SH" ? "沪市" : "深市",
+    };
+  }
+  if (parts.length === 2 && parts[0] === "HK") {
+    return { code: `${parts[1]}.HK`, market: "港股" };
+  }
+  return { code: symbol, market: "沪市" };
+}
+
+function formatWatchlistSearchTime(value: string): string {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) {
+    return "搜索结果";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function detailSymbolFromWatchlist(item: WatchlistItem) {
   if (item.code.endsWith(".SH")) {
-    return `CN:SH:${item.code.replace(".SH", "")}`;
+    return ["CN", "SH", item.code.replace(".SH", "")].join(":");
   }
   if (item.code.endsWith(".SZ")) {
-    return `CN:SZ:${item.code.replace(".SZ", "")}`;
+    return ["CN", "SZ", item.code.replace(".SZ", "")].join(":");
   }
   if (item.code.endsWith(".HK")) {
-    return `HK:${item.code.replace(".HK", "")}`;
+    return ["HK", item.code.replace(".HK", "")].join(":");
   }
   return item.code;
 }

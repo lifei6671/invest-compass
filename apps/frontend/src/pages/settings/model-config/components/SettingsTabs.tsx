@@ -1,5 +1,5 @@
 import { Tabs } from "antd";
-import { settingsTabs } from "../mock";
+import { settingsTabs } from "../defaults";
 import type { SettingsTabKey } from "../types";
 
 type SettingsTabsProps = {

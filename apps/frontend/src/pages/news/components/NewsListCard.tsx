@@ -14,6 +14,7 @@ type NewsListCardProps = {
   onOpenOriginal: (item: NewsItem) => void;
   onAddContext: (item: NewsItem) => void;
   onCopySummary: (item: NewsItem) => void;
+  emptyDescription?: string;
 };
 
 export function NewsListCard(props: NewsListCardProps) {
@@ -46,16 +47,15 @@ export function NewsListCard(props: NewsListCardProps) {
             />
           ))
         ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无匹配资讯" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={props.emptyDescription ?? "暂无匹配资讯"} />
         )}
       </div>
       <footer className="news-pagination-row">
         <span>共 {props.totalCount} 条</span>
-        <Pagination current={props.currentPage} total={218} pageSize={10} size="small" showSizeChanger={false} onChange={props.onPageChange} />
+        <Pagination current={props.currentPage} total={props.totalCount} pageSize={10} size="small" showSizeChanger={false} onChange={props.onPageChange} />
         <span>10 条/页</span>
         <span>跳至 1 页</span>
       </footer>
     </section>
   );
 }
-

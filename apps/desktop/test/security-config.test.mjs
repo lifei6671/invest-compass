@@ -434,6 +434,43 @@ test("报告历史 Rust command 必须固定映射到 Go API", () => {
   }
 });
 
+test("菜单范围搜索 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    [
+      "search_news",
+      "search_rebuild",
+      "search_reports",
+      "search_status",
+      "search_watchlist_notes",
+    ].filter((command) => !commands.includes(command)),
+    [],
+    "menu-scoped search command 必须显式声明，不能用通用代理或全局搜索代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of [
+    "/api/search/reports",
+    "/api/search/news",
+    "/api/search/watchlist-notes",
+    "/api/search/status",
+    "/api/search/rebuild",
+  ]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `menu-scoped search command 必须固定映射到 ${path}`,
+    );
+  }
+  assert.equal(combinedSource.includes("search_global"), false, "首版不允许 search_global command");
+  assert.equal(combinedSource.includes("/api/search/global"), false, "首版不允许全局搜索 API");
+  assert.equal(
+    /\bsearch_request\b|\bsearch_global_request\b/i.test(combinedSource),
+    false,
+    "搜索 command 不能退化为通用 search_request 代理",
+  );
+});
+
 test("检查更新 Rust command 必须固定映射到 Go API", () => {
   const commands = parseTauriCommandNames(commandSources);
   assert.equal(commands.includes("check_update"), true, "check_update command 必须显式声明");

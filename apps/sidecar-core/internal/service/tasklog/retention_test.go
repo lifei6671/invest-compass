@@ -66,6 +66,7 @@ type recordingRetentionStore struct {
 	options dao.TaskLogRetentionOptions
 }
 
+// PruneTaskLogs 记录 retention service 下发的裁剪参数。
 func (store *recordingRetentionStore) PruneTaskLogs(_ context.Context, options dao.TaskLogRetentionOptions) (dao.TaskLogRetentionResult, error) {
 	store.options = options
 	return dao.TaskLogRetentionResult{}, nil

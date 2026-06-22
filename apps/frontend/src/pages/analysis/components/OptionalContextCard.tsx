@@ -1,6 +1,6 @@
 import { InfoCircleOutlined } from "@ant-design/icons";
 import { Input, Select } from "antd";
-import { riskPreferences } from "../mock";
+import { riskPreferences } from "../defaults";
 import type { OptionalHoldingContext, RiskPreference } from "../types";
 
 type OptionalContextCardProps = {

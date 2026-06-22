@@ -7,7 +7,27 @@ import { StockInfoCard } from "./components/StockInfoCard";
 import { StockNewsTabsCard } from "./components/StockNewsTabsCard";
 import { StockTagsNoteCard } from "./components/StockTagsNoteCard";
 import { TechnicalIndicatorCard } from "./components/TechnicalIndicatorCard";
-import { basicInfoItems, conceptTags, myStockTags, stockDetailMock, stockKlineItems, stockNewsItems, technicalIndicators } from "./mock";
+import type { StockDetail } from "./types";
+
+const emptyStockDetail: StockDetail = {
+  name: "未选择股票",
+  symbol: "暂无",
+  code: "",
+  industry: "暂无",
+  subIndustry: "暂无",
+  concepts: [],
+  price: null,
+  changeAmount: null,
+  changePercent: null,
+  open: null,
+  high: null,
+  low: null,
+  previousClose: null,
+  turnoverRate: "暂无",
+  amount: "暂无",
+  volume: "暂无",
+  updateTime: "待加载",
+};
 
 export function StockDetailPage() {
   const navigate = useNavigate();
@@ -20,16 +40,16 @@ export function StockDetailPage() {
 
   return (
     <section className="flex min-h-[calc(100vh-120px)] min-w-[1140px] flex-col gap-4">
-      <StockHeaderCard stock={stockDetailMock} onBack={backToSource} />
+      <StockHeaderCard stock={emptyStockDetail} onBack={backToSource} />
       <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_360px] gap-4">
         <main className="min-w-0 space-y-4">
-          <KlineChartCard items={stockKlineItems} />
-          <TechnicalIndicatorCard items={technicalIndicators} />
-          <StockNewsTabsCard items={stockNewsItems} />
+          <KlineChartCard items={[]} />
+          <TechnicalIndicatorCard items={[]} />
+          <StockNewsTabsCard items={[]} />
         </main>
         <aside className="min-w-0 space-y-3">
-          <StockInfoCard items={basicInfoItems} concepts={conceptTags} />
-          <StockTagsNoteCard tags={myStockTags} />
+          <StockInfoCard items={[]} concepts={[]} />
+          <StockTagsNoteCard tags={[]} />
           <ResearchEntryCard />
         </aside>
       </div>

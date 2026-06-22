@@ -1,9 +1,9 @@
 import { FullscreenOutlined } from "@ant-design/icons";
-import { Button, Select } from "antd";
-import { promptPreviewMarkdown } from "../mock";
+import { Button, Empty, Select } from "antd";
 import type { PromptEditorState } from "../types";
 
 type OutputPreviewPanelProps = {
+  content: string;
   format: PromptEditorState["previewFormat"];
   onFormatChange: (format: PromptEditorState["previewFormat"]) => void;
   onFullscreen: () => void;
@@ -13,9 +13,7 @@ export function OutputPreviewPanel(props: OutputPreviewPanelProps) {
   return (
     <section className="prompt-card prompt-preview-panel">
       <div className="prompt-card-header prompt-compact-header">
-        <h2>
-          输出预览 <span>（示例）</span>
-        </h2>
+        <h2>输出预览</h2>
         <div className="prompt-preview-tools">
           <Select
             className="prompt-preview-select"
@@ -30,13 +28,17 @@ export function OutputPreviewPanel(props: OutputPreviewPanelProps) {
         </div>
       </div>
       <div className="prompt-preview-body">
-        {props.format === "Markdown" ? <MarkdownPreview markdown={promptPreviewMarkdown} /> : <pre>{plainTextFromMarkdown(promptPreviewMarkdown)}</pre>}
+        {props.format === "Markdown" ? <MarkdownPreview markdown={props.content} /> : <PlainTextPreview text={plainTextFromMarkdown(props.content)} />}
       </div>
     </section>
   );
 }
 
 function MarkdownPreview({ markdown }: { markdown: string }) {
+  if (!markdown.trim()) {
+    return <Empty description="暂无预览内容" />;
+  }
+
   return (
     <div className="prompt-markdown-preview">
       {markdown.split("\n").map((line, index) => {
@@ -60,6 +62,14 @@ function MarkdownPreview({ markdown }: { markdown: string }) {
       })}
     </div>
   );
+}
+
+function PlainTextPreview({ text }: { text: string }) {
+  if (!text.trim()) {
+    return <Empty description="暂无预览内容" />;
+  }
+
+  return <pre>{text}</pre>;
 }
 
 function plainTextFromMarkdown(markdown: string) {

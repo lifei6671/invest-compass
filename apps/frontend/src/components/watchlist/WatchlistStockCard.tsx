@@ -2,7 +2,7 @@ import { App as AntApp, Button, Tag } from "antd";
 import { DeleteOutlined, EditOutlined, EyeOutlined, RobotOutlined, StarOutlined } from "@ant-design/icons";
 import type React from "react";
 import { MiniTrendChart } from "./MiniTrendChart";
-import type { WatchlistItem } from "./mock";
+import type { WatchlistItem } from "./types";
 
 type WatchlistStockCardProps = {
   item: WatchlistItem;

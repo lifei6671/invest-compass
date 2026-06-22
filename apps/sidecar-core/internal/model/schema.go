@@ -8,19 +8,25 @@ import (
 
 // Stock 是股票基础信息缓存表，symbol 是全局唯一的标准股票代码。
 type Stock struct {
-	ID        int64  `gorm:"primaryKey;autoIncrement"`
-	Symbol    string `gorm:"not null;uniqueIndex"`
-	Market    string `gorm:"not null"`
-	Code      string `gorm:"not null"`
-	Name      string `gorm:"not null"`
-	Pinyin    string
-	Exchange  string
-	Industry  string
-	Concept   string
-	ListDate  string
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID             int64  `gorm:"primaryKey;autoIncrement"`
+	Symbol         string `gorm:"not null;uniqueIndex"`
+	Market         string `gorm:"not null"`
+	Code           string `gorm:"not null"`
+	Name           string `gorm:"not null"`
+	Pinyin         string
+	Exchange       string
+	Industry       string
+	Concept        string
+	ListDate       string
+	Status         string
+	FullName       string
+	PinyinFull     string
+	PinyinInitials string
+	SearchName     string
+	SearchVersion  int
+	IndexedAt      *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // Watchlist 是自选股表，active symbol 唯一约束只作用于未软删除记录。
@@ -235,4 +241,90 @@ type IngestionWatermark struct {
 	CursorJSON    string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// StockAlias 是股票搜索使用的别名表，别名只影响本地搜索召回和排序。
+type StockAlias struct {
+	ID             int64  `gorm:"primaryKey;autoIncrement"`
+	Symbol         string `gorm:"not null;uniqueIndex:idx_stock_aliases_symbol_alias,priority:1;index:idx_stock_aliases_symbol_active,where:deleted_at IS NULL"`
+	Alias          string `gorm:"not null;uniqueIndex:idx_stock_aliases_symbol_alias,priority:2"`
+	AliasType      string `gorm:"not null;default:manual"`
+	PinyinFull     string
+	PinyinInitials string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      gorm.DeletedAt
+}
+
+// StockPinyinOverride 保存股票多音字拼音修正规则。
+type StockPinyinOverride struct {
+	ID             int64  `gorm:"primaryKey;autoIncrement"`
+	Symbol         string `gorm:"not null;uniqueIndex"`
+	PinyinFull     string `gorm:"not null"`
+	PinyinInitials string `gorm:"not null"`
+	Reason         string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// SearchDocument 是菜单范围搜索索引的元数据表，真实内容仍以业务源表为准。
+type SearchDocument struct {
+	ID           int64  `gorm:"primaryKey;autoIncrement"`
+	BatchID      string `gorm:"column:batch_id;not null;uniqueIndex:idx_search_documents_batch_doc_uid,priority:1;index:idx_search_documents_batch_doc_type;index:idx_search_documents_batch_symbol;index:idx_search_documents_batch_ref,priority:1;index:idx_search_documents_batch_source_time"`
+	DocUID       string `gorm:"not null;uniqueIndex:idx_search_documents_batch_doc_uid,priority:2"`
+	DocType      string `gorm:"not null;index:idx_search_documents_batch_doc_type"`
+	RefTable     string `gorm:"not null;index:idx_search_documents_batch_ref,priority:2"`
+	RefID        string `gorm:"not null;index:idx_search_documents_batch_ref,priority:3"`
+	Symbol       string `gorm:"index:idx_search_documents_batch_symbol"`
+	Title        string `gorm:"not null"`
+	Summary      string
+	Source       string
+	SourceTime   time.Time `gorm:"index:idx_search_documents_batch_source_time"`
+	IndexedAt    time.Time `gorm:"not null"`
+	IndexVersion int       `gorm:"not null;default:1"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    gorm.DeletedAt
+}
+
+// SearchIndexBatch 记录一次可切换的搜索索引重建批次。
+type SearchIndexBatch struct {
+	BatchID             string `gorm:"column:batch_id;primaryKey"`
+	Scope               string `gorm:"not null;index:idx_search_index_batches_scope_status,priority:1"`
+	Status              string `gorm:"not null;index:idx_search_index_batches_scope_status,priority:2"`
+	SourceSchemaVersion int    `gorm:"not null;default:1"`
+	TokenizerName       string `gorm:"not null"`
+	TokenizerVersion    string `gorm:"not null"`
+	DictionaryHash      string `gorm:"not null"`
+	StartedAt           time.Time
+	FinishedAt          *time.Time
+	ErrorMessage        string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+// SearchIndexState 保存搜索索引的运行期状态和 active batch 指针。
+type SearchIndexState struct {
+	Key       string `gorm:"primaryKey"`
+	Value     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// TableName 固定搜索状态表名为单数，便于作为 key/value 状态表使用。
+func (SearchIndexState) TableName() string {
+	return "search_index_state"
+}
+
+// SearchIndexJob 是搜索增量索引的持久化 outbox，避免进程崩溃丢任务。
+type SearchIndexJob struct {
+	ID        int64  `gorm:"primaryKey;autoIncrement"`
+	DocType   string `gorm:"not null;uniqueIndex:idx_search_index_jobs_unique,priority:1"`
+	RefID     string `gorm:"not null;uniqueIndex:idx_search_index_jobs_unique,priority:2"`
+	Operation string `gorm:"not null;uniqueIndex:idx_search_index_jobs_unique,priority:3"`
+	Status    string `gorm:"not null;index:idx_search_index_jobs_status"`
+	Attempts  int    `gorm:"not null;default:0"`
+	LastError string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

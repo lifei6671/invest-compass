@@ -56,6 +56,7 @@ func Routes(config Config) []httpx.Route {
 	}
 }
 
+// handleList 处理任务日志列表查询并校验分页参数。
 func handleList(config Config) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		context := httpx.ContextFrom(request)
@@ -88,6 +89,7 @@ func handleList(config Config) http.HandlerFunc {
 	}
 }
 
+// handleGet 按日志 ID 读取单条任务日志详情。
 func handleGet(config Config) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		context := httpx.ContextFrom(request)
@@ -115,6 +117,7 @@ func handleGet(config Config) http.HandlerFunc {
 	}
 }
 
+// handleSummary 返回指定任务的日志聚合摘要。
 func handleSummary(config Config) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		taskID, ok := decodeTaskID(response, request, config)
@@ -127,6 +130,7 @@ func handleSummary(config Config) http.HandlerFunc {
 	}
 }
 
+// handleDiagnosis 返回指定任务的错误诊断结果。
 func handleDiagnosis(config Config) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		taskID, ok := decodeTaskID(response, request, config)
@@ -143,6 +147,7 @@ func handleDiagnosis(config Config) http.HandlerFunc {
 	}
 }
 
+// handleContext 返回指定任务的安全上下文摘要。
 func handleContext(config Config) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		taskID, ok := decodeTaskID(response, request, config)
@@ -155,6 +160,7 @@ func handleContext(config Config) http.HandlerFunc {
 	}
 }
 
+// handleExport 返回指定任务的脱敏日志导出包。
 func handleExport(config Config) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		taskID, ok := decodeTaskID(response, request, config)
@@ -171,6 +177,7 @@ func handleExport(config Config) http.HandlerFunc {
 	}
 }
 
+// decodeTaskID 解码并校验 task_id 请求字段。
 func decodeTaskID(response http.ResponseWriter, request *http.Request, config Config) (string, bool) {
 	context := httpx.ContextFrom(request)
 	if !ready(response, request, config, context) {
@@ -188,6 +195,7 @@ func decodeTaskID(response http.ResponseWriter, request *http.Request, config Co
 	return taskID, true
 }
 
+// ready 校验任务日志接口的 ready 状态和 runtime token。
 func ready(response http.ResponseWriter, request *http.Request, config Config, context httpx.RequestContext) bool {
 	if !httpx.RequireReadyToken(response, request, config.Security, context) {
 		return false
@@ -199,6 +207,7 @@ func ready(response http.ResponseWriter, request *http.Request, config Config, c
 	return true
 }
 
+// writeTaskScopedResponse 写入任务范围查询的统一响应。
 func writeTaskScopedResponse(response http.ResponseWriter, context httpx.RequestContext, data any, found bool, err error) {
 	if err != nil {
 		httpx.WriteError(response, http.StatusInternalServerError, 50000, "internal_error", context)

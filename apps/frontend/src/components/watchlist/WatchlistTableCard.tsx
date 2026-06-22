@@ -1,7 +1,7 @@
 import { App as AntApp, Button, ConfigProvider, Input, Pagination, Select, Table, Tag, Tooltip, type TableColumnsType } from "antd";
 import { DeleteOutlined, EditOutlined, EyeOutlined, FilterOutlined, ReloadOutlined, RobotOutlined, SearchOutlined, SettingOutlined, StarOutlined } from "@ant-design/icons";
 import { appAntdLocale } from "../../lib/antdLocale";
-import type { WatchlistItem } from "./mock";
+import type { WatchlistItem } from "./types";
 
 type WatchlistTableCardProps = {
   items: WatchlistItem[];
@@ -11,6 +11,10 @@ type WatchlistTableCardProps = {
   onDelete: (item: WatchlistItem) => void;
   onView: (item: WatchlistItem) => void;
   onRefresh: () => void;
+  onSearch: () => void;
+  isSearching?: boolean;
+  emptyDescription?: string;
+  totalCount: number;
 };
 
 const tagClassByName: Record<string, string> = {
@@ -100,11 +104,12 @@ export function WatchlistTableCard(props: WatchlistTableCardProps) {
           prefix={<SearchOutlined className="text-slate-400" />}
           value={props.keyword}
           onChange={(event) => props.onKeywordChange(event.target.value)}
+          onPressEnter={props.onSearch}
         />
         <Button type="primary" className="h-9 shrink-0 px-4" onClick={props.onAdd}>
           + 添加自选
         </Button>
-        <Button className="h-9 shrink-0 px-4" icon={<ReloadOutlined />} onClick={props.onRefresh}>
+        <Button className="h-9 shrink-0 px-4" icon={<ReloadOutlined />} loading={props.isSearching} onClick={props.onRefresh}>
           批量刷新
         </Button>
         <div className="ml-auto flex shrink-0 items-center gap-3">
@@ -121,11 +126,12 @@ export function WatchlistTableCard(props: WatchlistTableCardProps) {
         pagination={false}
         tableLayout="fixed"
         scroll={{ x: 1184, y: "calc(100vh - 470px)" }}
+        locale={{ emptyText: props.emptyDescription ?? "暂无匹配自选股" }}
       />
       <div className="flex shrink-0 items-center justify-between px-4 py-4">
-        <span className="text-[14px] text-slate-700">共 56 条</span>
+        <span className="text-[14px] text-slate-700">共 {props.totalCount} 条</span>
         <ConfigProvider locale={appAntdLocale}>
-          <Pagination className="watchlist-pagination" current={1} total={56} pageSize={10} showQuickJumper showSizeChanger pageSizeOptions={[10]} onChange={() => undefined} />
+          <Pagination className="watchlist-pagination" current={1} total={props.totalCount} pageSize={10} showQuickJumper showSizeChanger pageSizeOptions={[10]} onChange={() => undefined} />
         </ConfigProvider>
       </div>
     </section>

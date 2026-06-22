@@ -110,6 +110,51 @@ func TestTaskLogMigration(t *testing.T) {
 	assertColumns(t, db, "task_error_diagnoses", "task_id", "summary", "retryable", "source_log_id")
 }
 
+// TestSearchMigrationCreatesIndexSchema 验证范围搜索专题的普通表和 FTS5 虚表随迁移创建。
+func TestSearchMigrationCreatesIndexSchema(t *testing.T) {
+	db, err := Open(context.Background(), Config{Path: testSQLitePath(t)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := Migrate(context.Background(), db); err != nil {
+		t.Fatalf("migrate sqlite: %v", err)
+	}
+
+	for _, table := range []string{
+		"stock_aliases",
+		"stock_pinyin_overrides",
+		"search_documents",
+		"search_index_batches",
+		"search_index_state",
+		"search_index_jobs",
+	} {
+		if !db.Migrator().HasTable(table) {
+			t.Fatalf("expected search table %s to exist", table)
+		}
+		assertColumns(t, db, table, "created_at", "updated_at")
+	}
+	assertColumns(t, db, "stocks", "full_name", "pinyin_full", "pinyin_initials", "search_name", "search_version", "indexed_at")
+	assertColumns(t, db, "search_documents", "batch_id", "doc_uid", "doc_type", "ref_table", "ref_id", "indexed_at", "index_version", "deleted_at")
+	assertColumns(t, db, "search_index_batches", "batch_id", "scope", "status", "dictionary_hash", "error_message")
+	assertColumns(t, db, "search_index_jobs", "doc_type", "ref_id", "operation", "status", "attempts", "last_error")
+
+	for _, table := range []string{"stock_search_fts", "search_documents_fts"} {
+		if !db.Migrator().HasTable(table) {
+			t.Fatalf("expected FTS5 table %s to exist", table)
+		}
+	}
+	if err := db.Exec(`INSERT INTO stock_search_fts(batch_id, symbol, market, exchange, code, name_index, pinyin_initials) VALUES (?, ?, ?, ?, ?, ?, ?)`, "batch-1", "CN:SH:600519", "CN", "SH", "600519", "贵州 茅台 贵州茅台", "gzmt").Error; err != nil {
+		t.Fatalf("insert stock_search_fts row: %v", err)
+	}
+	var count int
+	if err := db.Raw(`SELECT count(*) FROM stock_search_fts WHERE stock_search_fts MATCH ?`, "茅台").Scan(&count).Error; err != nil {
+		t.Fatalf("query stock_search_fts: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one stock_search_fts match, got %d", count)
+	}
+}
+
 // TestMigrateIsIdempotent 验证重复迁移不会破坏已有数据库。
 func TestMigrateIsIdempotent(t *testing.T) {
 	db, err := Open(context.Background(), Config{Path: testSQLitePath(t)})
@@ -126,6 +171,22 @@ func TestMigrateIsIdempotent(t *testing.T) {
 
 	if !db.Migrator().HasTable("task_events") {
 		t.Fatal("expected task_events table to remain after repeated migration")
+	}
+}
+
+// TestProbeSQLiteFTS5ReportsAvailable 验证当前 sidecar 测试二进制启用了 SQLite FTS5。
+func TestProbeSQLiteFTS5ReportsAvailable(t *testing.T) {
+	db, err := Open(context.Background(), Config{Path: testSQLitePath(t)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+
+	status, err := ProbeSQLiteFTS5(context.Background(), db)
+	if err != nil {
+		t.Fatalf("probe sqlite fts5: %v", err)
+	}
+	if status != SQLiteFTS5Available {
+		t.Fatalf("expected sqlite fts5 status %q, got %q", SQLiteFTS5Available, status)
 	}
 }
 

@@ -1,7 +1,7 @@
 import { CloseOutlined, DownOutlined } from "@ant-design/icons";
 import { AutoComplete, Select } from "antd";
 import { useEffect, useMemo, useState } from "react";
-import { aiModels, analysisTypes, promptTemplates, stockCandidates } from "../mock";
+import { aiModels, analysisTypes, promptTemplates, stockCandidates } from "../defaults";
 import type { AIModel, AnalysisConfig, AnalysisType, SelectedStock } from "../types";
 
 type AnalysisConfigCardProps = {
@@ -18,7 +18,7 @@ export function AnalysisConfigCard(props: AnalysisConfigCardProps) {
       return stockCandidates;
     }
     return stockCandidates.filter((item) => {
-      const haystack = [item.name, item.symbol, item.code, item.keyword, item.industry].join(" ").toLowerCase();
+      const haystack = [item.name, item.symbol, item.code].join(" ").toLowerCase();
       return haystack.includes(keyword);
     });
   }, [stockInput]);
@@ -62,7 +62,7 @@ export function AnalysisConfigCard(props: AnalysisConfigCardProps) {
                 <span className="analysis-stock-option">
                   <span>
                     <strong>{item.name}</strong>
-                    <small>{item.industry}</small>
+                    <small>{item.code}</small>
                   </span>
                   <em>{item.symbol}</em>
                 </span>
@@ -108,5 +108,8 @@ export function AnalysisConfigCard(props: AnalysisConfigCardProps) {
 }
 
 function displayStock(stock: SelectedStock) {
+  if (!stock.name && !stock.symbol) {
+    return "";
+  }
   return `${stock.name}    ${stock.symbol}`;
 }

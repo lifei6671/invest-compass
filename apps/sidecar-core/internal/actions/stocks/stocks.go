@@ -3,27 +3,23 @@ package stocks
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/httpx"
-	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
-	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
-	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
+	searchservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/search"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/xerr"
 )
 
-// Store 是股票 action 依赖的数据访问边界。
-type Store interface {
-	UpsertStocks(ctx context.Context, stocks []model.Stock) error
+// Service 是股票 action 依赖的业务搜索边界。
+type Service interface {
+	Search(ctx context.Context, keyword string, limit int) ([]searchservice.StockSearchResult, error)
 }
 
 // Config 是股票 action 的运行期依赖。
 type Config struct {
-	Security       httpx.SecurityConfig
-	MarketProvider market.MarketProvider
-	Store          Store
+	Security httpx.SecurityConfig
+	Service  Service
 }
 
 type searchRequest struct {
@@ -52,8 +48,8 @@ func handleSearch(config Config) http.HandlerFunc {
 		if !httpx.RequireReadyToken(response, request, config.Security, context) {
 			return
 		}
-		if config.MarketProvider == nil {
-			httpx.WriteError(response, http.StatusServiceUnavailable, 50301, "market_provider_unavailable", context)
+		if config.Service == nil {
+			httpx.WriteError(response, http.StatusServiceUnavailable, 50301, "stock_search_service_unavailable", context)
 			return
 		}
 
@@ -68,46 +64,26 @@ func handleSearch(config Config) http.HandlerFunc {
 			return
 		}
 
-		stocks, err := config.MarketProvider.Search(request.Context(), keyword)
+		results, err := config.Service.Search(request.Context(), keyword, 20)
 		if err != nil {
 			var ruleError *xerr.Error
 			if errors.As(err, &ruleError) && ruleError.Code == xerr.MarketProviderUnconfigured {
 				httpx.WriteError(response, http.StatusServiceUnavailable, 50301, string(ruleError.Code), context)
 				return
 			}
-			slog.Warn(
-				"股票搜索 Provider 调用失败",
-				logger.FieldRequestID, context.RequestID,
-				logger.FieldTraceID, context.TraceID,
-				logger.FieldProvider, config.MarketProvider.Name(),
-				"error", logger.RedactError(err),
-			)
-			httpx.WriteError(response, http.StatusBadGateway, 50200, "market_provider_error", context)
+			httpx.WriteError(response, http.StatusInternalServerError, 50000, "stock_search_error", context)
 			return
 		}
-		if config.Store != nil {
-			if err := config.Store.UpsertStocks(request.Context(), modelStocksFromMarket(stocks)); err != nil {
-				slog.Warn(
-					"股票基础信息缓存写入失败",
-					logger.FieldRequestID, context.RequestID,
-					logger.FieldTraceID, context.TraceID,
-					"error", logger.RedactError(err),
-				)
-				httpx.WriteError(response, http.StatusInternalServerError, 50004, "stock_cache_error", context)
-				return
-			}
-		}
-
-		httpx.WriteOK(response, buildSearchResults(stocks), context)
+		httpx.WriteOK(response, buildSearchResults(results), context)
 	}
 }
 
-// buildSearchResults 转换 Provider 模型为 API 稳定响应字段。
-func buildSearchResults(stocks []market.StockBasic) []searchResult {
+// buildSearchResults 转换 service 模型为 API 稳定响应字段。
+func buildSearchResults(stocks []searchservice.StockSearchResult) []searchResult {
 	results := make([]searchResult, 0, len(stocks))
 	for _, item := range stocks {
 		results = append(results, searchResult{
-			Symbol:   item.Symbol.String(),
+			Symbol:   item.Symbol,
 			Name:     item.Name,
 			Code:     item.Code,
 			Market:   item.Market,
@@ -115,21 +91,4 @@ func buildSearchResults(stocks []market.StockBasic) []searchResult {
 		})
 	}
 	return results
-}
-
-// modelStocksFromMarket 转换 Provider 股票基础信息为可持久化缓存模型。
-func modelStocksFromMarket(stocks []market.StockBasic) []model.Stock {
-	result := make([]model.Stock, 0, len(stocks))
-	for _, item := range stocks {
-		result = append(result, model.Stock{
-			Symbol:   item.Symbol.String(),
-			Market:   item.Market,
-			Code:     item.Code,
-			Name:     item.Name,
-			Exchange: item.Exchange,
-			Industry: item.Industry,
-			Concept:  item.Concept,
-		})
-	}
-	return result
 }

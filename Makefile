@@ -69,7 +69,7 @@ go-build:
 
 .PHONY: go-test
 go-test:
-	cd $(SIDECAR_DIR) && go test ./...
+	cd $(SIDECAR_DIR) && go test -tags sqlite_fts5 ./...
 
 .PHONY: sidecar-build
 sidecar-build: go-build

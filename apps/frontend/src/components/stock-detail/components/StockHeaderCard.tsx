@@ -1,7 +1,7 @@
 import { App as AntApp, Button, Tag } from "antd";
 import { ArrowLeftOutlined, CopyOutlined, ReloadOutlined, RobotOutlined, StarOutlined } from "@ant-design/icons";
 import type { ReactNode } from "react";
-import type { StockDetail } from "../mock";
+import type { StockDetail } from "../types";
 
 type StockHeaderCardProps = {
   stock: StockDetail;
@@ -16,7 +16,7 @@ export function StockHeaderCard(props: StockHeaderCardProps) {
     try {
       await navigator.clipboard?.writeText(stock.symbol);
     } catch {
-      // 剪贴板能力不可用时仍保留本地交互反馈，避免静态 mock 页面中断。
+      // 剪贴板能力不可用时仍保留本地交互反馈，避免页面中断。
     }
     message.success("股票代码已复制");
   };
@@ -36,7 +36,7 @@ export function StockHeaderCard(props: StockHeaderCardProps) {
             <Button className="h-8 rounded-md px-3 text-[13px]" icon={<ArrowLeftOutlined />} onClick={props.onBack}>
               返回
             </Button>
-            <Button className="h-8 rounded-md px-3 text-[13px]" icon={<ReloadOutlined />} onClick={() => message.success("行情已刷新")}>
+            <Button className="h-8 rounded-md px-3 text-[13px]" icon={<ReloadOutlined />} onClick={() => message.info("行情刷新待接入")}>
               刷新行情
             </Button>
           </div>
@@ -57,10 +57,10 @@ export function StockHeaderCard(props: StockHeaderCardProps) {
 
       <div className="min-w-0 border-l border-[#edf1f7] pl-6">
         <div className="flex items-center justify-between gap-5">
-          <div className="app-number flex shrink-0 items-baseline gap-5 text-[16px] font-semibold text-[#ff4d4f]">
-            <span className="text-[30px] font-bold leading-9">{stock.price.toFixed(2)}</span>
-            <span>+{stock.changeAmount.toFixed(2)}</span>
-            <span>+{stock.changePercent.toFixed(2)}%</span>
+          <div className="app-number flex shrink-0 items-baseline gap-5 text-[16px] font-semibold text-[#64748b]">
+            <span className="text-[30px] font-bold leading-9">{formatQuoteNumber(stock.price)}</span>
+            <span>{formatQuoteNumber(stock.changeAmount)}</span>
+            <span>{formatPercent(stock.changePercent)}</span>
           </div>
           <div className="flex shrink-0 items-center justify-end gap-2 whitespace-nowrap">
             <Button className="h-9 rounded-md px-3.5 text-[#1677ff]" icon={<StarOutlined />} onClick={() => message.info("该股票已在自选列表中")}>
@@ -72,10 +72,10 @@ export function StockHeaderCard(props: StockHeaderCardProps) {
           </div>
         </div>
         <div className="mt-2 grid grid-cols-[repeat(7,max-content)] items-start gap-x-5 text-[12px]">
-          <QuoteMetric label="今开" value={stock.open.toFixed(2)} valueClass="text-[#16a34a]" />
-          <QuoteMetric label="最高" value={stock.high.toFixed(2)} valueClass="text-[#ff4d4f]" />
-          <QuoteMetric label="最低" value={stock.low.toFixed(2)} valueClass="text-[#16a34a]" />
-          <QuoteMetric label="昨收" value={stock.previousClose.toFixed(2)} />
+          <QuoteMetric label="今开" value={formatQuoteNumber(stock.open)} />
+          <QuoteMetric label="最高" value={formatQuoteNumber(stock.high)} />
+          <QuoteMetric label="最低" value={formatQuoteNumber(stock.low)} />
+          <QuoteMetric label="昨收" value={formatQuoteNumber(stock.previousClose)} />
           <QuoteMetric label="成交额" value={stock.amount} valueClass="text-[#f97316]" />
           <QuoteMetric label="换手率" value={stock.turnoverRate} />
           <QuoteMetric label="数据更新时间" value={stock.updateTime} />
@@ -96,4 +96,12 @@ function QuoteMetric(props: { label: string; value: string; valueClass?: string 
       <div className={["app-number mt-1 whitespace-nowrap leading-4 text-[#374151]", props.valueClass ?? ""].join(" ")}>{props.value}</div>
     </div>
   );
+}
+
+function formatQuoteNumber(value: number | null) {
+  return value === null ? "暂无" : value.toFixed(2);
+}
+
+function formatPercent(value: number | null) {
+  return value === null ? "暂无" : `${value.toFixed(2)}%`;
 }

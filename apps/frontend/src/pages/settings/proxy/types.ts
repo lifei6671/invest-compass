@@ -18,10 +18,10 @@ export type SystemProxyStatus = {
 };
 
 export type ProxyTestTarget =
-  | "https://www.baidu.com"
-  | "https://www.google.com"
-  | "https://api.openai.com"
-  | "https://api.deepseek.com";
+  | "baidu"
+  | "google"
+  | "openai"
+  | "deepseek";
 
 export type ProxyTestResult = {
   status: "success" | "failed" | "untested";
@@ -84,10 +84,10 @@ export const proxyModeOptions: ProxyModeOption[] = [
 ];
 
 export const testTargetOptions: Array<{ label: ProxyTestTarget; value: ProxyTestTarget }> = [
-  { label: "https://www.baidu.com", value: "https://www.baidu.com" },
-  { label: "https://www.google.com", value: "https://www.google.com" },
-  { label: "https://api.openai.com", value: "https://api.openai.com" },
-  { label: "https://api.deepseek.com", value: "https://api.deepseek.com" },
+  { label: "baidu", value: "baidu" },
+  { label: "google", value: "google" },
+  { label: "openai", value: "openai" },
+  { label: "deepseek", value: "deepseek" },
 ];
 
 export const httpProxyProtocolOptions: Array<{ label: string; value: HttpProxyProtocol }> = [
@@ -105,9 +105,9 @@ export const initialHttpProxyConfig: HttpProxyConfig = {
   host: "127.0.0.1",
   port: 7890,
   protocol: "http-https",
-  authenticationEnabled: true,
-  username: "invest_user",
-  password: "mock-pass",
+  authenticationEnabled: false,
+  username: "",
+  password: "",
   timeoutSeconds: 10,
 };
 
@@ -115,15 +115,15 @@ export const initialSocks5ProxyConfig: Socks5ProxyConfig = {
   host: "127.0.0.1",
   port: 1080,
   version: "socks5",
-  authenticationEnabled: true,
-  username: "invest_user",
-  password: "mock-pass",
+  authenticationEnabled: false,
+  username: "",
+  password: "",
   timeoutSeconds: 10,
 };
 
 export const initialProxyState: ProxySettingsState = {
   proxyMode: "system",
-  testTarget: "https://www.baidu.com",
+  testTarget: "baidu",
   bypassRules: "",
   testing: false,
   systemProxyStatus: {

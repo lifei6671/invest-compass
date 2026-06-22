@@ -16,8 +16,8 @@ export function SummaryPanel() {
         label: { show: false },
         labelLine: { show: false },
         data: [
-          { name: "沪市", value: 26 },
-          { name: "深市", value: 30 },
+          { name: "沪市", value: 0 },
+          { name: "深市", value: 0 },
         ],
       },
     ],
@@ -28,20 +28,20 @@ export function SummaryPanel() {
       <Card className="watchlist-side-card rounded-xl border-[#e5eaf3] shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="m-0 text-[16px] font-medium text-slate-950">自选概览</h2>
-          <Tooltip title="基于本地 mock 自选列表展示">
+          <Tooltip title="基于当前自选列表展示">
             <InfoCircleOutlined className="text-slate-400" />
           </Tooltip>
         </div>
-        <Metric icon={<AppstoreOutlined />} label="总数量" value="56" valueClass="text-[#1677ff]" />
-        <Metric icon={<ArrowUpOutlined />} iconClass="bg-[#fff1f0] text-[#ff4d4f]" label="今日上涨" value="28" hint="(50.00%)" valueClass="text-[#ff4d4f]" />
-        <Metric icon={<ArrowDownOutlined />} iconClass="bg-[#ecfdf3] text-[#16a34a]" label="今日下跌" value="21" hint="(37.50%)" valueClass="text-[#16a34a]" />
-        <Metric dotClass="bg-slate-300" label="平盘数量" value="7" hint="(12.50%)" valueClass="text-slate-400" />
-        <Metric icon={<PieChartOutlined />} label="最近分析数" value="12" hint="近7天生成" valueClass="text-[#635bff]" />
+        <Metric icon={<AppstoreOutlined />} label="总数量" value="0" valueClass="text-[#1677ff]" />
+        <Metric icon={<ArrowUpOutlined />} iconClass="bg-[#fff1f0] text-[#ff4d4f]" label="今日上涨" value="0" hint="(0.00%)" valueClass="text-[#ff4d4f]" />
+        <Metric icon={<ArrowDownOutlined />} iconClass="bg-[#ecfdf3] text-[#16a34a]" label="今日下跌" value="0" hint="(0.00%)" valueClass="text-[#16a34a]" />
+        <Metric dotClass="bg-slate-300" label="平盘数量" value="0" hint="(0.00%)" valueClass="text-slate-400" />
+        <Metric icon={<PieChartOutlined />} label="最近分析数" value="0" hint="近7天生成" valueClass="text-[#635bff]" />
         <div className="mt-3 flex items-start gap-3 border-t border-[#edf1f7] pt-4">
           <ClockCircleOutlined className="mt-1 text-slate-500" />
           <div>
             <div className="text-[14px] text-slate-600">最新更新时间</div>
-            <div className="app-number mt-1 text-[18px] font-medium text-slate-900">05-20 15:30:00</div>
+            <div className="app-number mt-1 text-[18px] font-medium text-slate-900">暂无</div>
           </div>
         </div>
       </Card>
@@ -50,8 +50,8 @@ export function SummaryPanel() {
         <div className="mt-5 flex items-center gap-3">
           {isJSDOM() ? <div aria-label="市场分布图" className="h-[82px] w-[82px] shrink-0 rounded-full border-[13px] border-[#1677ff] border-b-[#ff8a1f] border-r-[#ff8a1f]" /> : <EChartView option={option} style={{ width: 88, height: 88, flexShrink: 0 }} />}
           <div className="min-w-0 flex-1 space-y-3 text-[11px] text-slate-600">
-            <Legend color="#1677ff" label="沪市" value="26 (46.43%)" />
-            <Legend color="#ff8a1f" label="深市" value="30 (53.57%)" />
+            <Legend color="#1677ff" label="沪市" value="0 (0.00%)" />
+            <Legend color="#ff8a1f" label="深市" value="0 (0.00%)" />
           </div>
         </div>
       </Card>

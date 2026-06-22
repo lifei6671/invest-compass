@@ -5,6 +5,7 @@ import { taskStatusLabels, type TaskItem, type TaskSortMode } from "../types";
 
 type TaskTableCardProps = {
   tasks: TaskItem[];
+  total: number;
   selectedTaskId: string;
   sortMode: TaskSortMode;
   onSortChange: (sortMode: TaskSortMode) => void;
@@ -151,7 +152,7 @@ export function TaskTableCard(props: TaskTableCardProps) {
       <header className="task-table-header">
         <div className="task-table-title">
           <h2>任务列表</h2>
-          <span>（共 56 条）</span>
+          <span>（共 {props.total} 条）</span>
         </div>
         <div className="task-table-tools">
           <Select<TaskSortMode>
@@ -179,11 +180,11 @@ export function TaskTableCard(props: TaskTableCardProps) {
       />
 
       <footer className="task-table-pagination">
-        <span>共 56 条</span>
+        <span>共 {props.total} 条</span>
         <Pagination
           size="small"
           current={1}
-          total={56}
+          total={props.total}
           pageSize={20}
           onChange={() => undefined}
           showSizeChanger

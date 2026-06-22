@@ -1,6 +1,6 @@
-import { App as AntApp, Tag } from "antd";
+import { App as AntApp, Empty, Tag } from "antd";
 import { useState } from "react";
-import { hotTopics } from "../mock";
+import type { HotTopic } from "../types";
 
 const hotTabs = [
   { key: "industry", label: "行业热点" },
@@ -12,6 +12,7 @@ const hotTabs = [
 export function HotTopicsCard() {
   const { message } = AntApp.useApp();
   const [activeTab, setActiveTab] = useState("industry");
+  const hotTopics: HotTopic[] = [];
 
   return (
     <section className="dashboard-surface dashboard-hot-card">
@@ -37,14 +38,18 @@ export function HotTopicsCard() {
         ))}
       </div>
       <div className="dashboard-topic-list">
-        {hotTopics.map((topic) => (
-          <div key={topic.rank} className="dashboard-topic-row">
-            <span className={`dashboard-topic-rank rank-${topic.rank}`}>{topic.rank}</span>
-            <span className="dashboard-topic-name">{topic.name}</span>
-            <Tag className="dashboard-topic-change">{topic.changePercent}</Tag>
-            <span className="dashboard-topic-summary">{topic.summary}</span>
-          </div>
-        ))}
+        {hotTopics.length > 0 ? (
+          hotTopics.map((topic) => (
+            <div key={topic.rank} className="dashboard-topic-row">
+              <span className={`dashboard-topic-rank rank-${topic.rank}`}>{topic.rank}</span>
+              <span className="dashboard-topic-name">{topic.name}</span>
+              <Tag className="dashboard-topic-change">{topic.changePercent}</Tag>
+              <span className="dashboard-topic-summary">{topic.summary}</span>
+            </div>
+          ))
+        ) : (
+          <Empty description="暂无热点数据" />
+        )}
       </div>
     </section>
   );

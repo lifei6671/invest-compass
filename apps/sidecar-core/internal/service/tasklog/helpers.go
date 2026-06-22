@@ -30,6 +30,7 @@ func normalizeOption(value string, allLabel string) string {
 	return trimmed
 }
 
+// entryToRow 将持久化日志转换为前端列表行并完成脱敏。
 func entryToRow(entry model.TaskLogEntry) Row {
 	return Row{
 		ID:         entry.ID,
@@ -82,6 +83,7 @@ func rawJSONForEntry(entry model.TaskLogEntry) string {
 	return logger.RedactText(string(encoded))
 }
 
+// formatTime 将时间格式化为稳定 UTC RFC3339 字符串。
 func formatTime(value time.Time) string {
 	if value.IsZero() {
 		return ""
@@ -89,6 +91,7 @@ func formatTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339Nano)
 }
 
+// formatClock 将时间格式化为任务日志列表的本地时钟显示。
 func formatClock(value time.Time) string {
 	if value.IsZero() {
 		return ""
@@ -96,6 +99,7 @@ func formatClock(value time.Time) string {
 	return value.Format("15:04:05.000")
 }
 
+// taskDuration 计算任务开始到结束或更新时间的展示时长。
 func taskDuration(task model.Task) string {
 	if task.StartedAt.IsZero() {
 		return "—"
@@ -114,6 +118,7 @@ func taskDuration(task model.Task) string {
 	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
 
+// marshalStringList 脱敏并序列化诊断字符串列表。
 func marshalStringList(values []string) (string, error) {
 	safe := make([]string, 0, len(values))
 	for _, value := range values {
@@ -129,6 +134,7 @@ func marshalStringList(values []string) (string, error) {
 	return string(encoded), nil
 }
 
+// diagnosisFromModel 将持久化诊断转换为安全响应模型。
 func diagnosisFromModel(value model.TaskErrorDiagnosis) Diagnosis {
 	return Diagnosis{
 		TaskID:      value.TaskID,
@@ -144,6 +150,7 @@ func diagnosisFromModel(value model.TaskErrorDiagnosis) Diagnosis {
 	}
 }
 
+// unmarshalStringList 解析诊断字符串列表并逐项脱敏。
 func unmarshalStringList(value string) []string {
 	var values []string
 	if err := json.Unmarshal([]byte(value), &values); err != nil {
@@ -185,6 +192,7 @@ func buildDiagnosisFromError(entry model.TaskLogEntry) Diagnosis {
 	}
 }
 
+// snapshotBrief 生成脱敏后的短上下文摘要。
 func snapshotBrief(value string) string {
 	redacted := logger.RedactText(strings.TrimSpace(value))
 	if len([]rune(redacted)) <= 160 {
@@ -194,6 +202,7 @@ func snapshotBrief(value string) string {
 	return string(runes[:160]) + "..."
 }
 
+// inferLoadedStatus 根据输入快照判断某类上下文是否加载。
 func inferLoadedStatus(snapshot string, key string) string {
 	if strings.Contains(strings.ToLower(snapshot), strings.ToLower(key)) {
 		return "已加载"
@@ -201,6 +210,7 @@ func inferLoadedStatus(snapshot string, key string) string {
 	return "未记录"
 }
 
+// buildExportContent 生成任务日志导出的脱敏 Markdown 文本。
 func buildExportContent(summary Summary, events []model.TaskEvent, rows []Row, diagnosis Diagnosis, contextSummary ContextSummary, rawJSONSample string) string {
 	var builder strings.Builder
 	builder.WriteString("# 投研罗盘任务脱敏日志\n\n")
@@ -244,6 +254,7 @@ func buildExportContent(summary Summary, events []model.TaskEvent, rows []Row, d
 
 var unsafeFilePart = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
+// safeFilePart 将任务 ID 转换为可用于文件名的安全片段。
 func safeFilePart(value string) string {
 	trimmed := strings.TrimSpace(value)
 	trimmed = strings.Map(func(r rune) rune {

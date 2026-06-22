@@ -10,6 +10,7 @@ pub mod prompt;
 pub mod providers;
 pub mod reports;
 pub mod scheduler;
+pub mod search;
 pub mod settings;
 pub mod task_logs;
 pub mod tasks;

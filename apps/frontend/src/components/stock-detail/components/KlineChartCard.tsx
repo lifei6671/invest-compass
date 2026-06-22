@@ -1,9 +1,9 @@
-import { App as AntApp, Button, Segmented } from "antd";
+import { App as AntApp, Button, Empty, Segmented } from "antd";
 import { CompressOutlined, EllipsisOutlined, SettingOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import { EChartView } from "../../charts/EChartView";
 import { APP_FONT } from "../../../styles/fonts";
-import type { KlineItem } from "../mock";
+import type { KlineItem } from "../types";
 
 type KlineChartCardProps = {
   items: KlineItem[];
@@ -67,26 +67,17 @@ export function KlineChartCard(props: KlineChartCardProps) {
       </div>
 
       <div className="border-t border-[#edf1f7] pt-3">
-        <div className="mb-2 flex items-center gap-6 text-[12px]">
-          <span className="text-[#64748b]">MA</span>
-          <Legend color="#f59e0b" label="MA5: 25.28" />
-          <Legend color="#1677ff" label="MA10: 24.92" />
-          <Legend color="#8b5cf6" label="MA20: 24.18" />
-          <Legend color="#16a34a" label="MA60: 23.45" />
-        </div>
-        {isJSDOM() ? (
+        {props.items.length === 0 ? (
+          <div className="flex h-[260px] items-center justify-center">
+            <Empty description="暂无K线数据" />
+          </div>
+        ) : isJSDOM() ? (
           <div aria-label="K线图" className="flex h-[260px] items-center justify-center rounded border border-dashed border-[#d9e2f1] text-[13px] text-[#8a94a6]">
             K线图
           </div>
         ) : (
           <EChartView option={option} style={{ height: 260, width: "100%" }} />
         )}
-        <div className="-mt-7 flex items-center gap-6 text-[12px]">
-          <span className="text-[#64748b]">VOL</span>
-          <span className="text-[#64748b]">成交量: 34.72万手</span>
-          <Legend color="#f59e0b" label="MA5: 28.11万手" />
-          <Legend color="#1677ff" label="MA10: 26.33万手" />
-        </div>
       </div>
     </section>
   );
@@ -148,10 +139,6 @@ function lineSeries(name: string, data: number[], color: string) {
     symbol: "none",
     lineStyle: { width: 1.4, color },
   };
-}
-
-function Legend(props: { color: string; label: string }) {
-  return <span style={{ color: props.color }}>{props.label}</span>;
 }
 
 function isJSDOM() {

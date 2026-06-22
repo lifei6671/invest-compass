@@ -22,6 +22,7 @@ type fakeService struct {
 	listErr   error
 }
 
+// List 记录列表查询参数并返回可断言的任务日志行。
 func (service *fakeService) List(_ context.Context, query tasklogservice.Query) (tasklogservice.ListResult, error) {
 	service.listQuery = query
 	if service.listErr != nil {
@@ -30,26 +31,32 @@ func (service *fakeService) List(_ context.Context, query tasklogservice.Query) 
 	return tasklogservice.ListResult{Rows: []tasklogservice.Row{{ID: 7, TaskID: query.TaskID, Level: "INFO"}}}, nil
 }
 
+// Get 返回测试预设的任务日志详情。
 func (service *fakeService) Get(_ context.Context, _ int64) (tasklogservice.Detail, bool, error) {
 	return service.detail, service.detailOK, nil
 }
 
+// Summary 返回测试预设的任务日志摘要。
 func (service *fakeService) Summary(_ context.Context, _ string) (tasklogservice.Summary, bool, error) {
 	return service.summary, service.summaryOK, nil
 }
 
+// Diagnosis 返回无需外部依赖的默认诊断内容。
 func (service *fakeService) Diagnosis(_ context.Context, taskID string) (tasklogservice.Diagnosis, bool, error) {
 	return tasklogservice.Diagnosis{TaskID: taskID, Summary: "暂无错误诊断"}, false, nil
 }
 
+// Context 返回指定任务的测试上下文摘要。
 func (service *fakeService) Context(_ context.Context, taskID string) (tasklogservice.ContextSummary, bool, error) {
 	return tasklogservice.ContextSummary{TaskID: taskID}, true, nil
 }
 
+// Export 返回指定任务的安全日志导出包。
 func (service *fakeService) Export(_ context.Context, taskID string) (tasklogservice.ExportBundle, error) {
 	return tasklogservice.ExportBundle{FileName: taskID + ".txt", Content: "safe log"}, nil
 }
 
+// TestListTaskLogsAppliesQuery 验证列表接口会把筛选条件传给 service。
 func TestListTaskLogsAppliesQuery(t *testing.T) {
 	service := &fakeService{}
 	recorder := perform(t, handleList(testConfig(service)), map[string]any{
@@ -78,6 +85,7 @@ func TestListTaskLogsAppliesQuery(t *testing.T) {
 	}
 }
 
+// TestGetTaskLogRejectsInvalidID 验证日志详情接口拒绝非法 ID。
 func TestGetTaskLogRejectsInvalidID(t *testing.T) {
 	recorder := perform(t, handleGet(testConfig(&fakeService{})), map[string]any{"id": 0})
 	if recorder.Code != http.StatusBadRequest {
@@ -85,6 +93,7 @@ func TestGetTaskLogRejectsInvalidID(t *testing.T) {
 	}
 }
 
+// TestGetTaskLogReturnsNotFound 验证日志详情缺失时返回 not found。
 func TestGetTaskLogReturnsNotFound(t *testing.T) {
 	recorder := perform(t, handleGet(testConfig(&fakeService{})), map[string]any{"id": 99})
 	if recorder.Code != http.StatusNotFound {
@@ -92,6 +101,7 @@ func TestGetTaskLogReturnsNotFound(t *testing.T) {
 	}
 }
 
+// TestListTaskLogsRejectsInvalidQuery 验证列表接口拒绝非法分页条件。
 func TestListTaskLogsRejectsInvalidQuery(t *testing.T) {
 	recorder := perform(t, handleList(testConfig(&fakeService{})), map[string]any{
 		"task_id":  "task_1",
@@ -111,6 +121,7 @@ func TestListTaskLogsRejectsInvalidQuery(t *testing.T) {
 	}
 }
 
+// TestListTaskLogsRequiresReadyToken 验证任务日志查询必须携带 runtime token。
 func TestListTaskLogsRequiresReadyToken(t *testing.T) {
 	service := &fakeService{}
 	request := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(`{"task_id":"task_1","limit":10}`)))
@@ -123,6 +134,7 @@ func TestListTaskLogsRequiresReadyToken(t *testing.T) {
 	}
 }
 
+// TestListTaskLogsRejectsWhenNotReady 验证 Go core 未 ready 时拒绝任务日志查询。
 func TestListTaskLogsRejectsWhenNotReady(t *testing.T) {
 	config := testConfig(&fakeService{})
 	config.Security.Ready = false
@@ -133,6 +145,7 @@ func TestListTaskLogsRejectsWhenNotReady(t *testing.T) {
 	}
 }
 
+// TestSummaryRequiresTaskID 验证任务摘要接口要求有效 task_id。
 func TestSummaryRequiresTaskID(t *testing.T) {
 	recorder := perform(t, handleSummary(testConfig(&fakeService{})), map[string]any{"task_id": ""})
 	if recorder.Code != http.StatusBadRequest {
@@ -140,6 +153,7 @@ func TestSummaryRequiresTaskID(t *testing.T) {
 	}
 }
 
+// TestExportReturnsSanitizedBundle 验证日志导出接口返回脱敏导出包。
 func TestExportReturnsSanitizedBundle(t *testing.T) {
 	recorder := perform(t, handleExport(testConfig(&fakeService{})), map[string]any{"task_id": "task_1"})
 	if recorder.Code != http.StatusOK {
@@ -155,10 +169,12 @@ func TestExportReturnsSanitizedBundle(t *testing.T) {
 	}
 }
 
+// testConfig 创建带 ready token 的任务日志 action 测试配置。
 func testConfig(service Service) Config {
 	return Config{Security: httpx.SecurityConfig{Ready: true, Token: "token"}, Service: service}
 }
 
+// perform 执行带 token 的 POST 请求并返回响应记录器。
 func perform(t *testing.T, handler http.HandlerFunc, payload map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	body, err := json.Marshal(payload)

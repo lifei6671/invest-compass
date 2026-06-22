@@ -5,7 +5,7 @@ import { ModelConfigEditor } from "./components/ModelConfigEditor";
 import { ModelConfigTable } from "./components/ModelConfigTable";
 import { ProviderListPanel } from "./components/ProviderListPanel";
 import { SettingsTabs } from "./components/SettingsTabs";
-import { defaultDraft, draftFromConfig, mockModelConfigs, providerName } from "./mock";
+import { defaultDraft, draftFromConfig, initialModelConfigs, providerName } from "./defaults";
 import type { AIProviderType, ModelConfig, ModelConfigDraft, SettingsTabKey } from "./types";
 
 type ModelConfigPageProps = {
@@ -17,10 +17,10 @@ export function ModelConfigPage(props: ModelConfigPageProps = {}) {
   const showTabs = props.showTabs !== false;
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTabKey>("model-config");
   const [selectedProvider, setSelectedProvider] = useState<AIProviderType>("openai-compatible");
-  const [configs, setConfigs] = useState<ModelConfig[]>(mockModelConfigs);
-  const [selectedConfigId, setSelectedConfigId] = useState<string | null>("openai-default");
-  const [draft, setDraft] = useState<ModelConfigDraft>(() => draftFromConfig(mockModelConfigs[0]));
-  const [editorMode, setEditorMode] = useState<"create" | "edit">("edit");
+  const [configs, setConfigs] = useState<ModelConfig[]>(initialModelConfigs);
+  const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ModelConfigDraft>(() => defaultDraft("openai-compatible"));
+  const [editorMode, setEditorMode] = useState<"create" | "edit">("create");
   const [editorOpen, setEditorOpen] = useState(false);
   const [testingEditor, setTestingEditor] = useState(false);
 
@@ -126,25 +126,13 @@ export function ModelConfigPage(props: ModelConfigPageProps = {}) {
   };
 
   const testConfig = (id: string) => {
-    setConfigs((current) => current.map((item) => (item.id === id ? { ...item, connectionStatus: "testing" } : item)));
-    window.setTimeout(() => {
-      setConfigs((current) => current.map((item) => (item.id === id ? { ...item, connectionStatus: "normal" } : item)));
-      message.success("连接测试完成");
-    }, 800);
+    setSelectedConfigId(id);
+    message.info("连接测试接口待接入");
   };
 
   const testEditor = () => {
-    setTestingEditor(true);
-    if (draft.id) {
-      setConfigs((current) => current.map((item) => (item.id === draft.id ? { ...item, connectionStatus: "testing" } : item)));
-    }
-    window.setTimeout(() => {
-      if (draft.id) {
-        setConfigs((current) => current.map((item) => (item.id === draft.id ? { ...item, connectionStatus: "normal" } : item)));
-      }
-      setTestingEditor(false);
-      message.success("连接测试完成");
-    }, 800);
+    setTestingEditor(false);
+    message.info("连接测试接口待接入");
   };
 
   return (
@@ -193,7 +181,7 @@ export function ModelConfigPage(props: ModelConfigPageProps = {}) {
             onClick={() => {
               modal.confirm({
                 title: "确认删除配置？",
-                content: `删除后将从本地 mock 列表移除「${draft.name || providerName(draft.provider)}」。`,
+                content: `删除后将从本地配置列表移除「${draft.name || providerName(draft.provider)}」。`,
                 okText: "删除",
                 okButtonProps: { danger: true },
                 cancelText: "取消",

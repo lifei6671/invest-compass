@@ -68,7 +68,7 @@ cd apps && pnpm install
 cd apps && pnpm build
 cd apps && pnpm test
 cd apps && pnpm check
-cd apps/sidecar-core && go test ./...
+cd apps/sidecar-core && go test -tags sqlite_fts5 ./...
 cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
 git diff --check
 ```

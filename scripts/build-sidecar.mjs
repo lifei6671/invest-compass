@@ -61,7 +61,7 @@ export function selectBuildTargets(argv, platform = process.platform, arch = pro
 }
 
 export function buildGoCommand(target, outputPath) {
-  const args = ["build", "-mod=readonly"];
+  const args = ["build", "-mod=readonly", "-tags", "sqlite_fts5"];
   if (target.goos === "windows") {
     args.push("-ldflags", "-H windowsgui");
   }
@@ -69,13 +69,44 @@ export function buildGoCommand(target, outputPath) {
   return { command: "go", args };
 }
 
-export function buildGoEnvironment(target, baseEnv = process.env) {
-  return {
+export function buildGoEnvironment(
+  target,
+  baseEnv = process.env,
+  hostPlatform = process.platform,
+  hostArch = process.arch,
+) {
+  const env = {
     ...baseEnv,
     GOOS: target.goos,
     GOARCH: target.goarch,
     CGO_ENABLED: "1",
   };
+  if (target.goos === "darwin" && hostPlatform === "darwin") {
+    const archFlag = macOSCGOArchFlag(target.goarch, hostArch);
+    if (archFlag) {
+      env.CC = env.CC || "clang";
+      env.CGO_CFLAGS = joinFlags(`-arch ${archFlag}`, env.CGO_CFLAGS);
+      env.CGO_LDFLAGS = joinFlags(`-arch ${archFlag}`, env.CGO_LDFLAGS);
+    }
+  }
+  if (target.goos === "windows") {
+    env.CC = env.CC || "x86_64-w64-mingw32-gcc";
+  }
+  return env;
+}
+
+function macOSCGOArchFlag(targetArch, hostArch) {
+  if (targetArch === "amd64" && hostArch === "arm64") {
+    return "x86_64";
+  }
+  if (targetArch === "arm64" && hostArch === "x64") {
+    return "arm64";
+  }
+  return "";
+}
+
+function joinFlags(...parts) {
+  return parts.map((part) => String(part ?? "").trim()).filter(Boolean).join(" ");
 }
 
 export function assertSidecarBundleNames(externalBin) {

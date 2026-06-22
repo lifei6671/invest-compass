@@ -297,6 +297,7 @@ func (executor Executor) writeFailedStreamStage(ctx context.Context, meta tasklo
 	})
 }
 
+// isTimeoutError 识别 Provider 或上下文返回的超时类错误。
 func isTimeoutError(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true

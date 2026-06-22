@@ -1,10 +1,10 @@
 import { App as AntApp, Button, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { recentReports } from "../mock";
 import type { RecentReport } from "../types";
 
 export function RecentReportsCard() {
   const { message } = AntApp.useApp();
+  const recentReports: RecentReport[] = [];
   const columns: ColumnsType<RecentReport> = [
     {
       title: "报告标题",

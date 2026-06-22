@@ -123,6 +123,7 @@ func (handler *TaskLogHandler) WithGroup(name string) slog.Handler {
 	return &cloned
 }
 
+// flattenSlogAttr 展平 slog 属性分组，便于生成任务日志 payload。
 func flattenSlogAttr(values map[string]any, prefix string, attr slog.Attr) {
 	attr.Value = attr.Value.Resolve()
 	if attr.Key == "" {
@@ -141,6 +142,7 @@ func flattenSlogAttr(values map[string]any, prefix string, attr slog.Attr) {
 	values[key] = attr.Value.Any()
 }
 
+// taskLogPayloadJSON 生成排除保留字段后的脱敏 payload JSON。
 func taskLogPayloadJSON(values map[string]any) (string, error) {
 	payload := map[string]any{}
 	for key, value := range values {
@@ -159,6 +161,7 @@ func taskLogPayloadJSON(values map[string]any) (string, error) {
 	return RedactText(string(encoded)), nil
 }
 
+// isTaskLogReservedField 判断字段是否已经映射到任务日志固定列。
 func isTaskLogReservedField(key string) bool {
 	field := key
 	if index := strings.LastIndex(key, "."); index >= 0 {
@@ -179,6 +182,7 @@ func isTaskLogReservedField(key string) bool {
 	}
 }
 
+// taskLogLevel 将 slog 级别转换为任务日志级别。
 func taskLogLevel(level slog.Level) string {
 	if level >= slog.LevelError {
 		return "ERROR"
@@ -189,6 +193,7 @@ func taskLogLevel(level slog.Level) string {
 	return "INFO"
 }
 
+// stringValue 从属性集合读取并脱敏字符串字段。
 func stringValue(values map[string]any, key string) string {
 	value, ok := values[key]
 	if !ok {
@@ -200,6 +205,7 @@ func stringValue(values map[string]any, key string) string {
 	return RedactText(fmt.Sprint(value))
 }
 
+// int64Value 从属性集合读取整数或 duration 字段。
 func int64Value(values map[string]any, key string) int64 {
 	value, ok := values[key]
 	if !ok {
@@ -224,6 +230,7 @@ func int64Value(values map[string]any, key string) int64 {
 	}
 }
 
+// boolValue 从属性集合读取布尔字段。
 func boolValue(values map[string]any, key string) bool {
 	value, ok := values[key]
 	if !ok {
@@ -236,6 +243,7 @@ func boolValue(values map[string]any, key string) bool {
 	return ok && typed
 }
 
+// groupedValue 从分组属性中读取指定后缀字段。
 func groupedValue(values map[string]any, key string) (any, bool) {
 	suffix := "." + key
 	for candidate, value := range values {

@@ -14,6 +14,7 @@ type captureTaskLogWriter struct {
 	entries []model.TaskLogEntry
 }
 
+// WriteTaskLog 捕获 slog handler 生成的任务日志。
 func (writer *captureTaskLogWriter) WriteTaskLog(_ context.Context, entry model.TaskLogEntry) error {
 	writer.entries = append(writer.entries, entry)
 	return nil

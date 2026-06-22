@@ -147,6 +147,7 @@ pub fn task_logs_export(
     })
 }
 
+// post_task_log_task_id 将任务 ID 类查询固定转发到指定 Go API 路径。
 fn post_task_log_task_id(
     state: State<'_, CoreState>,
     path: &str,
@@ -159,6 +160,7 @@ fn post_task_log_task_id(
         .map_err(|error| error.to_string())
 }
 
+// validate_task_id 校验任务 ID 不能为空。
 fn validate_task_id(task_id: &str) -> Result<(), String> {
     if task_id.trim().is_empty() {
         return Err("invalid task id".to_string());
@@ -166,6 +168,7 @@ fn validate_task_id(task_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+// validate_task_log_id 校验任务日志 ID 必须为正数。
 fn validate_task_log_id(id: i64) -> Result<(), String> {
     if id <= 0 {
         return Err("invalid task log id".to_string());
@@ -173,6 +176,7 @@ fn validate_task_log_id(id: i64) -> Result<(), String> {
     Ok(())
 }
 
+// write_task_log_export_bundle 将脱敏日志导出包写入用户选择目录。
 fn write_task_log_export_bundle(
     target_dir: &Path,
     bundle: &TaskLogExportBundle,
@@ -193,6 +197,7 @@ fn write_task_log_export_bundle(
     Ok(output_path)
 }
 
+// validate_task_log_export_target_dir 校验导出目标必须是已存在目录。
 fn validate_task_log_export_target_dir(target_dir: &Path) -> Result<(), String> {
     if target_dir.as_os_str().is_empty() {
         return Err("task log export target is not a directory".to_string());
@@ -203,6 +208,7 @@ fn validate_task_log_export_target_dir(target_dir: &Path) -> Result<(), String> 
     Ok(())
 }
 
+// safe_task_log_export_file_name 校验导出文件名不能包含路径穿越片段。
 fn safe_task_log_export_file_name(file_name: &str) -> Result<&str, String> {
     let trimmed = file_name.trim();
     if trimmed.is_empty() || trimmed.contains('/') || trimmed.contains('\\') {
@@ -223,6 +229,7 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    // unique_test_dir 创建当前测试独占的临时目录路径。
     fn unique_test_dir(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)

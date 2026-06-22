@@ -1,4 +1,4 @@
-# 投研罗盘全文检索技术方案：GSE + SQLite FTS5
+# 投研罗盘范围搜索技术方案：GSE + SQLite FTS5
 
 ## 1. 评审结论
 
@@ -16,9 +16,12 @@ GSE 预分词 + SQLite FTS5 + 股票专用搜索索引 + 拼音字段独立索�
 3. SQLite FTS5 继续负责倒排索引、MATCH 查询、prefix 查询、BM25 排序。
 4. 股票搜索必须单独设计，不能只依赖普通全文检索。
 5. 拼音、股票代码、股票简称、全称、别名要独立建模和排序。
+6. 不做跨菜单、跨业务对象混合召回的全局搜索。
+7. 顶部搜索框默认就是股票搜索，点击结果进入个股详情。
+8. 其他菜单内的搜索必须由当前菜单精确限定范围。
 ```
 
-原因：当前项目技术栈是 Tauri v2 + Rust 桌面壳 + Go sidecar + SQLite + GORM，且前端必须通过 Rust 白名单 command 访问 Go core，不允许直接访问 sidecar 或 SQLite。全文检索必须保持这一架构边界。
+原因：当前项目技术栈是 Tauri v2 + Rust 桌面壳 + Go sidecar + SQLite + GORM，且前端必须通过 Rust 白名单 command 访问 Go core，不允许直接访问 sidecar 或 SQLite。搜索能力必须保持这一架构边界，并且不能通过一个“全局搜索”入口把股票、新闻、报告、任务日志等不同业务对象混在一起召回。
 
 SQLite FTS5 官方支持 `unicode61`、`ascii`、`porter`、`trigram` 等 tokenizer，默认 tokenizer 是 `unicode61`；它不内置 GSE 或 jieba 中文分词器，因此本方案采用“应用层 GSE 预分词后写入 FTS5”的方式。([SQLite官网][1])
 
@@ -30,7 +33,7 @@ GSE 本身支持普通模式、搜索引擎模式、全模式、精确模式、H
 
 ## 2.1 目标
 
-本期全文检索目标分为两类。
+本期搜索目标分为两类。
 
 ### A. 股票搜索增强
 
@@ -48,15 +51,16 @@ GSE 本身支持普通模式、搜索引擎模式、全模式、精确模式、H
 行业 / 概念弱匹配：光模块、CPO、HBM、PCB、AI服务器
 ```
 
-### B. 全局全文检索
+### B. 菜单 / 页面内范围搜索
 
-首版建议索引：
+本期不提供独立全局搜索页，也不提供跨业务对象混合召回 API。需要搜索时，由当前菜单或页面精确决定搜索范围：
 
 ```text
-股票基础信息
-新闻标题 / 摘要
-AI 分析报告标题 / 正文 / 风险摘要
-自选股备注 / 标签
+顶部搜索框：股票搜索，默认走 stock_search(keyword)
+自选股菜单：股票搜索 + 当前自选股备注 / 标签搜索
+报告历史菜单：仅搜索 AI 分析报告标题 / 正文摘要 / 风险摘要
+资讯菜单：仅搜索新闻标题 / 摘要
+任务历史菜单：首版不接全文索引，只保留现有任务筛选；后续如接入也只能搜索任务日志摘要，不索引完整 payload
 ```
 
 后续可扩展：
@@ -69,6 +73,15 @@ F10 / 基本面数据
 基金
 Prompt 模板
 任务日志摘要
+```
+
+扩展前提：
+
+```text
+1. 必须先有对应菜单或页面。
+2. 必须使用固定 Rust command 限定 scope。
+3. Go API 不能接受前端传入任意 doc_type 组合来模拟全局搜索。
+4. 每个 scope 都要有独立验收：数据来源、脱敏、软删除、跳转目标。
 ```
 
 ## 2.2 非目标
@@ -84,10 +97,15 @@ Prompt 模板
 不索引用户一次性持仓输入
 不开放 FTS5 MATCH 原生语法给前端
 不让前端直接访问 SQLite 或 Go sidecar
+不做独立全局搜索页
+不提供 `/api/search/global`
+不提供跨 scope 的搜索建议、最近搜索、搜索热词
 不接入公告、研报、资金流等首版未闭环入口
 ```
 
-`analysis_reports.input_snapshot` 可能包含用户一次性持仓输入，当前文档已经要求默认报告查询、复制、导出不包含完整 `input_snapshot`。全文检索也必须延续这个边界，不索引该字段。
+`analysis_reports.input_snapshot` 可能包含用户一次性持仓输入，当前文档已经要求默认报告查询、复制、导出不包含完整 `input_snapshot`。搜索索引也必须延续这个边界，不索引该字段。
+
+如果 `analysis_reports.content_markdown` 中回显了用户一次性持仓、成本、仓位、API 返回原文或其他敏感上下文，报告范围搜索在入索引前必须先生成脱敏摘要或使用白名单摘要字段，不能把完整正文直接写入 FTS。
 
 ---
 
@@ -98,7 +116,7 @@ React 前端
   ↓ typed invoke service
 Tauri Rust command
   ↓ 固定白名单 command
-Go actions/search
+Go actions/stocks 或 actions/search
   ↓
 service/search
   ├── QueryNormalizer
@@ -107,7 +125,7 @@ service/search
   │     └── SimpleTokenizer    降级实现
   ├── PinyinGenerator
   ├── StockSearchService
-  ├── DocumentSearchService
+  ├── ScopedDocumentSearchService
   ├── SearchIndexer
   ├── SearchRebuildManager
   └── SearchRanker
@@ -133,6 +151,8 @@ SQLite
 4. 所有搜索 API 只供 Rust 白名单 command 调用。
 5. 搜索相关 SQL 必须集中在 dao/search.go。
 6. 前端只调用 typed invoke service，不拼接 MATCH 表达式。
+7. 除股票搜索外，所有文档搜索必须由菜单 scope 固定范围。
+8. 顶部搜索框不做全局检索，默认只调用股票搜索。
 ```
 
 ---
@@ -141,7 +161,7 @@ SQLite
 
 ## 4.1 中文分词：GSE
 
-新增依赖：
+新增依赖，实施前必须按项目规则确认：
 
 ```bash
 go get github.com/go-ego/gse
@@ -157,7 +177,7 @@ seg.CutSearch(text, true)
 
 ## 4.2 拼音：go-pinyin
 
-新增依赖：
+新增依赖，实施前必须按项目规则确认：
 
 ```bash
 go get github.com/mozillazg/go-pinyin
@@ -177,6 +197,38 @@ snippet / highlight，后续可选
 ```
 
 FTS5 支持 prefix index；本方案用 `prefix = '1 2 3 4 5 6'` 支撑股票代码、拼音、首字母前缀查询。FTS5 官方也提供 `bm25()` 排序函数，且可以给不同列传入权重。([SQLite官网][1])
+
+当前 Go sidecar 通过 `gorm.io/driver/sqlite` 间接使用 `github.com/mattn/go-sqlite3`。FTS5 不是只靠运行时检查即可保证的能力，构建链路必须显式带上 `sqlite_fts5` 或 `fts5` build tag。
+
+必须补齐：
+
+```text
+1. apps/sidecar-core 的本地 go test 命令带 FTS5 build tag。
+2. sidecar:check-targets 覆盖 macOS Apple Silicon、macOS Intel、Windows x64。
+3. release:check:local 能验证实际 sidecar 二进制包含 FTS5。
+4. 启动时执行 SELECT sqlite_compileoption_used('ENABLE_FTS5')。
+5. 如果 FTS5 不可用，股票搜索退回 code/name/pinyin LIKE，菜单范围文档搜索禁用并提示。
+```
+
+建议统一命令入口：
+
+```bash
+go test -tags sqlite_fts5 ./...
+```
+
+如果后续构建脚本选择 `fts5` 而不是 `sqlite_fts5`，必须在 sidecar 构建、测试和发布脚本中保持同一个 tag，不能本地测试和发布二进制使用不同编译选项。
+
+## 4.4 依赖确认点
+
+本方案涉及新增 Go 依赖和构建参数变化，属于项目规则中的 Ask First 范围。
+
+实施前需要确认：
+
+```text
+操作类型：新增 Go 依赖 + 修改 sidecar 构建 tag
+影响范围：apps/sidecar-core/go.mod、go.sum、sidecar 构建脚本、发布校验脚本
+风险评估：依赖体积、跨平台编译、SQLite FTS5 是否随二进制稳定启用
+```
 
 ---
 
@@ -232,6 +284,15 @@ apps/desktop/src-tauri/src/commands/search.rs
 ```text
 apps/frontend/src/services/search.ts
 apps/frontend/src/services/search.test.ts
+```
+
+注意：
+
+```text
+1. 现有 stock_search(keyword) 仍属于 market.rs 的股票搜索 command。
+2. search.rs 只承载菜单范围文档搜索、索引状态和重建能力。
+3. 不新增 search_global / globalSearch。
+4. 不新增可由前端自由传 doc_types 的通用搜索 command。
 ```
 
 ## 5.2 Tokenizer 接口
@@ -364,6 +425,7 @@ CREATE TABLE stock_pinyin_overrides (
 
 ```sql
 CREATE VIRTUAL TABLE stock_search_fts USING fts5(
+    batch_id UNINDEXED,
     symbol UNINDEXED,
     market UNINDEXED,
     exchange UNINDEXED,
@@ -384,6 +446,7 @@ CREATE VIRTUAL TABLE stock_search_fts USING fts5(
 字段说明：
 
 ```text
+batch_id：当前可用索引批次，查询必须绑定 search_index_state.active_stock_batch_id
 symbol：CN:SH:600519，不参与全文排序，仅返回
 market：CN，不参与全文排序
 exchange：SH/SZ，不参与全文排序
@@ -403,7 +466,8 @@ concept_index：概念词
 ```sql
 CREATE TABLE search_documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    doc_uid TEXT NOT NULL UNIQUE,
+    batch_id TEXT NOT NULL,
+    doc_uid TEXT NOT NULL,
     doc_type TEXT NOT NULL,
     ref_table TEXT NOT NULL,
     ref_id TEXT NOT NULL,
@@ -414,21 +478,36 @@ CREATE TABLE search_documents (
     source_time DATETIME,
     indexed_at DATETIME NOT NULL,
     index_version INTEGER NOT NULL DEFAULT 1,
-    deleted_at DATETIME
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    deleted_at DATETIME,
+    UNIQUE(batch_id, doc_uid)
 );
 
 CREATE INDEX idx_search_documents_doc_type
-ON search_documents(doc_type);
+ON search_documents(batch_id, doc_type);
 
 CREATE INDEX idx_search_documents_symbol
-ON search_documents(symbol);
+ON search_documents(batch_id, symbol);
 
 CREATE INDEX idx_search_documents_ref
-ON search_documents(ref_table, ref_id);
+ON search_documents(batch_id, ref_table, ref_id);
 
 CREATE INDEX idx_search_documents_source_time
-ON search_documents(source_time);
+ON search_documents(batch_id, source_time);
 ```
+
+`search_documents` 是菜单范围文档索引的元数据表，不是全局搜索结果表。
+
+查询时必须附带固定 scope：
+
+```text
+report_history -> doc_type = report
+news_center -> doc_type = news
+watchlist -> doc_type = watchlist_note
+```
+
+禁止一个请求同时传入多个 doc_type 来模拟跨菜单全局搜索。
 
 `doc_uid` 规则：
 
@@ -437,13 +516,14 @@ stock:CN:SH:600519
 news:<news_items.id>
 report:<analysis_reports.id>
 watchlist_note:<watchlists.id>
-prompt:<prompt_templates.id>
+prompt:<prompt_templates.id>      后续 Prompt 模板菜单需要搜索时再启用
 ```
 
 ## 6.6 新增 search_documents_fts
 
 ```sql
 CREATE VIRTUAL TABLE search_documents_fts USING fts5(
+    batch_id UNINDEXED,
     doc_uid UNINDEXED,
     doc_type UNINDEXED,
     symbol UNINDEXED,
@@ -456,12 +536,67 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 );
 ```
 
-## 6.7 新增 search_index_state
+该 FTS 表可复用同一套物理结构，但查询入口必须是菜单范围 API。`doc_type` 只是后端强约束字段，不能暴露成前端可自由组合的全局过滤器。
+
+查询必须同时绑定：
+
+```text
+batch_id = active_document_batch_id
+doc_type = 固定菜单 scope 对应类型
+```
+
+`batch_id` 是无损重建边界。重建时写入新 batch，校验成功后只切换 `search_index_state.active_document_batch_id`，不得先清空当前可用 batch。
+
+## 6.7 新增 search_index_batches
+
+```sql
+CREATE TABLE search_index_batches (
+    batch_id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    status TEXT NOT NULL,
+    source_schema_version INTEGER NOT NULL DEFAULT 1,
+    tokenizer_name TEXT NOT NULL,
+    tokenizer_version TEXT NOT NULL,
+    dictionary_hash TEXT NOT NULL,
+    started_at DATETIME NOT NULL,
+    finished_at DATETIME,
+    error_message TEXT DEFAULT '',
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+
+CREATE INDEX idx_search_index_batches_scope_status
+ON search_index_batches(scope, status);
+```
+
+`scope` 只能取：
+
+```text
+stock
+reports
+news
+watchlist_notes
+all
+```
+
+`status` 只能取：
+
+```text
+BUILDING
+READY
+FAILED
+RETIRED
+```
+
+`error_message` 必须写入脱敏后的错误摘要，不得包含 SQL 原文、文件路径、token、凭据或用户持仓明细。
+
+## 6.8 新增 search_index_state
 
 ```sql
 CREATE TABLE search_index_state (
     key TEXT PRIMARY KEY,
     value TEXT,
+    created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
 ```
@@ -476,8 +611,42 @@ dictionary_hash
 last_full_rebuild_at
 last_rebuild_status
 last_rebuild_error
+active_stock_batch_id
+active_document_batch_id
 stock_count
 document_count
+```
+
+`active_stock_batch_id` 和 `active_document_batch_id` 是查询期唯一可信的当前索引批次。增量索引和搜索查询都必须读取 active batch，避免重建中的半成品进入用户可见结果。
+
+## 6.9 新增 search_index_jobs
+
+```sql
+CREATE TABLE search_index_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_type TEXT NOT NULL,
+    ref_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT DEFAULT '',
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE(doc_type, ref_id, operation)
+);
+
+CREATE INDEX idx_search_index_jobs_status
+ON search_index_jobs(status, updated_at);
+```
+
+`search_index_jobs` 是增量索引 outbox。业务表写入成功时，必须在同一个数据库事务内写入或合并对应 job；后台 worker 只消费 `PENDING` / `FAILED_RETRYABLE` job。禁止仅在事务提交后写内存队列，否则进程崩溃会丢失索引任务。
+
+字段约束：
+
+```text
+operation：upsert / delete
+status：PENDING / RUNNING / DONE / FAILED_RETRYABLE / FAILED_FINAL
+last_error：仅保存脱敏摘要
 ```
 
 ---
@@ -553,7 +722,7 @@ URL 中的 token 参数
 
 ```text
 analysis_reports.title
-analysis_reports.content_markdown
+analysis_reports.content_markdown 脱敏摘要或白名单片段
 analysis_reports.risk_summary
 analysis_reports.symbol
 analysis_reports.created_at
@@ -563,7 +732,7 @@ analysis_reports.created_at
 
 ```text
 title_index：报告标题
-body_index：content_markdown + risk_summary
+body_index：脱敏后的 content_markdown 摘要 + risk_summary
 symbol：报告关联股票
 source_time：created_at
 ```
@@ -576,6 +745,16 @@ userPosition
 api_key_ref
 resolved_api_key
 raw_api_key
+```
+
+报告索引的强制规则：
+
+```text
+1. 不读取 input_snapshot。
+2. 不索引用户一次性持仓原文。
+3. 不索引模型请求原文、Provider 原始响应和内部调试上下文。
+4. content_markdown 入索引前必须经过敏感信息脱敏。
+5. 如果无法证明正文已脱敏，只能索引 title + risk_summary + 结构化摘要。
 ```
 
 ## 7.4 自选股备注索引
@@ -744,43 +923,35 @@ pinyin_initials = "gzmt g z m t"
 POST /api/stocks/search
 ```
 
-请求扩展：
+当前兼容请求：
 
 ```json
 {
-  "keyword": "gzmt",
-  "limit": 20,
-  "market": "CN",
-  "include_delisted": false
+  "keyword": "gzmt"
 }
 ```
 
-响应扩展：
+兼容响应：
 
 ```json
-{
-  "items": [
-    {
-      "symbol": "CN:SH:600519",
-      "code": "600519",
-      "name": "贵州茅台",
-      "full_name": "贵州茅台酒股份有限公司",
-      "market": "CN",
-      "exchange": "SH",
-      "industry": "白酒",
-      "match_type": "pinyin_initials",
-      "score": 950,
-      "highlight": "贵州茅台"
-    }
-  ]
-}
+[
+  {
+    "symbol": "CN:SH:600519",
+    "code": "600519",
+    "name": "贵州茅台",
+    "market": "CN",
+    "exchange": "SH"
+  }
+]
 ```
 
 兼容策略：
 
 ```text
-现有前端只需要 symbol/name/code/market/exchange 时继续可用。
-新增字段用于后续优化展示。
+1. `stock_search(keyword)` 的 data 必须继续是数组，不能改成 `{ items: [] }`。
+2. symbol/name/code/market/exchange 字段必须保持稳定。
+3. full_name、industry、match_type、score、highlight 等字段只能作为 item 的可选扩展字段。
+4. 如需返回 `{ items, has_more }`，必须新增 command 或 endpoint，不能静默改现有契约。
 ```
 
 ## 9.2 股票搜索流程
@@ -789,11 +960,24 @@ POST /api/stocks/search
 1. Normalize keyword
 2. 判断 keyword 类型
 3. 执行强规则精确匹配
-4. 执行 stock_search_fts MATCH 召回
-5. 合并去重
-6. 计算业务 score
-7. 按 score DESC、rank ASC 排序
-8. 返回 limit 条
+4. 执行本地 stocks 强规则查询
+5. 执行 stock_search_fts MATCH 召回
+6. 本地无命中且 MarketProvider 可用时，调用 Provider 搜索
+7. Provider 返回结果写入 stocks 并增量索引
+8. 合并去重
+9. 计算业务 score
+10. 按 score DESC、rank ASC 排序
+11. 返回 limit 条
+```
+
+冷启动和 Provider 边界：
+
+```text
+1. 新库或索引未完成时，本地索引可能没有股票基础数据。
+2. 本地无命中时允许走 MarketProvider.Search，但必须保持 T13 授权和可用性边界。
+3. Provider 未配置时不得伪造股票，只能返回本地缓存命中；无缓存命中则返回空结果或稳定不可用错误。
+4. Provider 调用失败时错误必须脱敏，不能泄露外部请求 URL 中的敏感参数。
+5. 搜索成功后仍按标准 symbol 幂等写入 stocks 缓存。
 ```
 
 keyword 类型：
@@ -844,20 +1028,23 @@ final_score = business_score + fts_rank_score + market_boost + active_boost
 退市 / 暂停上市 -200
 ```
 
-## 9.4 全局搜索 API
+## 9.4 菜单范围搜索 API
 
-新增：
+不新增 `/api/search/global`。
+
+允许新增的 API 必须由菜单范围固定：
 
 ```http
-POST /api/search/global
+POST /api/search/reports
+POST /api/search/news
+POST /api/search/watchlist-notes
 ```
 
-请求：
+报告历史搜索请求：
 
 ```json
 {
   "keyword": "光模块 算力",
-  "doc_types": ["stock", "news", "report", "watchlist_note"],
   "symbols": ["CN:SZ:300502"],
   "limit": 20,
   "offset": 0,
@@ -890,41 +1077,31 @@ POST /api/search/global
 }
 ```
 
-## 9.5 搜索建议 API
+固定范围规则：
 
-新增：
-
-```http
-POST /api/search/suggest
+```text
+1. `/api/search/reports` 只能查询 doc_type = report。
+2. `/api/search/news` 只能查询 doc_type = news。
+3. `/api/search/watchlist-notes` 只能查询 doc_type = watchlist_note。
+4. Go handler 可以复用内部实现，但 scope 必须由路由固定，不能由前端传入任意 doc_types。
+5. 搜索结果点击目标必须和菜单一致：report -> 报告详情，news -> 新闻详情或外链，watchlist_note -> 自选股页定位。
 ```
 
-请求：
+## 9.5 顶部搜索框
 
-```json
-{
-  "keyword": "gz",
-  "limit": 10
-}
+顶部搜索框的交互语义：
+
+```text
+1. 默认就是股票搜索。
+2. 只调用 `stock_search(keyword)`。
+3. 输入代码、symbol、简称、别名、拼音时返回股票候选。
+4. 点击股票候选进入 `/stocks/:symbol`。
+5. 不召回新闻、报告、自选备注、任务日志。
+6. 不展示“全部结果”或跨菜单搜索页入口。
 ```
 
-返回：
+如果后续需要顶部搜索框显示候选建议，也必须复用股票搜索结果，不新增跨 scope 的 `search_suggest`。
 
-```json
-{
-  "items": [
-    {
-      "type": "stock",
-      "text": "贵州茅台",
-      "symbol": "CN:SH:600519",
-      "match_type": "pinyin_initials"
-    },
-    {
-      "type": "query",
-      "text": "光模块"
-    }
-  ]
-}
-```
 
 ---
 
@@ -1013,11 +1190,11 @@ type SearchIndexer interface {
 ```text
 业务写入成功
   ↓
+同一 dao.Store transaction 内 upsert search_index_jobs
+  ↓
 dao.Store transaction commit
   ↓
-SearchIndexer.Enqueue(doc_type, ref_id)
-  ↓
-后台轻量 worker 合并任务
+后台轻量 worker 拉取 PENDING / FAILED_RETRYABLE job
   ↓
 读取源表
   ↓
@@ -1026,6 +1203,26 @@ SearchIndexer.Enqueue(doc_type, ref_id)
 upsert search_documents
   ↓
 delete + insert FTS row
+  ↓
+标记 search_index_jobs DONE
+```
+
+增量索引必须使用 `search_index_jobs` 作为持久化 outbox：
+
+```text
+1. 业务写入和 job 写入必须在同一个事务内完成。
+2. 同一 doc_type/ref_id/operation 重复触发时合并为一个 PENDING job。
+3. 进程重启后扫描 RUNNING / FAILED_RETRYABLE job 并恢复处理。
+4. job 失败只记录脱敏后的 last_error。
+5. worker 写索引时必须绑定当前 active batch。
+```
+
+禁止做法：
+
+```text
+业务事务提交后只写内存队列。
+业务事务提交后异步 best-effort Enqueue 但没有持久化补偿。
+索引失败后吞掉错误且不留下可恢复 job。
 ```
 
 ## 11.3 股票更新索引
@@ -1044,11 +1241,12 @@ delete + insert FTS row
 流程：
 
 ```text
-1. 读取 stocks + aliases + overrides。
-2. 生成 code/name/full_name/alias/pinyin/industry/concept。
-3. DELETE FROM stock_search_fts WHERE symbol = ?。
-4. INSERT INTO stock_search_fts(...) VALUES(...)。
-5. 更新 stocks.indexed_at / search_version。
+1. 读取 active_stock_batch_id。
+2. 读取 stocks + aliases + overrides。
+3. 生成 code/name/full_name/alias/pinyin/industry/concept。
+4. DELETE FROM stock_search_fts WHERE batch_id = ? AND symbol = ?。
+5. INSERT INTO stock_search_fts(batch_id, ...) VALUES(...)。
+6. 更新 stocks.indexed_at / search_version。
 ```
 
 ## 11.4 新闻更新索引
@@ -1067,8 +1265,9 @@ news_items 软删除
 1. 读取 news_items。
 2. title / summary 走 GSE CutSearch。
 3. tags 轻分词。
-4. 写 search_documents。
-5. 写 search_documents_fts。
+4. 读取 active_document_batch_id。
+5. 写 search_documents。
+6. 写 search_documents_fts。
 ```
 
 ## 11.5 报告更新索引
@@ -1085,10 +1284,22 @@ AI 报告保存成功
 
 ```text
 1. 读取 analysis_reports。
-2. title / content_markdown / risk_summary 入索引。
-3. 不读取 input_snapshot。
-4. 写 search_documents。
-5. 写 search_documents_fts。
+2. 不读取 input_snapshot。
+3. 生成 sanitized_search_summary。
+4. title / sanitized_search_summary / risk_summary 入索引。
+5. 读取 active_document_batch_id。
+6. 写 search_documents。
+7. 写 search_documents_fts。
+```
+
+`sanitized_search_summary` 是报告搜索唯一允许使用的正文来源：
+
+```text
+1. 来源可以是 content_markdown 的脱敏摘要或报告保存时生成的白名单结构化摘要。
+2. 必须复用日志 / 导出链路的敏感信息脱敏规则。
+3. 必须删除用户一次性持仓原文、成本、仓位、完整 Prompt、Provider 原始响应、API Key、代理密码和内部调试上下文。
+4. 如果无法证明摘要已脱敏，必须 fail closed：只索引 title + risk_summary，不索引正文。
+5. 单测必须覆盖包含 userPosition / raw_api_key / resolved_api_key / Authorization / Proxy-Authorization 的报告内容不会进入 FTS。
 ```
 
 报告删除：
@@ -1096,7 +1307,7 @@ AI 报告保存成功
 ```text
 1. analysis_reports soft delete。
 2. search_documents soft delete。
-3. 删除 search_documents_fts row。
+3. 在 active_document_batch_id 内删除 search_documents_fts row。
 ```
 
 ---
@@ -1129,10 +1340,21 @@ POST /api/search/status
 ```json
 {
   "scope": "all",
-  "doc_types": ["stock", "news", "report", "watchlist_note"],
   "force": false
 }
 ```
+
+`scope` 只能取：
+
+```text
+all
+stock
+reports
+news
+watchlist_notes
+```
+
+该接口不接受 `doc_types` 数组。
 
 返回：
 
@@ -1142,23 +1364,78 @@ POST /api/search/status
 }
 ```
 
+`/api/search/status` 响应必须来自 active batch 和现有索引表，不允许前端伪造：
+
+```json
+{
+  "fts5_status": "AVAILABLE",
+  "gse_status": "FALLBACK",
+  "search_status": "READY",
+  "active_stock_batch_id": "stock-ready-1",
+  "active_document_batch_id": "document-ready-1",
+  "running_rebuild_task_id": "",
+  "stock_index_count": 5000,
+  "report_index_count": 20,
+  "news_index_count": 1000,
+  "watchlist_note_index_count": 12,
+  "last_rebuild_at": "2026-06-22T13:30:00Z",
+  "tokenizer_name": "simple",
+  "tokenizer_version": "1",
+  "dictionary_hash": "builtin"
+}
+```
+
+字段来源：
+
+```text
+stock_index_count -> stock_search_fts 当前 active stock batch
+report/news/watchlist_note_index_count -> search_documents 当前 active document batch
+last_rebuild_at / tokenizer / dictionary -> search_index_batches 当前 active batch
+gse_status -> 根据 active batch tokenizer_name 推导，simple 表示 FALLBACK
+```
+
 ## 12.3 重建流程
 
 ```text
 1. 创建 SEARCH_INDEX_REBUILD 任务。
 2. 写 TASK_CREATED。
-3. 清空 stock_search_fts。
-4. 清空 search_documents / search_documents_fts。
+3. 创建 rebuild batch_id。
+4. search_index_batches 写入 BUILDING。
 5. 批量重建股票索引。
 6. 批量重建新闻索引。
 7. 批量重建报告索引。
 8. 批量重建自选股备注索引。
-9. 执行 FTS optimize。
-10. 更新 search_index_state。
-11. 写 TASK_SUCCESS。
+9. 校验新索引完整性。
+10. 在短事务内切换 active_stock_batch_id / active_document_batch_id。
+11. 将旧 batch 标记 RETIRED。
+12. 执行 FTS optimize。
+13. 更新 search_index_state。
+14. 写 TASK_SUCCESS。
 ```
 
 FTS5 支持 `optimize` 和 `integrity-check` 等维护命令，重建后建议执行 optimize，设置中心可以提供索引健康检查。([SQLite官网][1])
+
+批次写入规则：
+
+```text
+1. 重建期间所有新索引行都写入 rebuild batch_id。
+2. 搜索查询继续读取 active batch，不读取 BUILDING batch。
+3. 校验失败时将 rebuild batch 标记 FAILED，并保留旧 active batch。
+4. active batch 切换必须在一个短事务内完成，只更新 search_index_state 和 batch 状态。
+5. 清理 RETIRED batch 必须异步执行，清理失败不影响当前搜索。
+```
+
+重建安全规则：
+
+```text
+1. 不能先清空线上可用索引再开始慢速重建。
+2. 如果已有可用索引，重建失败必须保留旧索引继续服务。
+3. 如果是首次安装且没有旧索引，搜索状态显示 NEED_REBUILD / BUILDING。
+4. 重建错误写入 task_events 前必须脱敏。
+5. 用户再次点击重建时，同一 scope 只能有一个 RUNNING 重建任务。
+6. 重建任务不得读取 analysis_reports.input_snapshot。
+7. 报告重建无法生成脱敏摘要时，必须只索引 title + risk_summary。
+```
 
 ## 12.4 是否接入 scheduler
 
@@ -1179,8 +1456,9 @@ FTS5 支持 `optimize` 和 `integrity-check` 等维护命令，重建后建议�
 ## 13.1 新增 Go API
 
 ```text
-POST /api/search/global
-POST /api/search/suggest
+POST /api/search/reports
+POST /api/search/news
+POST /api/search/watchlist-notes
 POST /api/search/rebuild
 POST /api/search/status
 ```
@@ -1194,14 +1472,15 @@ POST /api/stocks/search
 但底层改为：
 
 ```text
-StockSearchService -> stock_search_fts + 强规则排序
+StockSearchService -> 本地 stocks 强规则 + stock_search_fts + Provider fallback + 强规则排序
 ```
 
 ## 13.2 新增 Rust command
 
 ```text
-search_global(payload)
-search_suggest(payload)
+search_reports(payload)
+search_news(payload)
+search_watchlist_notes(payload)
 search_rebuild(payload)
 search_status()
 ```
@@ -1209,10 +1488,11 @@ search_status()
 固定映射：
 
 ```text
-search_global(payload)  -> POST /api/search/global
-search_suggest(payload) -> POST /api/search/suggest
-search_rebuild(payload) -> POST /api/search/rebuild
-search_status()         -> POST /api/search/status
+search_reports(payload)         -> POST /api/search/reports
+search_news(payload)            -> POST /api/search/news
+search_watchlist_notes(payload) -> POST /api/search/watchlist-notes
+search_rebuild(payload)         -> POST /api/search/rebuild
+search_status()                 -> POST /api/search/status
 ```
 
 Rust 校验：
@@ -1221,25 +1501,40 @@ Rust 校验：
 keyword trim 后不能为空
 limit 必须 1-100
 offset 必须 >= 0
-doc_types 只能是白名单
 symbols 必须符合标准 symbol 格式
-rebuild scope 只能是 all / stock / document
+rebuild scope 只能是 all / stock / reports / news / watchlist_notes
+不能接收 doc_types 数组
+```
+
+权限边界：
+
+```text
+1. search_reports / search_news / search_watchlist_notes 只允许主窗口通过对应菜单页面调用。
+2. search_status 允许主窗口和设置中心读取。
+3. search_rebuild 会启动 SEARCH_INDEX_REBUILD 后台任务，只能由设置中心索引管理入口触发。
+4. capabilities/default.json 不新增文件系统、shell、网络或插件权限。
+5. desktop security-config.test.mjs 必须覆盖 search_* command 已注册、固定 path、无通用代理，以及 search_rebuild 不能暴露为任意 path / 任意 scope。
+6. 如果后续新增多窗口，search_rebuild 必须继续限制在 settings/main 能力范围，远程 URL 或非受信窗口不得调用。
 ```
 
 ## 13.3 前端 typed service
 
 ```ts
 export async function stockSearch(
-  payload: StockSearchRequest
-): Promise<StockSearchResponse>
+  keyword: string
+): Promise<StockSearchResult[]>
 
-export async function globalSearch(
-  payload: GlobalSearchRequest
-): Promise<GlobalSearchResponse>
+export async function searchReports(
+  payload: ScopedSearchRequest
+): Promise<ScopedSearchResponse>
 
-export async function searchSuggest(
-  payload: SearchSuggestRequest
-): Promise<SearchSuggestResponse>
+export async function searchNews(
+  payload: ScopedSearchRequest
+): Promise<ScopedSearchResponse>
+
+export async function searchWatchlistNotes(
+  payload: ScopedSearchRequest
+): Promise<ScopedSearchResponse>
 
 export async function searchStatus(): Promise<SearchStatusResponse>
 
@@ -1256,19 +1551,49 @@ export async function rebuildSearchIndex(
 访问 127.0.0.1
 直接访问 SQLite
 保存敏感搜索上下文
+传入任意 doc_types 组合
 ```
 
 ---
 
 # 14. 前端页面设计
 
-## 14.1 股票搜索弹窗增强
+## 14.1 顶部股票搜索框
+
+位置：
+
+```text
+AppShell 顶部搜索框
+```
+
+语义：
+
+```text
+1. 默认搜索股票。
+2. 调用 stockSearch(keyword)。
+3. 结果只展示股票。
+4. 点击结果进入 /stocks/:symbol。
+5. 不展示新闻、报告、自选备注和任务日志。
+6. 不提供“查看全部搜索结果”入口。
+```
+
+展示字段：
+
+```text
+股票名称
+代码
+市场 / 交易所
+行业，可选
+匹配类型，可选
+是否已加入自选，可选
+```
+
+## 14.2 股票搜索弹窗增强
 
 位置：
 
 ```text
 自选股页
-个股详情页顶部搜索
 AI 分析页股票选择器
 ```
 
@@ -1294,43 +1619,48 @@ AI 分析页股票选择器
 概念匹配
 ```
 
-## 14.2 全局搜索页
+## 14.3 菜单范围搜索
 
-新增页面：
+不新增 `/search` 全局搜索页。
+
+各菜单搜索范围：
 
 ```text
-/search
+报告历史页：searchReports，只搜索 report
+资讯中心页：searchNews，只搜索 news
+自选股页：stockSearch + searchWatchlistNotes
+任务历史页：首版保留结构化筛选，不接全文搜索
+设置中心：只展示搜索索引状态，不搜索业务数据
 ```
 
-布局：
+页面交互：
 
 ```text
-顶部：搜索框 + 搜索按钮
-左侧：类型过滤
-中间：结果列表
-右侧：可选搜索说明 / 最近搜索
+搜索框位于当前菜单页面内
+筛选项只展示当前菜单合法字段
+结果点击只跳转当前菜单支持的目标
+空状态必须说明当前搜索范围
 ```
 
-类型过滤：
+禁止：
 
 ```text
-全部
-股票
-新闻
-分析报告
-自选备注
+跨菜单混合结果
+跨菜单“全部”过滤
+最近搜索跨菜单共享
+搜索热词跨菜单共享
+前端传 doc_types 自由组合
 ```
 
 结果点击：
 
 ```text
-stock -> /stocks/:symbol
 news -> 打开新闻详情或外链
 report -> /reports/:id
 watchlist_note -> /watchlist?symbol=...
 ```
 
-## 14.3 设置中心新增索引管理
+## 14.4 设置中心新增索引管理
 
 位置：
 
@@ -1343,7 +1673,9 @@ watchlist_note -> /watchlist?symbol=...
 ```text
 索引状态
 股票索引数量
-文档索引数量
+报告索引数量
+新闻索引数量
+自选备注索引数量
 最后重建时间
 词典版本
 GSE tokenizer 状态
@@ -1373,7 +1705,7 @@ A 股股票：5000-10000
 p50 < 30ms
 p95 < 80ms
 
-全局搜索：
+菜单范围搜索：
 p50 < 80ms
 p95 < 250ms
 
@@ -1421,20 +1753,23 @@ INSERT INTO search_documents_fts(search_documents_fts) VALUES('optimize');
 5. 创建 stock_search_fts。
 6. 创建 search_documents。
 7. 创建 search_documents_fts。
-8. 创建 search_index_state。
-9. 写入 search schema_version。
-10. 标记 search_status = NEED_REBUILD。
+8. 创建 search_index_batches。
+9. 创建 search_index_state。
+10. 创建 search_index_jobs。
+11. 写入 search schema_version。
+12. 标记 search_status = NEED_REBUILD。
 ```
 
-当前项目已经要求 Go sidecar 生产启动时在 `dao.Open` 和 `dao.Migrate` 前执行迁移前备份。全文检索新增表也必须遵守该流程。
+当前项目已经要求 Go sidecar 生产启动时在 `dao.Open` 和 `dao.Migrate` 前执行迁移前备份。搜索索引新增表也必须遵守该流程。
 
 ## 16.2 首次启动策略
 
 ```text
 首次启动不阻塞进入主界面。
 后台启动 SEARCH_INDEX_REBUILD。
-股票搜索在索引未完成前降级为 code/name LIKE。
-全局搜索在索引未完成前展示“索引构建中”。
+股票搜索在索引未完成前只基于已缓存 stocks 降级为 code/name LIKE；本地无命中时仍按 Provider fallback 边界处理。
+菜单范围搜索在索引未完成前展示“索引构建中”。
+SEARCH_INDEX_REBUILD 成功前不得把 BUILDING batch 暴露给搜索查询。
 ```
 
 ## 16.3 回滚策略
@@ -1444,8 +1779,9 @@ INSERT INTO search_documents_fts(search_documents_fts) VALUES('optimize');
 ```text
 search_status = UNAVAILABLE
 股票搜索降级为 code/name/pinyin LIKE
-全局搜索禁用并提示当前 SQLite 不支持 FTS5
+菜单范围搜索禁用并提示当前 SQLite 不支持 FTS5
 设置页显示修复建议
+search_index_jobs 保留，待 FTS5 恢复后重新消费或触发全量重建
 ```
 
 ---
@@ -1467,10 +1803,13 @@ StockIndexBuilder
 DocumentIndexBuilder
 FTSQueryBuilder
 StockRanker
-GlobalSearchRanker
+ScopedSearchRanker
 危险 MATCH 输入转义
 软删除后索引不可见
 索引重建幂等
+search_index_jobs 崩溃恢复
+active batch 切换失败时保留旧索引
+报告 sanitized_search_summary 脱敏失败时 fail closed
 ```
 
 ## 17.2 SQLite 集成测试
@@ -1487,6 +1826,9 @@ GlobalSearchRanker
 验证 doc_type 过滤
 验证 symbol 过滤
 验证 delete + insert 更新
+验证 search_index_batches 只切换 READY batch
+验证 BUILDING batch 不参与查询
+验证 search_index_jobs 与业务写入同事务提交
 验证 optimize 不报错
 ```
 
@@ -1514,14 +1856,24 @@ CPO -> 相关股票 / 新闻 / 报告
 AI服务器 -> 相关股票 / 新闻 / 报告
 ```
 
+说明：
+
+```text
+股票相关断言在 stock_search 中验证。
+新闻相关断言在 searchNews 中验证。
+报告相关断言在 searchReports 中验证。
+不得用一个全局搜索 case 同时断言三类结果。
+```
+
 ## 17.4 前端测试
 
 ```text
 股票搜索 loading / empty / error / success
 拼音搜索成功
 代码搜索成功
-全局搜索结果展示
-doc_type 过滤
+报告历史菜单范围搜索结果展示
+资讯菜单范围搜索结果展示
+自选备注菜单范围搜索结果展示
 symbol 过滤
 点击结果跳转
 索引构建中提示
@@ -1533,7 +1885,7 @@ symbol 过滤
 必须执行：
 
 ```bash
-cd apps/sidecar-core && go test ./...
+cd apps/sidecar-core && go test -tags sqlite_fts5 ./...
 pnpm --dir apps test
 pnpm --dir apps check
 pnpm --dir apps sidecar:check-targets
@@ -1546,8 +1898,10 @@ pnpm --dir apps release:check:local
 macOS Apple Silicon sidecar 可构建
 macOS Intel sidecar 可构建
 Windows x64 sidecar 可构建
+构建脚本和测试脚本使用同一 FTS5 build tag
 GSE 词典文件能被正确打包或嵌入
 启动后 GSE 初始化成功
+SELECT sqlite_compileoption_used('ENABLE_FTS5') 返回 1
 ```
 
 ---
@@ -1559,6 +1913,7 @@ GSE 词典文件能被正确打包或嵌入
 ```text
 GSE 依赖已引入。
 go-pinyin 依赖已引入。
+FTS5 build tag 已进入 Go 测试、sidecar 构建和发布验证。
 三平台 sidecar 构建通过。
 不引入 gojieba 默认依赖。
 不引入 cgo/C++ 强依赖。
@@ -1571,9 +1926,15 @@ stocks 扩展字段迁移成功。
 stock_aliases / stock_pinyin_overrides 创建成功。
 stock_search_fts 创建成功。
 search_documents / search_documents_fts 创建成功。
+search_index_batches 创建成功。
 search_index_state 创建成功。
+search_index_jobs 创建成功。
+所有新增索引元数据表遵守 created_at / updated_at 规则，明确例外不得隐含。
 重复 migration 不破坏旧库。
 迁移前备份生效。
+FTS5 不可用时状态为 UNAVAILABLE，迁移不伪装成功。
+BUILDING batch 不参与查询。
+READY batch 切换失败时保留旧 active batch。
 ```
 
 ## RGF3：股票搜索门禁
@@ -1588,21 +1949,29 @@ symbol 搜索通过。
 拼音首字母搜索通过。
 多音字 override 生效。
 股票搜索不返回新闻 / 报告。
+本地无命中时 Provider fallback 边界符合 T13。
+Provider 未配置时不伪造股票数据。
+现有 stock_search(keyword) 仍返回数组。
 排序符合强规则。
 ```
 
-## RGF4：全局搜索门禁
+## RGF4：菜单范围搜索门禁
 
 ```text
-新闻可检索。
-报告可检索。
-自选备注可检索。
-支持 doc_type 过滤。
+search_reports 只检索 report。
+search_news 只检索 news。
+search_watchlist_notes 只检索 watchlist_note。
+不提供 /api/search/global。
+不提供前端任意 doc_types 组合。
 支持 symbol 过滤。
 软删除后不可见。
 不索引 input_snapshot。
 不索引 task_events payload。
 不索引日志和凭据。
+报告正文只来自 sanitized_search_summary。
+sanitized_search_summary 脱敏失败时 fail closed，只索引 title + risk_summary。
+报告搜索测试证明 userPosition / raw_api_key / resolved_api_key 不进入 FTS。
+search_index_jobs 崩溃恢复生效。
 ```
 
 ## RGF5：安全门禁
@@ -1615,16 +1984,22 @@ Go API 复用 token / ready / DecodeJSON。
 前端不直连 Go sidecar。
 用户输入不能注入 FTS MATCH。
 错误响应不泄露 SQL、路径、token。
+顶部搜索框只调用 stock_search。
+search_rebuild 只能由设置中心索引管理入口触发。
+desktop security-config.test.mjs 覆盖 search_* command 注册、固定 path 和无通用代理。
+search_rebuild 不接受任意 doc_types / 任意 path / 任意 scope。
 ```
 
 ## RGF6：性能门禁
 
 ```text
 股票搜索 p95 < 80ms。
-全局搜索 p95 < 250ms。
+菜单范围搜索 p95 < 250ms。
 10 万文档重建 < 120 秒。
 重建期间 UI 可用。
 增量索引不阻塞主业务写入。
+重建失败时保留旧索引继续服务。
+清理 RETIRED batch 不阻塞当前搜索。
 ```
 
 ---
@@ -1721,6 +2096,26 @@ prefix 控制长度。
 
 # 20. 分阶段实施计划
 
+## Phase 0：依赖、构建与 FTS5 探针
+
+交付：
+
+```text
+GSE / go-pinyin 依赖确认
+sqlite_fts5 或 fts5 build tag 统一配置
+FTS5 编译能力探针
+临时 SQLite FTS5 集成测试
+sidecar:check-targets 覆盖三平台
+```
+
+验收：
+
+```text
+go test -tags sqlite_fts5 ./... 通过。
+三平台 sidecar 构建链路使用同一 FTS5 tag。
+启动探针能区分 AVAILABLE / UNAVAILABLE。
+```
+
 ## Phase 1：Tokenizer 与股票搜索增强
 
 交付：
@@ -1733,33 +2128,45 @@ PinyinGenerator
 stock_aliases
 stock_pinyin_overrides
 stock_search_fts
-/api/stocks/search 切换为新搜索
+active_stock_batch_id
+/api/stocks/search 增强为本地索引 + Provider fallback
+顶部搜索框默认股票搜索
 ```
 
 验收：
 
 ```text
 代码、简称、全称、别名、拼音、首字母全部通过。
+现有 stock_search(keyword) 响应数组契约不变。
+Provider 未配置时不伪造数据。
 ```
 
-## Phase 2：全局搜索
+## Phase 2：菜单范围搜索
 
 交付：
 
 ```text
 search_documents
 search_documents_fts
+search_index_batches
+search_index_jobs
 SearchIndexer
-/api/search/global
-search_global Rust command
-前端全局搜索页
+/api/search/reports
+/api/search/news
+/api/search/watchlist-notes
+search_reports / search_news / search_watchlist_notes Rust command
+报告历史、资讯中心、自选股页内搜索
 ```
 
 验收：
 
 ```text
-新闻、报告、自选备注可搜索。
-支持 doc_type 和 symbol 过滤。
+新闻、报告、自选备注分别在对应菜单内可搜索。
+不存在 /search 全局页。
+不存在跨 scope 搜索结果。
+报告搜索不索引 input_snapshot 和未脱敏正文。
+增量索引通过 search_index_jobs 崩溃恢复。
+查询只读取 active_document_batch_id。
 ```
 
 ## Phase 3：索引管理
@@ -1768,6 +2175,7 @@ search_global Rust command
 
 ```text
 search_index_state
+search_index_batches
 /api/search/status
 /api/search/rebuild
 设置中心索引管理
@@ -1781,6 +2189,8 @@ FTS optimize
 可查看索引状态。
 可手动重建。
 重建失败可看到脱敏错误。
+重建失败保留旧 active batch。
+search_rebuild 只允许设置中心索引管理入口触发。
 ```
 
 ## Phase 4：搜索体验增强
@@ -1788,19 +2198,18 @@ FTS optimize
 交付：
 
 ```text
-search_suggest
-高亮摘要
-最近搜索
+股票候选高亮摘要
+菜单内结果高亮摘要
 同义词词典
-搜索热词
 可选 trigram 子串召回
 ```
 
 验收：
 
 ```text
-搜索建议可用。
 结果摘要高亮。
+顶部候选仍只返回股票。
+菜单内增强不跨 scope。
 不会引入明显噪声。
 ```
 
@@ -1817,8 +2226,9 @@ search_suggest
 SQLite FTS5 只做倒排和排序
 股票搜索独立强排序
 拼音字段独立索引
-全文索引可重建
+搜索索引可重建
 敏感字段不索引
+不做跨菜单全局搜索
 ```
 
 最关键的工程原则：
@@ -1833,7 +2243,7 @@ SQLite FTS5 只做倒排和排序
 ```text
 1. 先做 GSE Tokenizer 抽象。
 2. 再做 stock_search_fts。
-3. 先替换 /api/stocks/search。
+3. 先增强 /api/stocks/search，并保持现有响应数组契约。
 4. 再做 search_documents_fts。
-5. 最后做全局搜索页面和索引管理。
+5. 最后做菜单范围搜索页面和索引管理。
 ```

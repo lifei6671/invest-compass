@@ -154,7 +154,7 @@ export function ModelConfigTable(props: ModelConfigTableProps) {
                 event.stopPropagation();
                 modal.confirm({
                   title: "确认删除配置？",
-                  content: `删除后将从本地 mock 列表移除「${record.name}」。`,
+                  content: `删除后将从本地配置列表移除「${record.name}」。`,
                   okText: "删除",
                   okButtonProps: { danger: true },
                   cancelText: "取消",

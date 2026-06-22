@@ -46,6 +46,7 @@ export function ReportDetailHeader(props: ReportDetailHeaderProps) {
           <span>生成时间 {props.report.generatedAt}</span>
           <span>任务 ID {props.report.taskId}</span>
           <span>数据更新时间 {props.report.dataUpdatedAt}</span>
+          <span>风险摘要 {props.report.riskSummary}</span>
         </div>
       </div>
       <div className="report-detail-actions">

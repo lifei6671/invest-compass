@@ -17,6 +17,7 @@ type captureStageWriter struct {
 	err     error
 }
 
+// WriteTaskLog 捕获阶段日志写入请求。
 func (writer *captureStageWriter) WriteTaskLog(_ context.Context, entry model.TaskLogEntry) error {
 	writer.entries = append(writer.entries, entry)
 	return writer.err
@@ -98,6 +99,7 @@ func TestRunStageReturnsWriteError(t *testing.T) {
 	}
 }
 
+// steppingNow 按调用顺序返回预设时间，方便断言耗时。
 func steppingNow(values ...time.Time) func() time.Time {
 	index := 0
 	return func() time.Time {

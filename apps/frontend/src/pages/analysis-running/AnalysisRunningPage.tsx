@@ -6,18 +6,32 @@ import { RunningTaskHeader } from "./components/RunningTaskHeader";
 import { StreamingOutputPanel } from "./components/StreamingOutputPanel";
 import { TaskLogPanel } from "./components/TaskLogPanel";
 import { TaskStepTimeline } from "./components/TaskStepTimeline";
-import { initialTaskLogs, initialTaskSteps, runningTaskSummary, streamingMarkdown as initialStreamingMarkdown } from "./mock";
-import type { TaskLogItem, TaskStep } from "./types";
+import type { RunningTaskSummary, TaskLogItem, TaskStep } from "./types";
+
+const emptyTaskSummary: RunningTaskSummary = {
+  title: "AI 分析任务",
+  stockName: "",
+  stockCode: "",
+  analysisType: "",
+  status: "CANCELLED",
+  taskId: "暂无",
+  elapsed: "暂无",
+  model: "暂无",
+};
 
 export function AnalysisRunningPage() {
   const { message } = AntApp.useApp();
   const [autoScroll, setAutoScroll] = useState(true);
-  const [generating, setGenerating] = useState(true);
-  const [streamingMarkdown] = useState(initialStreamingMarkdown);
-  const [steps] = useState<TaskStep[]>(initialTaskSteps);
-  const [logs] = useState<TaskLogItem[]>(initialTaskLogs);
+  const [generating, setGenerating] = useState(false);
+  const [streamingMarkdown] = useState("");
+  const [steps] = useState<TaskStep[]>([]);
+  const [logs] = useState<TaskLogItem[]>([]);
 
   const copyCurrentContent = () => {
+    if (!streamingMarkdown.trim()) {
+      message.info("暂无可复制的输出内容");
+      return;
+    }
     const writer = navigator.clipboard?.writeText;
     const request = writer ? writer.call(navigator.clipboard, streamingMarkdown) : Promise.resolve();
     request
@@ -27,7 +41,7 @@ export function AnalysisRunningPage() {
 
   return (
     <section className="analysis-running-page">
-      <RunningTaskHeader value={runningTaskSummary} onBack={() => message.info("返回上一页待接入")} />
+      <RunningTaskHeader value={emptyTaskSummary} onBack={() => message.info("返回上一页待接入")} />
       <div className="analysis-running-workspace">
         <TaskStepTimeline steps={steps} />
         <StreamingOutputPanel
@@ -44,7 +58,7 @@ export function AnalysisRunningPage() {
           setGenerating(false);
           message.warning("已停止生成");
         }}
-        onBackground={() => message.info("任务已切换为后台运行")}
+        onBackground={() => message.info("暂无运行中的任务")}
         onCopy={copyCurrentContent}
       />
       <AnalysisRunningRiskNotice />

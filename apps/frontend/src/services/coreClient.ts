@@ -590,6 +590,56 @@ export type CacheCleanResult = {
   cleaned_targets: string[];
 };
 
+export type SearchIndexStatus = {
+  fts5_status: string;
+  gse_status?: string;
+  search_status: string;
+  active_stock_batch_id?: string;
+  active_document_batch_id?: string;
+  running_rebuild_task_id?: string;
+  stock_index_count?: number;
+  report_index_count?: number;
+  news_index_count?: number;
+  watchlist_note_index_count?: number;
+  last_rebuild_at?: string;
+  tokenizer_name?: string;
+  tokenizer_version?: string;
+  dictionary_hash?: string;
+};
+
+export type SearchRebuildPayload = {
+  scope: "all" | "stock" | "reports" | "news" | "watchlist_notes";
+  force: boolean;
+};
+
+export type SearchRebuildResult = {
+  task_id: string;
+  scope?: string;
+  stock_batch_id?: string;
+  document_batch_id?: string;
+};
+
+export type DocumentSearchPayload = {
+  keyword: string;
+  symbols: string[];
+  limit: number;
+  offset: number;
+  sort: string;
+};
+
+export type DocumentSearchItem = {
+  doc_uid: string;
+  doc_type: "report" | "news" | "watchlist_note";
+  ref_id: string;
+  symbol: string;
+  title: string;
+  summary: string;
+  source: string;
+  source_time: string;
+  score: number;
+  highlights: string[];
+};
+
 export type ProviderStatusItem = {
   name: string;
   source: string;
@@ -1051,6 +1101,36 @@ export async function cacheStats(): Promise<CacheStatsResult> {
 /// 通过固定 Rust command 清理允许的临时缓存目标。
 export async function cacheClean(targets: string[]): Promise<CacheCleanResult> {
   const response = await invoke<CoreEnvelope<CacheCleanResult>>("cache_clean", { payload: { targets } });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取搜索索引状态，设置中心不直接访问 Go core。
+export async function searchStatus(): Promise<SearchIndexStatus> {
+  const response = await invoke<CoreEnvelope<SearchIndexStatus>>("search_status");
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 触发搜索索引重建，只允许固定 scope。
+export async function searchRebuild(payload: SearchRebuildPayload): Promise<SearchRebuildResult> {
+  const response = await invoke<CoreEnvelope<SearchRebuildResult>>("search_rebuild", { payload });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 搜索报告历史范围，不接受任意 doc_type。
+export async function searchReports(payload: DocumentSearchPayload): Promise<DocumentSearchItem[]> {
+  const response = await invoke<CoreEnvelope<DocumentSearchItem[]>>("search_reports", { payload });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 搜索资讯中心范围，不接受任意 doc_type。
+export async function searchNews(payload: DocumentSearchPayload): Promise<DocumentSearchItem[]> {
+  const response = await invoke<CoreEnvelope<DocumentSearchItem[]>>("search_news", { payload });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 搜索自选备注范围，不接受任意 doc_type。
+export async function searchWatchlistNotes(payload: DocumentSearchPayload): Promise<DocumentSearchItem[]> {
+  const response = await invoke<CoreEnvelope<DocumentSearchItem[]>>("search_watchlist_notes", { payload });
   return unwrapCoreResponse(response);
 }
 

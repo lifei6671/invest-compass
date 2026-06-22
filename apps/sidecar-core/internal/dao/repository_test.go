@@ -115,6 +115,103 @@ func TestStockRepositoryUpsertsBySymbol(t *testing.T) {
 	}
 }
 
+// TestStockSearchRepositoryListsLocalCandidates 验证股票搜索 DAO 支持本地强规则候选和 symbol 回表。
+func TestStockSearchRepositoryListsLocalCandidates(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.UpsertStocks(ctx, []model.Stock{
+		{Symbol: "CN:SH:600519", Market: "CN", Exchange: "SH", Code: "600519", Name: "贵州茅台", FullName: "贵州茅台酒股份有限公司", PinyinFull: "guizhoumaotai", PinyinInitials: "gzmt", Status: "LISTED"},
+		{Symbol: "CN:SH:601398", Market: "CN", Exchange: "SH", Code: "601398", Name: "工商银行", PinyinFull: "gongshangyinhang", PinyinInitials: "gsyh", Status: "LISTED"},
+	}); err != nil {
+		t.Fatalf("seed stocks: %v", err)
+	}
+
+	candidates, err := store.ListStocksForSearch(ctx, "gzmt", nil, 10)
+	if err != nil {
+		t.Fatalf("list stock search candidates: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Symbol != "CN:SH:600519" {
+		t.Fatalf("unexpected local candidates: %+v", candidates)
+	}
+
+	bySymbols, err := store.ListStocksForSearch(ctx, "", []string{"CN:SH:601398", "CN:SH:600519"}, 10)
+	if err != nil {
+		t.Fatalf("list stock candidates by symbols: %v", err)
+	}
+	if len(bySymbols) != 2 || bySymbols[0].Symbol != "CN:SH:601398" || bySymbols[1].Symbol != "CN:SH:600519" {
+		t.Fatalf("expected symbol order preserved, got %+v", bySymbols)
+	}
+}
+
+// TestStockSearchRepositoryListsAllStocksForRebuild 验证全量重建能读取所有股票基础信息。
+func TestStockSearchRepositoryListsAllStocksForRebuild(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.UpsertStocks(ctx, []model.Stock{
+		{Symbol: "CN:SH:600519", Market: "CN", Exchange: "SH", Code: "600519", Name: "贵州茅台"},
+		{Symbol: "CN:SH:601398", Market: "CN", Exchange: "SH", Code: "601398", Name: "工商银行"},
+	}); err != nil {
+		t.Fatalf("seed stocks: %v", err)
+	}
+
+	stocks, err := store.ListAllStocksForSearch(ctx)
+	if err != nil {
+		t.Fatalf("list all stocks for search: %v", err)
+	}
+	if len(stocks) != 2 || stocks[0].Symbol != "CN:SH:600519" || stocks[1].Symbol != "CN:SH:601398" {
+		t.Fatalf("unexpected rebuild stocks: %+v", stocks)
+	}
+}
+
+// TestStockAliasRepositoryListsBySymbols 验证股票别名能按 symbol 批量读取。
+func TestStockAliasRepositoryListsBySymbols(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.db.WithContext(ctx).Create(&model.StockAlias{Symbol: "CN:SH:600519", Alias: "茅台", AliasType: "manual"}).Error; err != nil {
+		t.Fatalf("seed stock alias: %v", err)
+	}
+
+	aliases, err := store.ListStockAliasesBySymbols(ctx, []string{"CN:SH:600519", "CN:SH:601398"})
+	if err != nil {
+		t.Fatalf("list stock aliases by symbols: %v", err)
+	}
+	if len(aliases["CN:SH:600519"]) != 1 || aliases["CN:SH:600519"][0].Alias != "茅台" {
+		t.Fatalf("unexpected aliases: %+v", aliases)
+	}
+	if len(aliases["CN:SH:601398"]) != 0 {
+		t.Fatalf("expected empty alias slice for missing symbol, got %+v", aliases)
+	}
+}
+
+// TestSearchDocumentRepositoryListsByUIDsInMatchOrder 验证菜单搜索回表保留 FTS 命中顺序并排除软删除文档。
+func TestSearchDocumentRepositoryListsByUIDsInMatchOrder(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	first := model.SearchDocument{BatchID: "doc-ready-1", DocUID: "report:1", DocType: "report", RefTable: "analysis_reports", RefID: "1", Title: "第一篇", SourceTime: time.Date(2026, 6, 21, 9, 0, 0, 0, time.UTC)}
+	second := model.SearchDocument{BatchID: "doc-ready-1", DocUID: "report:2", DocType: "report", RefTable: "analysis_reports", RefID: "2", Title: "第二篇", SourceTime: time.Date(2026, 6, 22, 9, 0, 0, 0, time.UTC)}
+	deleted := model.SearchDocument{BatchID: "doc-ready-1", DocUID: "report:3", DocType: "report", RefTable: "analysis_reports", RefID: "3", Title: "已删除"}
+
+	for _, document := range []*model.SearchDocument{&first, &second, &deleted} {
+		if err := store.UpsertSearchDocument(ctx, document); err != nil {
+			t.Fatalf("seed search document: %v", err)
+		}
+	}
+	if err := store.SoftDeleteSearchDocument(ctx, "doc-ready-1", "report:3"); err != nil {
+		t.Fatalf("soft delete search document: %v", err)
+	}
+
+	documents, err := store.ListSearchDocumentsByUIDs(ctx, "doc-ready-1", []string{"report:2", "report:3", "report:1"})
+	if err != nil {
+		t.Fatalf("list search documents by uids: %v", err)
+	}
+	if len(documents) != 2 || documents[0].DocUID != "report:2" || documents[1].DocUID != "report:1" {
+		t.Fatalf("expected matched order without deleted document, got %+v", documents)
+	}
+}
+
 // TestMarketQuoteRepositoryUpsertsBySymbol 验证行情快照缓存按 symbol 幂等更新并支持短缓存读取。
 func TestMarketQuoteRepositoryUpsertsBySymbol(t *testing.T) {
 	store := newTestStore(t)
@@ -454,6 +551,407 @@ func TestReportRepositoryUpsertsByTaskID(t *testing.T) {
 	}
 	if len(reports) != 0 {
 		t.Fatalf("expected deleted report hidden, got %+v", reports)
+	}
+}
+
+// TestSearchIndexRepositoryStoresActiveBatches 验证搜索索引状态表能稳定保存当前可查询 batch。
+func TestSearchIndexRepositoryStoresActiveBatches(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.SetSearchIndexState(ctx, "active_stock_batch_id", "stock-batch-1"); err != nil {
+		t.Fatalf("set active stock batch: %v", err)
+	}
+	if err := store.SetSearchIndexState(ctx, "active_document_batch_id", "doc-batch-1"); err != nil {
+		t.Fatalf("set active document batch: %v", err)
+	}
+	if err := store.SetSearchIndexState(ctx, "active_stock_batch_id", "stock-batch-2"); err != nil {
+		t.Fatalf("update active stock batch: %v", err)
+	}
+
+	stockBatch, ok, err := store.GetSearchIndexState(ctx, "active_stock_batch_id")
+	if err != nil {
+		t.Fatalf("get active stock batch: %v", err)
+	}
+	if !ok || stockBatch != "stock-batch-2" {
+		t.Fatalf("unexpected active stock batch: ok=%v value=%q", ok, stockBatch)
+	}
+	documentBatch, ok, err := store.GetSearchIndexState(ctx, "active_document_batch_id")
+	if err != nil {
+		t.Fatalf("get active document batch: %v", err)
+	}
+	if !ok || documentBatch != "doc-batch-1" {
+		t.Fatalf("unexpected active document batch: ok=%v value=%q", ok, documentBatch)
+	}
+}
+
+// TestSearchIndexBatchRepositoryKeepsReadyBatchActive 验证失败重建不会覆盖旧的 READY batch。
+func TestSearchIndexBatchRepositoryKeepsReadyBatchActive(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	readyBatch := model.SearchIndexBatch{
+		BatchID:             "stock-ready-1",
+		Scope:               "stock",
+		Status:              SearchIndexBatchStatusReady,
+		SourceSchemaVersion: 1,
+	}
+	if err := store.SaveSearchIndexBatch(ctx, &readyBatch); err != nil {
+		t.Fatalf("save ready batch: %v", err)
+	}
+	if err := store.SetSearchIndexState(ctx, "active_stock_batch_id", readyBatch.BatchID); err != nil {
+		t.Fatalf("activate ready batch: %v", err)
+	}
+
+	failedBatch := model.SearchIndexBatch{
+		BatchID:             "stock-building-2",
+		Scope:               "stock",
+		Status:              SearchIndexBatchStatusBuilding,
+		SourceSchemaVersion: 1,
+	}
+	if err := store.SaveSearchIndexBatch(ctx, &failedBatch); err != nil {
+		t.Fatalf("save building batch: %v", err)
+	}
+	failedBatch.Status = SearchIndexBatchStatusFailed
+	failedBatch.ErrorMessage = "fts rebuild failed"
+	if err := store.SaveSearchIndexBatch(ctx, &failedBatch); err != nil {
+		t.Fatalf("mark failed batch: %v", err)
+	}
+
+	activeBatch, ok, err := store.GetSearchIndexState(ctx, "active_stock_batch_id")
+	if err != nil {
+		t.Fatalf("get active batch after failed rebuild: %v", err)
+	}
+	if !ok || activeBatch != readyBatch.BatchID {
+		t.Fatalf("failed rebuild must keep old active batch, got ok=%v value=%q", ok, activeBatch)
+	}
+}
+
+// TestSearchIndexBatchRepositoryActivatesReadyBatchesAtomically 验证 READY batch 切换会更新 active 指针并退休旧 batch。
+func TestSearchIndexBatchRepositoryActivatesReadyBatchesAtomically(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	oldStock := model.SearchIndexBatch{BatchID: "stock-old", Scope: "stock", Status: SearchIndexBatchStatusReady, SourceSchemaVersion: 1}
+	oldDocument := model.SearchIndexBatch{BatchID: "doc-old", Scope: "document", Status: SearchIndexBatchStatusReady, SourceSchemaVersion: 1}
+	newStock := model.SearchIndexBatch{BatchID: "stock-new", Scope: "stock", Status: SearchIndexBatchStatusReady, SourceSchemaVersion: 1}
+	newDocument := model.SearchIndexBatch{BatchID: "doc-new", Scope: "document", Status: SearchIndexBatchStatusReady, SourceSchemaVersion: 1}
+	for _, batch := range []*model.SearchIndexBatch{&oldStock, &oldDocument, &newStock, &newDocument} {
+		if err := store.SaveSearchIndexBatch(ctx, batch); err != nil {
+			t.Fatalf("save batch: %v", err)
+		}
+	}
+	if err := store.SetSearchIndexState(ctx, "active_stock_batch_id", oldStock.BatchID); err != nil {
+		t.Fatalf("set old stock active: %v", err)
+	}
+	if err := store.SetSearchIndexState(ctx, "active_document_batch_id", oldDocument.BatchID); err != nil {
+		t.Fatalf("set old document active: %v", err)
+	}
+
+	if err := store.ActivateSearchIndexBatches(ctx, newStock.BatchID, newDocument.BatchID); err != nil {
+		t.Fatalf("activate search index batches: %v", err)
+	}
+
+	activeStock, ok, err := store.GetSearchIndexState(ctx, "active_stock_batch_id")
+	if err != nil || !ok || activeStock != newStock.BatchID {
+		t.Fatalf("unexpected active stock batch: value=%q ok=%v err=%v", activeStock, ok, err)
+	}
+	activeDocument, ok, err := store.GetSearchIndexState(ctx, "active_document_batch_id")
+	if err != nil || !ok || activeDocument != newDocument.BatchID {
+		t.Fatalf("unexpected active document batch: value=%q ok=%v err=%v", activeDocument, ok, err)
+	}
+
+	var retired []model.SearchIndexBatch
+	if err := store.db.WithContext(ctx).Where("status = ?", SearchIndexBatchStatusRetired).Find(&retired).Error; err != nil {
+		t.Fatalf("list retired batches: %v", err)
+	}
+	if len(retired) != 2 {
+		t.Fatalf("expected old batches retired, got %+v", retired)
+	}
+}
+
+// TestSearchIndexOverviewCountsActiveBatches 验证设置中心索引概览只统计 active batch，并返回词典元数据。
+func TestSearchIndexOverviewCountsActiveBatches(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	stockFinishedAt := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)
+	documentFinishedAt := time.Date(2026, 6, 22, 13, 30, 0, 0, time.UTC)
+	stockBatch := model.SearchIndexBatch{
+		BatchID:             "stock-ready-1",
+		Scope:               "stock",
+		Status:              SearchIndexBatchStatusReady,
+		SourceSchemaVersion: 1,
+		TokenizerName:       "simple",
+		TokenizerVersion:    "1",
+		DictionaryHash:      "builtin",
+		FinishedAt:          &stockFinishedAt,
+	}
+	documentBatch := model.SearchIndexBatch{
+		BatchID:             "document-ready-1",
+		Scope:               "document",
+		Status:              SearchIndexBatchStatusReady,
+		SourceSchemaVersion: 1,
+		TokenizerName:       "simple",
+		TokenizerVersion:    "1",
+		DictionaryHash:      "builtin",
+		FinishedAt:          &documentFinishedAt,
+	}
+	for _, batch := range []*model.SearchIndexBatch{&stockBatch, &documentBatch} {
+		if err := store.SaveSearchIndexBatch(ctx, batch); err != nil {
+			t.Fatalf("save search index batch: %v", err)
+		}
+	}
+	if err := store.ReplaceStockSearchFTS(ctx, stockBatch.BatchID, []StockSearchFTSRow{
+		{Symbol: "CN:SH:600519", Market: "CN", Exchange: "SH", Code: "600519", NameIndex: "贵州茅台"},
+		{Symbol: "CN:SZ:000001", Market: "CN", Exchange: "SZ", Code: "000001", NameIndex: "平安银行"},
+	}); err != nil {
+		t.Fatalf("replace stock fts: %v", err)
+	}
+	for _, document := range []model.SearchDocument{
+		{BatchID: documentBatch.BatchID, DocUID: "report:1", DocType: "report", RefTable: "analysis_reports", RefID: "1", Title: "报告"},
+		{BatchID: documentBatch.BatchID, DocUID: "news:2", DocType: "news", RefTable: "news_items", RefID: "2", Title: "新闻"},
+		{BatchID: documentBatch.BatchID, DocUID: "news:3", DocType: "news", RefTable: "news_items", RefID: "3", Title: "新闻二"},
+		{BatchID: documentBatch.BatchID, DocUID: "watchlist_note:4", DocType: "watchlist_note", RefTable: "watchlists", RefID: "4", Title: "备注"},
+		{BatchID: "document-old", DocUID: "report:old", DocType: "report", RefTable: "analysis_reports", RefID: "99", Title: "旧报告"},
+	} {
+		doc := document
+		if err := store.UpsertSearchDocument(ctx, &doc); err != nil {
+			t.Fatalf("upsert search document: %v", err)
+		}
+	}
+
+	overview, err := store.GetSearchIndexOverview(ctx, stockBatch.BatchID, documentBatch.BatchID)
+	if err != nil {
+		t.Fatalf("get search index overview: %v", err)
+	}
+	if overview.StockCount != 2 || overview.ReportCount != 1 || overview.NewsCount != 2 || overview.WatchlistNoteCount != 1 {
+		t.Fatalf("unexpected overview counts: %+v", overview)
+	}
+	if overview.LastRebuildAt == nil || !overview.LastRebuildAt.Equal(documentFinishedAt) {
+		t.Fatalf("unexpected last rebuild time: %+v", overview.LastRebuildAt)
+	}
+	if overview.TokenizerName != "simple" || overview.TokenizerVersion != "1" || overview.DictionaryHash != "builtin" {
+		t.Fatalf("unexpected tokenizer metadata: %+v", overview)
+	}
+}
+
+// TestSearchIndexBatchRepositoryRejectsNonReadyActivation 验证非 READY batch 不能切换 active 指针。
+func TestSearchIndexBatchRepositoryRejectsNonReadyActivation(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	oldStock := model.SearchIndexBatch{BatchID: "stock-old", Scope: "stock", Status: SearchIndexBatchStatusReady, SourceSchemaVersion: 1}
+	buildingDocument := model.SearchIndexBatch{BatchID: "doc-building", Scope: "document", Status: SearchIndexBatchStatusBuilding, SourceSchemaVersion: 1}
+	if err := store.SaveSearchIndexBatch(ctx, &oldStock); err != nil {
+		t.Fatalf("save old stock batch: %v", err)
+	}
+	if err := store.SaveSearchIndexBatch(ctx, &buildingDocument); err != nil {
+		t.Fatalf("save building document batch: %v", err)
+	}
+	if err := store.SetSearchIndexState(ctx, "active_stock_batch_id", oldStock.BatchID); err != nil {
+		t.Fatalf("set old stock active: %v", err)
+	}
+
+	if err := store.ActivateSearchIndexBatches(ctx, oldStock.BatchID, buildingDocument.BatchID); err == nil {
+		t.Fatal("expected non-ready document batch activation to fail")
+	}
+	activeStock, ok, err := store.GetSearchIndexState(ctx, "active_stock_batch_id")
+	if err != nil || !ok || activeStock != oldStock.BatchID {
+		t.Fatalf("failed activation must preserve old stock active batch, value=%q ok=%v err=%v", activeStock, ok, err)
+	}
+}
+
+// TestStockSearchFTSRepositoryFiltersByBatch 验证股票 FTS 查询只读取指定 batch，避免 BUILDING batch 泄露。
+func TestStockSearchFTSRepositoryFiltersByBatch(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.ReplaceStockSearchFTS(ctx, "stock-ready-1", []StockSearchFTSRow{{
+		Symbol:         "CN:SH:600519",
+		Market:         "CN",
+		Exchange:       "SH",
+		Code:           "600519",
+		CodePrefix:     "600",
+		NameIndex:      "贵州茅台 maotai",
+		FullNameIndex:  "贵州茅台酒股份有限公司",
+		AliasIndex:     "茅台",
+		PinyinFull:     "guizhoumaotai",
+		PinyinInitials: "gzmt",
+		IndustryIndex:  "白酒",
+		ConceptIndex:   "消费",
+	}}); err != nil {
+		t.Fatalf("replace ready stock fts: %v", err)
+	}
+	if err := store.ReplaceStockSearchFTS(ctx, "stock-building-2", []StockSearchFTSRow{{
+		Symbol:         "CN:SH:601398",
+		Market:         "CN",
+		Exchange:       "SH",
+		Code:           "601398",
+		CodePrefix:     "601",
+		NameIndex:      "工商银行 maotai",
+		PinyinFull:     "gongshangyinhang",
+		PinyinInitials: "gsyh",
+	}}); err != nil {
+		t.Fatalf("replace building stock fts: %v", err)
+	}
+
+	matches, err := store.SearchStockFTS(ctx, "stock-ready-1", "maotai", 10)
+	if err != nil {
+		t.Fatalf("search ready stock fts: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Symbol != "CN:SH:600519" {
+		t.Fatalf("expected only ready batch stock, got %+v", matches)
+	}
+}
+
+// TestSearchDocumentRepositorySoftDeleteRemovesFTS 验证菜单文档软删除后不会继续被 FTS 命中。
+func TestSearchDocumentRepositorySoftDeleteRemovesFTS(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	sourceTime := time.Date(2026, 6, 22, 9, 30, 0, 0, time.UTC)
+
+	document := model.SearchDocument{
+		BatchID:    "doc-ready-1",
+		DocUID:     "report:task-1",
+		DocType:    "report",
+		RefTable:   "analysis_reports",
+		RefID:      "task-1",
+		Symbol:     "CN:SH:600519",
+		Title:      "贵州茅台分析报告",
+		Summary:    "sanitized momentum summary",
+		Source:     "analysis_report",
+		SourceTime: sourceTime,
+		IndexedAt:  sourceTime,
+	}
+	if err := store.UpsertSearchDocument(ctx, &document); err != nil {
+		t.Fatalf("upsert search document: %v", err)
+	}
+	if err := store.ReplaceSearchDocumentFTS(ctx, SearchDocumentFTSRow{
+		BatchID:     document.BatchID,
+		DocUID:      document.DocUID,
+		DocType:     document.DocType,
+		Symbol:      document.Symbol,
+		TitleIndex:  document.Title,
+		BodyIndex:   document.Summary,
+		TagIndex:    "report stock_full",
+		PinyinIndex: "guizhoumaotai",
+	}); err != nil {
+		t.Fatalf("replace search document fts: %v", err)
+	}
+
+	matches, err := store.SearchDocumentsFTS(ctx, "doc-ready-1", "report", "guizhoumaotai", 10)
+	if err != nil {
+		t.Fatalf("search documents fts: %v", err)
+	}
+	if len(matches) != 1 || matches[0].DocUID != document.DocUID {
+		t.Fatalf("expected document match, got %+v", matches)
+	}
+
+	if err := store.SoftDeleteSearchDocument(ctx, document.BatchID, document.DocUID); err != nil {
+		t.Fatalf("soft delete search document: %v", err)
+	}
+	matches, err = store.SearchDocumentsFTS(ctx, "doc-ready-1", "report", "guizhoumaotai", 10)
+	if err != nil {
+		t.Fatalf("search documents fts after delete: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("expected soft deleted document removed from fts, got %+v", matches)
+	}
+}
+
+// TestSearchIndexJobRepositoryMergesDuplicatePendingJobs 验证同一对象的重复索引任务会被 outbox 合并。
+func TestSearchIndexJobRepositoryMergesDuplicatePendingJobs(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	job := model.SearchIndexJob{
+		DocType:   "report",
+		RefID:     "report-1",
+		Operation: "upsert",
+		Status:    SearchIndexJobStatusPending,
+	}
+	if err := store.UpsertSearchIndexJob(ctx, job); err != nil {
+		t.Fatalf("upsert first search index job: %v", err)
+	}
+	job.Attempts = 1
+	job.LastError = "previous retry failed"
+	if err := store.UpsertSearchIndexJob(ctx, job); err != nil {
+		t.Fatalf("upsert duplicate search index job: %v", err)
+	}
+
+	jobs, err := store.ListRunnableSearchIndexJobs(ctx, 10)
+	if err != nil {
+		t.Fatalf("list runnable search index jobs: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected duplicate job to merge, got %+v", jobs)
+	}
+	if jobs[0].DocType != "report" || jobs[0].RefID != "report-1" || jobs[0].Attempts != 1 {
+		t.Fatalf("unexpected merged job: %+v", jobs[0])
+	}
+	requireCount(t, store, &model.SearchIndexJob{}, 1)
+}
+
+// TestSearchIndexJobRepositoryRecoversRunningJobs 验证进程重启后 RUNNING 任务会回到可重试队列。
+func TestSearchIndexJobRepositoryRecoversRunningJobs(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.UpsertSearchIndexJob(ctx, model.SearchIndexJob{
+		DocType:   "news",
+		RefID:     "news-1",
+		Operation: "delete",
+		Status:    SearchIndexJobStatusRunning,
+		Attempts:  2,
+	}); err != nil {
+		t.Fatalf("insert running search index job: %v", err)
+	}
+	if err := store.RecoverRunningSearchIndexJobs(ctx); err != nil {
+		t.Fatalf("recover running search index jobs: %v", err)
+	}
+
+	jobs, err := store.ListRunnableSearchIndexJobs(ctx, 10)
+	if err != nil {
+		t.Fatalf("list recovered search index jobs: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].Status != SearchIndexJobStatusFailedRetryable || jobs[0].Attempts != 2 {
+		t.Fatalf("unexpected recovered job: %+v", jobs)
+	}
+}
+
+// TestSearchIndexJobRepositoryMarksTerminalStatus 验证 outbox 状态更新会保存终态并脱敏错误摘要。
+func TestSearchIndexJobRepositoryMarksTerminalStatus(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.UpsertSearchIndexJob(ctx, model.SearchIndexJob{
+		DocType:   "watchlist_note",
+		RefID:     "watchlist-1",
+		Operation: "upsert",
+		Status:    SearchIndexJobStatusPending,
+	}); err != nil {
+		t.Fatalf("insert terminal status job: %v", err)
+	}
+	jobs, err := store.ListRunnableSearchIndexJobs(ctx, 10)
+	if err != nil {
+		t.Fatalf("list terminal status job: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected one terminal status job, got %+v", jobs)
+	}
+
+	if err := store.MarkSearchIndexJobStatus(ctx, jobs[0].ID, SearchIndexJobStatusFailedFinal, "raw_api_key=sk-secret"); err != nil {
+		t.Fatalf("mark failed final job: %v", err)
+	}
+	var stored model.SearchIndexJob
+	if err := store.db.WithContext(ctx).First(&stored, jobs[0].ID).Error; err != nil {
+		t.Fatalf("get terminal status job: %v", err)
+	}
+	if stored.Status != SearchIndexJobStatusFailedFinal {
+		t.Fatalf("unexpected terminal status: %+v", stored)
+	}
+	if strings.Contains(stored.LastError, "sk-secret") {
+		t.Fatalf("expected terminal error redacted, got %q", stored.LastError)
 	}
 }
 

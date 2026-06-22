@@ -114,12 +114,14 @@ func (writer *AsyncWriter) LastError() error {
 	return writer.lastErr
 }
 
+// isClosed 判断异步写入器是否已经进入关闭流程。
 func (writer *AsyncWriter) isClosed() bool {
 	writer.mu.Lock()
 	defer writer.mu.Unlock()
 	return writer.closed
 }
 
+// run 驱动后台批量 flush 循环。
 func (writer *AsyncWriter) run() {
 	defer close(writer.stopped)
 	ticker := time.NewTicker(writer.flushInterval)
@@ -142,6 +144,7 @@ func (writer *AsyncWriter) run() {
 	}
 }
 
+// drain 在关闭时尽量取出队列中尚未写出的日志。
 func (writer *AsyncWriter) drain(batch []model.TaskLogEntry) []model.TaskLogEntry {
 	for {
 		select {
@@ -153,6 +156,7 @@ func (writer *AsyncWriter) drain(batch []model.TaskLogEntry) []model.TaskLogEntr
 	}
 }
 
+// flush 将当前批次复制后交给 appender 落库。
 func (writer *AsyncWriter) flush(ctx context.Context, batch []model.TaskLogEntry) []model.TaskLogEntry {
 	if len(batch) == 0 {
 		return batch[:0]

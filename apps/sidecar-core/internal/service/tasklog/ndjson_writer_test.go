@@ -96,6 +96,7 @@ func TestNDJSONWriterRetentionDeletesExpiredAndOldestFiles(t *testing.T) {
 	assertFileExists(t, ignoredPath)
 }
 
+// newTestNDJSONWriter 创建测试用 NDJSON writer 并直接失败非法配置。
 func newTestNDJSONWriter(t *testing.T, config NDJSONWriterConfig) *NDJSONWriter {
 	t.Helper()
 	writer, err := NewNDJSONWriter(config)
@@ -105,6 +106,7 @@ func newTestNDJSONWriter(t *testing.T, config NDJSONWriterConfig) *NDJSONWriter 
 	return writer
 }
 
+// readFile 读取测试日志文件内容并保留行尾换行。
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	file, err := os.Open(path)
@@ -124,6 +126,7 @@ func readFile(t *testing.T, path string) string {
 	return builder.String()
 }
 
+// writeFileWithModTime 写入测试文件并设置修改时间。
 func writeFileWithModTime(t *testing.T, path string, content string, modTime time.Time) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -134,6 +137,7 @@ func writeFileWithModTime(t *testing.T, path string, content string, modTime tim
 	}
 }
 
+// assertFileExists 断言指定路径仍存在。
 func assertFileExists(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); err != nil {
@@ -141,6 +145,7 @@ func assertFileExists(t *testing.T, path string) {
 	}
 }
 
+// assertFileMissing 断言指定路径已被清理。
 func assertFileMissing(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); !os.IsNotExist(err) {

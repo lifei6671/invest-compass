@@ -218,6 +218,7 @@ func (store *Store) PruneTaskLogs(ctx context.Context, options TaskLogRetentionO
 	return result, err
 }
 
+// normalizeTaskLogLimit 归一化任务日志分页上限并拒绝越界参数。
 func normalizeTaskLogLimit(limit int) (int, error) {
 	if limit == 0 {
 		return defaultTaskLogLimit, nil
@@ -231,6 +232,7 @@ func normalizeTaskLogLimit(limit int) (int, error) {
 	return limit, nil
 }
 
+// pruneTaskLogPerTaskOverflow 按单任务保留上限删除最旧日志。
 func pruneTaskLogPerTaskOverflow(tx *gorm.DB, limit int) (int64, error) {
 	var taskIDs []string
 	if err := tx.Model(&model.TaskLogEntry{}).Distinct("task_id").Pluck("task_id", &taskIDs).Error; err != nil {
@@ -268,6 +270,7 @@ func pruneTaskLogPerTaskOverflow(tx *gorm.DB, limit int) (int64, error) {
 	return deleted, nil
 }
 
+// pruneTaskLogTotalOverflow 按全局保留上限删除最旧日志。
 func pruneTaskLogTotalOverflow(tx *gorm.DB, limit int) (int64, error) {
 	var count int64
 	if err := tx.Model(&model.TaskLogEntry{}).Count(&count).Error; err != nil {

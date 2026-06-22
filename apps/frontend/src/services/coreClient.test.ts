@@ -44,6 +44,11 @@ import {
   schedulerRunsList,
   schedulerRunsTrigger,
   schedulerStatus,
+  searchNews,
+  searchRebuild,
+  searchReports,
+  searchStatus,
+  searchWatchlistNotes,
   stockSearch,
   settingsGet,
   settingsSet,
@@ -742,6 +747,246 @@ describe("coreClient", () => {
       { command: "providers_status", payload: {} },
       { command: "check_update", payload: {} },
       { command: "export_logs", payload: { targetDir: "/tmp" } },
+    ]);
+  });
+
+  test("搜索索引管理通过固定 Tauri command 读取状态并触发重建", async () => {
+    const calls: Array<{ command: string; payload?: unknown }> = [];
+    mockIPC((command, payload) => {
+      calls.push({ command, payload });
+      switch (command) {
+        case "search_status":
+          return {
+            code: 0,
+            message: "ok",
+            data: {
+              fts5_status: "available",
+              search_status: "ready",
+              active_stock_batch_id: "stock-ready-1",
+              active_document_batch_id: "doc-ready-1",
+              running_rebuild_task_id: "",
+            },
+          };
+        case "search_rebuild":
+          return {
+            code: 0,
+            message: "ok",
+            data: {
+              task_id: "task-search-1",
+              scope: "reports",
+              stock_batch_id: "stock-ready-1",
+              document_batch_id: "doc-building-1",
+            },
+          };
+        default:
+          throw new Error(`unexpected command ${command}`);
+      }
+    });
+
+    await expect(searchStatus()).resolves.toMatchObject({
+      fts5_status: "available",
+      active_stock_batch_id: "stock-ready-1",
+      active_document_batch_id: "doc-ready-1",
+    });
+    await expect(searchRebuild({ scope: "reports", force: false })).resolves.toEqual({
+      task_id: "task-search-1",
+      scope: "reports",
+      stock_batch_id: "stock-ready-1",
+      document_batch_id: "doc-building-1",
+    });
+
+    expect(calls).toEqual([
+      { command: "search_status", payload: {} },
+      { command: "search_rebuild", payload: { payload: { scope: "reports", force: false } } },
+    ]);
+  });
+
+  test("报告历史菜单搜索通过固定 search_reports command 查询报告范围", async () => {
+    const calls: Array<{ command: string; payload?: unknown }> = [];
+    mockIPC((command, payload) => {
+      calls.push({ command, payload });
+      return {
+        code: 0,
+        message: "ok",
+        data: [
+          {
+            doc_uid: "report:7",
+            doc_type: "report",
+            ref_id: "7",
+            symbol: "CN:SH:600519",
+            title: "贵州茅台 个股综合分析",
+            summary: "消费复苏与估值波动",
+            source: "analysis_report",
+            source_time: "2026-06-22T09:00:00Z",
+            score: 1,
+            highlights: ["消费复苏"],
+          },
+        ],
+      };
+    });
+
+    await expect(
+      searchReports({
+        keyword: "茅台",
+        symbols: ["CN:SH:600519"],
+        limit: 20,
+        offset: 0,
+        sort: "relevance",
+      }),
+    ).resolves.toEqual([
+      {
+        doc_uid: "report:7",
+        doc_type: "report",
+        ref_id: "7",
+        symbol: "CN:SH:600519",
+        title: "贵州茅台 个股综合分析",
+        summary: "消费复苏与估值波动",
+        source: "analysis_report",
+        source_time: "2026-06-22T09:00:00Z",
+        score: 1,
+        highlights: ["消费复苏"],
+      },
+    ]);
+
+    expect(calls).toEqual([
+      {
+        command: "search_reports",
+        payload: {
+          payload: {
+            keyword: "茅台",
+            symbols: ["CN:SH:600519"],
+            limit: 20,
+            offset: 0,
+            sort: "relevance",
+          },
+        },
+      },
+    ]);
+  });
+
+  test("资讯中心菜单搜索通过固定 search_news command 查询资讯范围", async () => {
+    const calls: Array<{ command: string; payload?: unknown }> = [];
+    mockIPC((command, payload) => {
+      calls.push({ command, payload });
+      return {
+        code: 0,
+        message: "ok",
+        data: [
+          {
+            doc_uid: "news:9",
+            doc_type: "news",
+            ref_id: "9",
+            symbol: "CN:SZ:300308",
+            title: "光模块订单增长",
+            summary: "800G 需求拉动",
+            source: "财联社",
+            source_time: "2026-06-22T10:00:00Z",
+            score: 1,
+            highlights: ["光模块"],
+          },
+        ],
+      };
+    });
+
+    await expect(
+      searchNews({
+        keyword: "光模块",
+        symbols: ["CN:SZ:300308"],
+        limit: 20,
+        offset: 0,
+        sort: "relevance",
+      }),
+    ).resolves.toEqual([
+      {
+        doc_uid: "news:9",
+        doc_type: "news",
+        ref_id: "9",
+        symbol: "CN:SZ:300308",
+        title: "光模块订单增长",
+        summary: "800G 需求拉动",
+        source: "财联社",
+        source_time: "2026-06-22T10:00:00Z",
+        score: 1,
+        highlights: ["光模块"],
+      },
+    ]);
+
+    expect(calls).toEqual([
+      {
+        command: "search_news",
+        payload: {
+          payload: {
+            keyword: "光模块",
+            symbols: ["CN:SZ:300308"],
+            limit: 20,
+            offset: 0,
+            sort: "relevance",
+          },
+        },
+      },
+    ]);
+  });
+
+  test("自选备注菜单搜索通过固定 search_watchlist_notes command 查询备注范围", async () => {
+    const calls: Array<{ command: string; payload?: unknown }> = [];
+    mockIPC((command, payload) => {
+      calls.push({ command, payload });
+      return {
+        code: 0,
+        message: "ok",
+        data: [
+          {
+            doc_uid: "watchlist_note:7",
+            doc_type: "watchlist_note",
+            ref_id: "7",
+            symbol: "CN:SZ:300308",
+            title: "中际旭创",
+            summary: "北美客户订单",
+            source: "watchlist_note",
+            source_time: "2026-06-22T10:00:00Z",
+            score: 1,
+            highlights: ["光模块"],
+          },
+        ],
+      };
+    });
+
+    await expect(
+      searchWatchlistNotes({
+        keyword: "北美客户",
+        symbols: ["CN:SZ:300308"],
+        limit: 20,
+        offset: 0,
+        sort: "relevance",
+      }),
+    ).resolves.toEqual([
+      {
+        doc_uid: "watchlist_note:7",
+        doc_type: "watchlist_note",
+        ref_id: "7",
+        symbol: "CN:SZ:300308",
+        title: "中际旭创",
+        summary: "北美客户订单",
+        source: "watchlist_note",
+        source_time: "2026-06-22T10:00:00Z",
+        score: 1,
+        highlights: ["光模块"],
+      },
+    ]);
+
+    expect(calls).toEqual([
+      {
+        command: "search_watchlist_notes",
+        payload: {
+          payload: {
+            keyword: "北美客户",
+            symbols: ["CN:SZ:300308"],
+            limit: 20,
+            offset: 0,
+            sort: "relevance",
+          },
+        },
+      },
     ]);
   });
 

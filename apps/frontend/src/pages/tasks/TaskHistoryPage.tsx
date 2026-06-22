@@ -1,27 +1,44 @@
 import { useMemo, useState } from "react";
 import { App as AntApp, Drawer, Grid } from "antd";
 import { InfoCircleFilled, SafetyCertificateOutlined } from "@ant-design/icons";
-import { initialTaskFilters, initialTaskItems, taskEvents, taskSummary } from "./mock";
-import type { TaskFilters, TaskItem, TaskSortMode } from "./types";
+import type { TaskEvent, TaskFilters, TaskItem, TaskSortMode, TaskSummary } from "./types";
 import { TaskDetailPanel } from "./components/TaskDetailPanel";
 import { TaskFilterCard } from "./components/TaskFilterCard";
 import { TaskLogDrawer } from "./components/TaskLogDrawer";
 import { TaskSummaryCards } from "./components/TaskSummaryCards";
 import { TaskTableCard } from "./components/TaskTableCard";
 
+const initialTaskFilters: TaskFilters = {
+  taskType: "全部类型",
+  status: "全部状态",
+  dateRangeLabel: "近7天",
+  dateRangeStart: "",
+  dateRangeEnd: "",
+  keyword: "",
+};
+
 export function TaskHistoryPage() {
   const { message } = AntApp.useApp();
   const screens = Grid.useBreakpoint();
   const [filters, setFilters] = useState<TaskFilters>(initialTaskFilters);
   const [appliedFilters, setAppliedFilters] = useState<TaskFilters>(initialTaskFilters);
-  const [tasks, setTasks] = useState<TaskItem[]>(initialTaskItems);
-  const [selectedTaskId, setSelectedTaskId] = useState(initialTaskItems[0]?.id ?? "");
+  const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [taskEvents] = useState<TaskEvent[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState("");
   const [detailOpen, setDetailOpen] = useState(false);
   const [logDrawerOpen, setLogDrawerOpen] = useState(false);
   const [sortMode, setSortMode] = useState<TaskSortMode>("按开始时间倒序");
 
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? tasks[0];
   const drawerWidth = screens.xl ? "50vw" : "100vw";
+  const taskSummary = useMemo<TaskSummary>(
+    () => ({
+      runningCount: tasks.filter((task) => task.status === "RUNNING").length,
+      successTodayCount: tasks.filter((task) => task.status === "SUCCESS").length,
+      failedCount: tasks.filter((task) => task.status === "FAILED").length,
+    }),
+    [tasks],
+  );
 
   const visibleTasks = useMemo(() => {
     const keyword = appliedFilters.keyword.trim().toLowerCase();
@@ -119,6 +136,7 @@ export function TaskHistoryPage() {
       <div className="task-history-content-grid">
         <TaskTableCard
           tasks={visibleTasks}
+          total={visibleTasks.length}
           selectedTaskId={selectedTask?.id ?? ""}
           sortMode={sortMode}
           onSortChange={handleSortChange}

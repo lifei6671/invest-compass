@@ -1,5 +1,5 @@
 import { FullscreenOutlined } from "@ant-design/icons";
-import { Button, Select } from "antd";
+import { Button, Empty, Select } from "antd";
 import type { OutputFormat } from "../types";
 
 type OutputPreviewCardProps = {
@@ -16,7 +16,6 @@ export function OutputPreviewCard(props: OutputPreviewCardProps) {
       <header className="analysis-output-header">
         <div className="analysis-output-title">
           <h2 className="analysis-card-title">输出预览</h2>
-          <span>（示例）</span>
         </div>
         <div className="analysis-output-tools">
           <Select
@@ -39,6 +38,10 @@ export function OutputPreviewCard(props: OutputPreviewCardProps) {
 }
 
 function MarkdownPreview(props: { markdown: string }) {
+  if (!props.markdown.trim()) {
+    return <Empty description="暂无输出内容" />;
+  }
+
   const lines = props.markdown.split("\n");
   return (
     <div className="analysis-markdown-preview">
@@ -62,5 +65,9 @@ function MarkdownPreview(props: { markdown: string }) {
 }
 
 function PlainTextPreview(props: { text: string }) {
+  if (!props.text.trim()) {
+    return <Empty description="暂无输出内容" />;
+  }
+
   return <pre className="analysis-plain-preview">{props.text}</pre>;
 }

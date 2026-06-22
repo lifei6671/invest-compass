@@ -16,6 +16,7 @@ type captureBatchAppender struct {
 	err     error
 }
 
+// Append 记录异步写入器提交的批次。
 func (appender *captureBatchAppender) Append(_ context.Context, entries []model.TaskLogEntry) error {
 	appender.mu.Lock()
 	defer appender.mu.Unlock()
@@ -23,12 +24,14 @@ func (appender *captureBatchAppender) Append(_ context.Context, entries []model.
 	return appender.err
 }
 
+// batchCount 返回已捕获的批次数量。
 func (appender *captureBatchAppender) batchCount() int {
 	appender.mu.Lock()
 	defer appender.mu.Unlock()
 	return len(appender.batches)
 }
 
+// totalEntries 返回所有批次中的日志总数。
 func (appender *captureBatchAppender) totalEntries() int {
 	appender.mu.Lock()
 	defer appender.mu.Unlock()
@@ -142,6 +145,7 @@ type blockingAppender struct {
 	startedCh chan struct{}
 }
 
+// Append 阻塞首个批次写入，用于制造队列满场景。
 func (appender *blockingAppender) Append(_ context.Context, _ []model.TaskLogEntry) error {
 	appender.once.Do(func() {
 		close(appender.startedCh)
@@ -150,6 +154,7 @@ func (appender *blockingAppender) Append(_ context.Context, _ []model.TaskLogEnt
 	return nil
 }
 
+// started 判断阻塞 appender 是否已经开始处理批次。
 func (appender *blockingAppender) started() bool {
 	select {
 	case <-appender.startedCh:
@@ -159,6 +164,7 @@ func (appender *blockingAppender) started() bool {
 	}
 }
 
+// shutdownAsyncWriter 在测试中带超时关闭异步写入器。
 func shutdownAsyncWriter(t *testing.T, writer *AsyncWriter) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -168,6 +174,7 @@ func shutdownAsyncWriter(t *testing.T, writer *AsyncWriter) {
 	}
 }
 
+// waitFor 等待异步断言条件在超时前成立。
 func waitFor(t *testing.T, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

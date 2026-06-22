@@ -1,8 +1,8 @@
-import { App as AntApp, Button, ConfigProvider, Input, Pagination, Select } from "antd";
+import { App as AntApp, Button, ConfigProvider, Empty, Input, Pagination, Select } from "antd";
 import { FilterOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { appAntdLocale } from "../../lib/antdLocale";
 import { WatchlistStockCard } from "./WatchlistStockCard";
-import type { WatchlistItem } from "./mock";
+import type { WatchlistItem } from "./types";
 
 type WatchlistCardGridProps = {
   items: WatchlistItem[];
@@ -12,20 +12,15 @@ type WatchlistCardGridProps = {
   onDelete: (item: WatchlistItem) => void;
   onView: (item: WatchlistItem) => void;
   onRefresh: () => void;
+  onSearch: () => void;
+  isSearching?: boolean;
+  emptyDescription?: string;
+  totalCount: number;
 };
-
-const cardOrder = [1, 2, 3, 8, 5, 6, 7, 10];
 
 export function WatchlistCardGrid(props: WatchlistCardGridProps) {
   const { message } = AntApp.useApp();
-  const orderedItems = [...props.items].sort((left, right) => {
-    const leftIndex = cardOrder.indexOf(left.id);
-    const rightIndex = cardOrder.indexOf(right.id);
-    const normalizedLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
-    const normalizedRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
-    return normalizedLeft - normalizedRight || left.id - right.id;
-  });
-  const visibleItems = orderedItems.slice(0, 8);
+  const visibleItems = props.items.slice(0, 8);
 
   const handleFilterChange = () => {
     message.info("筛选功能待接入");
@@ -42,11 +37,12 @@ export function WatchlistCardGrid(props: WatchlistCardGridProps) {
           prefix={<SearchOutlined className="text-slate-400" />}
           value={props.keyword}
           onChange={(event) => props.onKeywordChange(event.target.value)}
+          onPressEnter={props.onSearch}
         />
         <Button type="primary" className="h-9 shrink-0 px-4" onClick={props.onAdd}>
           + 添加自选
         </Button>
-        <Button className="h-9 shrink-0 px-4" icon={<ReloadOutlined />} onClick={props.onRefresh}>
+        <Button className="h-9 shrink-0 px-4" icon={<ReloadOutlined />} loading={props.isSearching} onClick={props.onRefresh}>
           批量刷新
         </Button>
         <div className="ml-auto flex shrink-0 items-center gap-3">
@@ -56,16 +52,22 @@ export function WatchlistCardGrid(props: WatchlistCardGridProps) {
         </div>
       </div>
 
-      <div className="grid min-w-0 grid-cols-[repeat(auto-fill,256px)] justify-start gap-4 overflow-x-auto pt-1 pb-1">
-        {visibleItems.map((item) => (
-          <WatchlistStockCard key={item.id} item={item} onDelete={props.onDelete} onView={props.onView} />
-        ))}
-      </div>
+      {visibleItems.length > 0 ? (
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fill,256px)] justify-start gap-4 overflow-x-auto pt-1 pb-1">
+          {visibleItems.map((item) => (
+            <WatchlistStockCard key={item.id} item={item} onDelete={props.onDelete} onView={props.onView} />
+          ))}
+        </div>
+      ) : (
+        <div className="flex min-h-[280px] items-center justify-center rounded-xl border border-dashed border-[#dbe5f2] bg-white">
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={props.emptyDescription ?? "暂无匹配自选股"} />
+        </div>
+      )}
 
       <div className="mt-4 flex shrink-0 items-center justify-between">
-        <span className="text-[14px] text-slate-700">共 56 条</span>
+        <span className="text-[14px] text-slate-700">共 {props.totalCount} 条</span>
         <ConfigProvider locale={appAntdLocale}>
-          <Pagination className="watchlist-pagination" current={1} total={56} pageSize={10} showQuickJumper showSizeChanger pageSizeOptions={[10]} onChange={() => undefined} />
+          <Pagination className="watchlist-pagination" current={1} total={props.totalCount} pageSize={10} showQuickJumper showSizeChanger pageSizeOptions={[10]} onChange={() => undefined} />
         </ConfigProvider>
       </div>
     </section>

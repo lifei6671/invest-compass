@@ -13,6 +13,7 @@ type adapterCaptureStageWriter struct {
 	err     error
 }
 
+// WriteTaskLog 捕获 adapter 转发的单条任务日志。
 func (writer *adapterCaptureStageWriter) WriteTaskLog(_ context.Context, entry model.TaskLogEntry) error {
 	writer.entries = append(writer.entries, entry)
 	return writer.err

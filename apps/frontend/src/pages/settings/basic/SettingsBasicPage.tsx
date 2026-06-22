@@ -1,12 +1,22 @@
 import { App as AntApp } from "antd";
 import { useCallback, useEffect, useState } from "react";
-import { cacheClean, cacheStats, type CacheStatsItem, type CacheStatsResult } from "../../../services/coreClient";
+import {
+  cacheClean,
+  cacheStats,
+  searchRebuild,
+  searchStatus,
+  type CacheStatsItem,
+  type CacheStatsResult,
+  type SearchIndexStatus,
+  type SearchRebuildPayload,
+} from "../../../services/coreClient";
 import { AppBasicSettingsCard } from "./components/AppBasicSettingsCard";
 import { CacheManagementCard } from "./components/CacheManagementCard";
 import { DesktopCapabilityCard } from "./components/DesktopCapabilityCard";
 import { NotificationSettingsCard } from "./components/NotificationSettingsCard";
 import { OtherSettingsCard } from "./components/OtherSettingsCard";
 import { ProxySummaryCard } from "./components/ProxySummaryCard";
+import { SearchIndexManagementCard } from "./components/SearchIndexManagementCard";
 import { WorkspaceSettingsCard } from "./components/WorkspaceSettingsCard";
 import { SettingsRiskNotice } from "../components/SettingsRiskNotice";
 import {
@@ -40,6 +50,9 @@ export function SettingsBasicPage() {
   const [desktopSettings, setDesktopSettings] = useState<DesktopSettingsState>(initialDesktopSettings);
   const [cacheSummary, setCacheSummary] = useState<CacheSummary>(initialCacheSummary);
   const [cacheLoading, setCacheLoading] = useState(false);
+  const [searchIndexStatus, setSearchIndexStatus] = useState<SearchIndexStatus | null>(null);
+  const [searchIndexLoading, setSearchIndexLoading] = useState(false);
+  const [rebuildingScope, setRebuildingScope] = useState<SearchRebuildPayload["scope"] | null>(null);
   const [otherSettings, setOtherSettings] = useState<OtherSettingsState>(initialOtherSettings);
 
   const loadCacheSummary = useCallback(async () => {
@@ -56,6 +69,22 @@ export function SettingsBasicPage() {
     void loadCacheSummary();
   }, [loadCacheSummary]);
 
+  const loadSearchIndexStatus = useCallback(async () => {
+    setSearchIndexLoading(true);
+    try {
+      setSearchIndexStatus(await searchStatus());
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "搜索索引状态读取失败");
+      setSearchIndexStatus(null);
+    } finally {
+      setSearchIndexLoading(false);
+    }
+  }, [message]);
+
+  useEffect(() => {
+    void loadSearchIndexStatus();
+  }, [loadSearchIndexStatus]);
+
   const handleCleanCache = async () => {
     const targets = cacheSummary.items.filter((item) => item.cleanable).map((item) => item.target);
     if (targets.length === 0) {
@@ -71,6 +100,19 @@ export function SettingsBasicPage() {
       message.error(error instanceof Error ? error.message : "缓存清理失败");
     } finally {
       setCacheLoading(false);
+    }
+  };
+
+  const handleRebuildSearchIndex = async (scope: SearchRebuildPayload["scope"]) => {
+    setRebuildingScope(scope);
+    try {
+      const result = await searchRebuild({ scope, force: false });
+      await loadSearchIndexStatus();
+      message.success(`索引重建任务已创建：${result.task_id}`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "索引重建失败");
+    } finally {
+      setRebuildingScope(null);
     }
   };
 
@@ -107,6 +149,13 @@ export function SettingsBasicPage() {
           value={cacheSummary}
           loading={cacheLoading}
           onCleanCache={handleCleanCache}
+        />
+        <SearchIndexManagementCard
+          value={searchIndexStatus}
+          loading={searchIndexLoading}
+          rebuildingScope={rebuildingScope}
+          onRefresh={loadSearchIndexStatus}
+          onRebuild={handleRebuildSearchIndex}
         />
         <ProxySummaryCard value={initialProxySummary} onEditProxy={() => message.info("代理设置页待接入")} />
         <OtherSettingsCard

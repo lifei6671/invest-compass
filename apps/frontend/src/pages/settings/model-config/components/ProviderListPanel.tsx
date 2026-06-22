@@ -9,7 +9,7 @@ import LmStudio from "@lobehub/icons/es/LmStudio/components/Mono";
 import Ollama from "@lobehub/icons/es/Ollama/components/Mono";
 import OpenAI from "@lobehub/icons/es/OpenAI/components/Mono";
 import Qwen from "@lobehub/icons/es/Qwen/components/Mono";
-import { providers } from "../mock";
+import { providers } from "../defaults";
 import type { AIProviderType, ProviderIconKey } from "../types";
 import type { ReactNode } from "react";
 

@@ -271,6 +271,7 @@ func (service Service) WriteTaskLog(ctx context.Context, entry model.TaskLogEntr
 	return service.Append(ctx, []model.TaskLogEntry{entry})
 }
 
+// now 返回 service 注入时间或当前 UTC 时间。
 func (service Service) now() time.Time {
 	if service.Now != nil {
 		return service.Now()

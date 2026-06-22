@@ -1,10 +1,10 @@
 import { App as AntApp, Progress, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { recentTasks } from "../mock";
 import type { RecentTask, RecentTaskStatus } from "../types";
 
 export function RecentTasksCard() {
   const { message } = AntApp.useApp();
+  const recentTasks: RecentTask[] = [];
   const columns: ColumnsType<RecentTask> = [
     { title: "任务标题", dataIndex: "title", width: 152, ellipsis: true, render: (value: string) => <span className="font-medium text-[#111827]">{value}</span> },
     { title: "类型", dataIndex: "type", width: 90, ellipsis: true },

@@ -20,6 +20,16 @@ type Config struct {
 	Path string
 }
 
+// SQLiteFTS5Status 表示当前 SQLite 二进制是否具备 FTS5 能力。
+type SQLiteFTS5Status string
+
+const (
+	// SQLiteFTS5Available 表示当前 SQLite 编译选项明确启用了 FTS5。
+	SQLiteFTS5Available SQLiteFTS5Status = "AVAILABLE"
+	// SQLiteFTS5Unavailable 表示当前 SQLite 编译选项明确未启用 FTS5。
+	SQLiteFTS5Unavailable SQLiteFTS5Status = "UNAVAILABLE"
+)
+
 // BackupConfig 描述迁移前 SQLite 文件备份所需的输入。
 type BackupConfig struct {
 	Path      string
@@ -55,6 +65,21 @@ func Open(ctx context.Context, config Config) (*gorm.DB, error) {
 	}
 
 	return db, nil
+}
+
+// ProbeSQLiteFTS5 使用当前 GORM 连接探测 SQLite 是否启用了 FTS5 编译选项。
+func ProbeSQLiteFTS5(ctx context.Context, db *gorm.DB) (SQLiteFTS5Status, error) {
+	if db == nil {
+		return SQLiteFTS5Unavailable, fmt.Errorf("dao db is required")
+	}
+	var enabled int
+	if err := db.WithContext(ctx).Raw("SELECT sqlite_compileoption_used('ENABLE_FTS5')").Scan(&enabled).Error; err != nil {
+		return SQLiteFTS5Unavailable, fmt.Errorf("probe sqlite fts5 compile option: %w", err)
+	}
+	if enabled == 1 {
+		return SQLiteFTS5Available, nil
+	}
+	return SQLiteFTS5Unavailable, nil
 }
 
 // BackupBeforeMigration 在 schema 迁移前备份已有 SQLite 文件；首次启动和内存库会跳过。
@@ -141,10 +166,65 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 			&model.SchedulerJob{},
 			&model.SchedulerRun{},
 			&model.IngestionWatermark{},
+			&model.StockAlias{},
+			&model.StockPinyinOverride{},
+			&model.SearchDocument{},
+			&model.SearchIndexBatch{},
+			&model.SearchIndexState{},
+			&model.SearchIndexJob{},
 		)
 	})
 	if err != nil {
 		return fmt.Errorf("migrate sqlite schema: %w", err)
+	}
+	if err := migrateSearchFTS(ctx, db); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateSearchFTS 创建搜索专题使用的 FTS5 虚表；普通 GORM AutoMigrate 不负责虚表。
+func migrateSearchFTS(ctx context.Context, db *gorm.DB) error {
+	if status, err := ProbeSQLiteFTS5(ctx, db); err != nil {
+		return err
+	} else if status != SQLiteFTS5Available {
+		return fmt.Errorf("sqlite fts5 is unavailable")
+	}
+	statements := []string{
+		`CREATE VIRTUAL TABLE IF NOT EXISTS stock_search_fts USING fts5(
+			batch_id UNINDEXED,
+			symbol UNINDEXED,
+			market UNINDEXED,
+			exchange UNINDEXED,
+			code,
+			code_prefix,
+			name_index,
+			full_name_index,
+			alias_index,
+			pinyin_full,
+			pinyin_initials,
+			industry_index,
+			concept_index,
+			tokenize = 'unicode61 remove_diacritics 2 tokenchars ''._-:''',
+			prefix = '1 2 3 4 5 6'
+		)`,
+		`CREATE VIRTUAL TABLE IF NOT EXISTS search_documents_fts USING fts5(
+			batch_id UNINDEXED,
+			doc_uid UNINDEXED,
+			doc_type UNINDEXED,
+			symbol UNINDEXED,
+			title_index,
+			body_index,
+			tag_index,
+			pinyin_index,
+			tokenize = 'unicode61 remove_diacritics 2 tokenchars ''._-:/#''',
+			prefix = '2 3 4 5'
+		)`,
+	}
+	for _, statement := range statements {
+		if err := db.WithContext(ctx).Exec(statement).Error; err != nil {
+			return fmt.Errorf("migrate search fts: %w", err)
+		}
 	}
 	return nil
 }

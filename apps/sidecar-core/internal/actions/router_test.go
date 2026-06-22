@@ -24,6 +24,7 @@ import (
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
 	promptservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/prompt"
+	searchservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/search"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/settings"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/stock"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/updatecheck"
@@ -372,6 +373,47 @@ func TestStockSearchUpsertsStockCache(t *testing.T) {
 		cached.Industry != "白酒" ||
 		cached.Concept != "消费" {
 		t.Fatalf("unexpected cached stock: %+v", cached)
+	}
+	if len(store.jobs) != 1 ||
+		store.jobs[0].DocType != "stock" ||
+		store.jobs[0].RefID != "CN:SH:600519" ||
+		store.jobs[0].Operation != "upsert" {
+		t.Fatalf("expected stock search index job, got %+v", store.jobs)
+	}
+}
+
+// TestDocumentSearchRoutesAreScoped 验证菜单范围搜索路由已注册，且不存在全局搜索入口。
+func TestDocumentSearchRoutesAreScoped(t *testing.T) {
+	handler := NewHandler(Config{
+		Version:               "0.1.0",
+		Token:                 "test-token",
+		DBStatus:              "not_configured",
+		Ready:                 true,
+		DocumentSearchService: &fakeRootDocumentSearchService{},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/search/reports", strings.NewReader(`{"keyword":"茅台","limit":20,"offset":0}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected scoped report search route status %d, got %d body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+
+	getRecorder := httptest.NewRecorder()
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/search/reports", nil)
+	getRequest.Header.Set("X-Invest-Compass-Token", "test-token")
+	handler.ServeHTTP(getRecorder, getRequest)
+	if getRecorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected non-POST status %d, got %d", http.StatusMethodNotAllowed, getRecorder.Code)
+	}
+
+	globalRecorder := httptest.NewRecorder()
+	globalRequest := httptest.NewRequest(http.MethodPost, "/api/search/global", strings.NewReader(`{"keyword":"茅台"}`))
+	globalRequest.Header.Set("X-Invest-Compass-Token", "test-token")
+	handler.ServeHTTP(globalRecorder, globalRequest)
+	if globalRecorder.Code != http.StatusNotFound {
+		t.Fatalf("expected no global search route status %d, got %d", http.StatusNotFound, globalRecorder.Code)
 	}
 }
 
@@ -2689,6 +2731,7 @@ type recordingCacheCleaner struct {
 
 type memoryStockStore struct {
 	saved []model.Stock
+	jobs  []model.SearchIndexJob
 }
 
 type memoryMarketStore struct {
@@ -2814,6 +2857,41 @@ type memoryReportStore struct {
 // UpsertStocks 记录搜索后写入的股票基础信息缓存。
 func (store *memoryStockStore) UpsertStocks(_ context.Context, stocks []model.Stock) error {
 	store.saved = append(store.saved, stocks...)
+	return nil
+}
+
+// ListStocksForSearch 在路由测试中默认不提供本地股票命中，触发 Provider fallback。
+func (store *memoryStockStore) ListStocksForSearch(context.Context, string, []string, int) ([]model.Stock, error) {
+	return nil, nil
+}
+
+// ListStockAliasesBySymbols 返回空别名集合。
+func (store *memoryStockStore) ListStockAliasesBySymbols(_ context.Context, symbols []string) (map[string][]model.StockAlias, error) {
+	result := make(map[string][]model.StockAlias, len(symbols))
+	for _, symbol := range symbols {
+		result[symbol] = nil
+	}
+	return result, nil
+}
+
+// ListActiveWatchlists 返回空自选股集合。
+func (store *memoryStockStore) ListActiveWatchlists(context.Context) ([]model.Watchlist, error) {
+	return nil, nil
+}
+
+// GetSearchIndexState 在路由测试中默认表示尚无 active FTS batch。
+func (store *memoryStockStore) GetSearchIndexState(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+
+// SearchStockFTS 在路由测试中默认无 FTS 命中。
+func (store *memoryStockStore) SearchStockFTS(context.Context, string, string, int) ([]dao.StockSearchFTSMatch, error) {
+	return nil, nil
+}
+
+// UpsertSearchIndexJob 记录 Provider fallback 后的股票增量索引任务。
+func (store *memoryStockStore) UpsertSearchIndexJob(_ context.Context, job model.SearchIndexJob) error {
+	store.jobs = append(store.jobs, job)
 	return nil
 }
 
@@ -3170,6 +3248,33 @@ type recordingLogExportSource struct {
 	request logexport.Request
 	err     error
 	calls   int
+}
+
+type fakeRootDocumentSearchService struct{}
+
+// SearchReports 返回空报告搜索结果，供根路由注册测试使用。
+func (service *fakeRootDocumentSearchService) SearchReports(context.Context, searchservice.DocumentSearchRequest) ([]searchservice.DocumentSearchResult, error) {
+	return nil, nil
+}
+
+// SearchNews 返回空资讯搜索结果，供根路由注册测试使用。
+func (service *fakeRootDocumentSearchService) SearchNews(context.Context, searchservice.DocumentSearchRequest) ([]searchservice.DocumentSearchResult, error) {
+	return nil, nil
+}
+
+// SearchWatchlistNotes 返回空自选备注搜索结果，供根路由注册测试使用。
+func (service *fakeRootDocumentSearchService) SearchWatchlistNotes(context.Context, searchservice.DocumentSearchRequest) ([]searchservice.DocumentSearchResult, error) {
+	return nil, nil
+}
+
+// Status 返回空搜索索引状态，供根路由注册测试使用。
+func (service *fakeRootDocumentSearchService) Status(context.Context) (searchservice.SearchStatus, error) {
+	return searchservice.SearchStatus{FTS5Status: "AVAILABLE", SearchStatus: "READY"}, nil
+}
+
+// Rebuild 返回空搜索重建结果，供根路由注册测试使用。
+func (service *fakeRootDocumentSearchService) Rebuild(context.Context, searchservice.SearchRebuildRequest) (searchservice.SearchRebuildAccepted, error) {
+	return searchservice.SearchRebuildAccepted{}, nil
 }
 
 // CacheUsages 返回测试注入的缓存统计，并记录调用次数。

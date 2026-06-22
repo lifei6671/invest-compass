@@ -70,6 +70,7 @@ func RunStage(ctx context.Context, writer StageWriter, meta StageMeta, stage str
 	return err
 }
 
+// buildStageEntry 根据阶段执行结果构造脱敏任务日志。
 func buildStageEntry(meta StageMeta, stage string, stageErr error, durationMS int64) model.TaskLogEntry {
 	level := LevelInfo
 	message := stage + " completed"
@@ -101,6 +102,7 @@ func buildStageEntry(meta StageMeta, stage string, stageErr error, durationMS in
 	}
 }
 
+// buildStagePayload 构造阶段日志中的脱敏结构化 payload。
 func buildStagePayload(stage string, stageErr error, durationMS int64, code string, retryable bool) string {
 	payload := map[string]any{
 		"stage":       logger.RedactText(stage),
@@ -121,6 +123,7 @@ func buildStagePayload(stage string, stageErr error, durationMS int64, code stri
 	return logger.RedactText(string(encoded))
 }
 
+// codeFromError 从业务错误中提取稳定错误码。
 func codeFromError(err error) string {
 	var coded *xerr.Error
 	if errors.As(err, &coded) && coded != nil && coded.Code != "" {
@@ -129,6 +132,7 @@ func codeFromError(err error) string {
 	return defaultStageErrorCode
 }
 
+// stageNow 返回阶段日志使用的当前时间。
 func stageNow(meta StageMeta) time.Time {
 	if meta.Now != nil {
 		return meta.Now()

@@ -1,48 +1,54 @@
 import { useMemo, useState } from "react";
 import { App as AntApp } from "antd";
 import { InfoCircleFilled, SafetyCertificateOutlined } from "@ant-design/icons";
-import {
-  dataSourceStatuses,
-  hotIndustries,
-  hotKeywords,
-  initialNewsFilters,
-  mentionedStocks,
-  newsItems,
-  sentimentSummary,
-} from "./mock";
-import type { NewsFilters, NewsItem } from "./types";
+import type { DataSourceStatus, HotIndustry, MentionedStock, NewsFilters, NewsItem, SentimentSummary } from "./types";
 import { NewsFilterCard } from "./components/NewsFilterCard";
 import { NewsListCard } from "./components/NewsListCard";
 import { NewsSidebarPanel } from "./components/NewsSidebarPanel";
+import { openExternalURL, searchNews, type DocumentSearchItem } from "../../services/coreClient";
 
 const pageSize = 10;
-const mockTotalCount = 218;
+const initialNewsFilters: NewsFilters = {
+  keyword: "",
+  stock: "全部股票",
+  source: "全部来源",
+  industry: "全部行业",
+  timeRange: "近 7 天",
+};
+const hotKeywords: string[] = [];
+const hotIndustries: HotIndustry[] = [];
+const mentionedStocks: MentionedStock[] = [];
+const dataSourceStatuses: DataSourceStatus[] = [];
+const sentimentSummary: SentimentSummary = {
+  positive: { count: 0, percent: 0 },
+  neutral: { count: 0, percent: 0 },
+  negative: { count: 0, percent: 0 },
+  summary: "暂无资讯情绪统计",
+};
 
 export function NewsCenterPage() {
   const { message } = AntApp.useApp();
   const [filters, setFilters] = useState<NewsFilters>(initialNewsFilters);
   const [sortMode, setSortMode] = useState("按最新");
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchItems, setSearchItems] = useState<NewsItem[]>([]);
+  const [remoteSearchMode, setRemoteSearchMode] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
 
   const filteredItems = useMemo(() => {
-    const keyword = filters.keyword.trim().toLowerCase();
-    return newsItems.filter((item) => {
-      const keywordMatched =
-        !keyword ||
-        item.title.toLowerCase().includes(keyword) ||
-        item.summary.toLowerCase().includes(keyword) ||
-        item.tags.some((tag) => tag.toLowerCase().includes(keyword));
-      const stockMatched = filters.stock === "全部股票" || item.tags.includes(filters.stock);
-      const sourceMatched = filters.source === "全部来源" || item.source === filters.source;
-      const industryMatched = filters.industry === "全部行业" || item.tags.some((tag) => tag.includes(filters.industry));
-      return keywordMatched && stockMatched && sourceMatched && industryMatched;
-    });
-  }, [filters]);
+    if (remoteSearchMode) {
+      return searchItems;
+    }
+    return [];
+  }, [filters, remoteSearchMode, searchItems]);
 
   const visibleItems = filteredItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalCount = filteredItems.length;
 
   const updateFilters = (patch: Partial<NewsFilters>) => {
     setFilters((current) => ({ ...current, ...patch }));
+    setRemoteSearchMode(false);
+    setSearchItems([]);
     setCurrentPage(1);
   };
 
@@ -66,6 +72,46 @@ export function NewsCenterPage() {
     message.success("摘要已复制");
   };
 
+  const handleRefresh = async () => {
+    const keyword = filters.keyword.trim();
+    if (!keyword) {
+      setRemoteSearchMode(false);
+      setSearchItems([]);
+      message.info("请输入关键词后搜索资讯中心");
+      return;
+    }
+    try {
+      setIsSearching(true);
+      const results = await searchNews({
+        keyword,
+        symbols: [],
+        limit: 20,
+        offset: 0,
+        sort: "relevance",
+      });
+      setSearchItems(results.filter((item) => item.doc_type === "news").map(mapSearchNewsItem));
+      setRemoteSearchMode(true);
+      setCurrentPage(1);
+      message.success("资讯搜索已更新");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "资讯搜索失败");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleOpenOriginal = async (item: NewsItem) => {
+    if (!item.url) {
+      message.info("暂无原文链接");
+      return;
+    }
+    try {
+      await openExternalURL(item.url);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "打开原文失败");
+    }
+  };
+
   return (
     <main className="news-center-page">
       <header className="news-center-title-row">
@@ -80,21 +126,23 @@ export function NewsCenterPage() {
         hotKeywords={hotKeywords}
         onChange={updateFilters}
         onHotKeywordClick={handleHotKeywordClick}
-        onRefresh={() => message.success("资讯已刷新")}
+        onRefresh={handleRefresh}
+        isRefreshing={isSearching}
       />
 
       <div className="news-center-content-grid">
         <NewsListCard
           items={visibleItems}
-          totalCount={mockTotalCount}
+          totalCount={totalCount}
           sortMode={sortMode}
           currentPage={currentPage}
           onSortModeChange={handleSortModeChange}
           onViewSwitch={() => message.info("视图切换待接入")}
           onPageChange={setCurrentPage}
-          onOpenOriginal={() => message.info("查看原文待接入")}
+          onOpenOriginal={handleOpenOriginal}
           onAddContext={() => message.success("已加入 AI 分析上下文")}
           onCopySummary={handleCopySummary}
+          emptyDescription="仅搜索资讯中心，暂无匹配资讯"
         />
         <NewsSidebarPanel
           industries={hotIndustries}
@@ -108,6 +156,36 @@ export function NewsCenterPage() {
       <NewsRiskNotice />
     </main>
   );
+}
+
+function mapSearchNewsItem(item: DocumentSearchItem): NewsItem {
+  const tags = Array.from(new Set([item.symbol, ...item.highlights].map((tag) => tag.trim()).filter(Boolean)));
+  return {
+    id: item.doc_uid,
+    source: item.source || "资讯",
+    timeLabel: formatSearchNewsTime(item.source_time),
+    title: item.title,
+    summary: item.summary,
+    tags,
+    url: documentSearchRefURL(item.ref_id),
+  };
+}
+
+function formatSearchNewsTime(value: string): string {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) {
+    return "时间未知";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function documentSearchRefURL(refID: string): string | undefined {
+  return /^https?:\/\//i.test(refID) ? refID : undefined;
 }
 
 function NewsRiskNotice() {

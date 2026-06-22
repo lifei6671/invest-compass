@@ -1,13 +1,4 @@
-export type NewsSource =
-  | "财联社"
-  | "证券时报"
-  | "芯榜"
-  | "界面新闻"
-  | "同花顺资讯"
-  | "上海证券报"
-  | "Wind 资讯"
-  | "第一财经"
-  | "证券日报";
+export type NewsSource = string;
 
 export type NewsItem = {
   id: string;
@@ -60,4 +51,3 @@ export type DataSourceStatus = {
   lastUpdatedAt: string;
   cacheStatus: "good" | "warning" | "bad";
 };
-

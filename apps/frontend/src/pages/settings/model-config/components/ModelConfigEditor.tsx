@@ -1,7 +1,7 @@
 import { Input, InputNumber, Select, Switch } from "antd";
 import type { ReactNode } from "react";
 import type { ModelConfig, ModelConfigDraft } from "../types";
-import { providers } from "../mock";
+import { providers } from "../defaults";
 
 type ModelConfigEditorProps = {
   draft: ModelConfigDraft;

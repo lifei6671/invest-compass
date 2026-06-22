@@ -273,6 +273,7 @@ func buildActionsConfig(token string, store *dao.Store, schedulerQueue *schedule
 		CacheStatsProvider:  store,
 		CacheCleaner:        store,
 		StockStore:          store,
+		DocumentSearchStore: store,
 		MarketStore:         store,
 		NewsStore:           store,
 		WatchlistStore:      store,

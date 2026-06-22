@@ -1,6 +1,6 @@
-import { App as AntApp } from "antd";
+import { App as AntApp, Empty } from "antd";
 import { useState } from "react";
-import type { TechnicalIndicator } from "../mock";
+import type { TechnicalIndicator } from "../types";
 
 type TechnicalIndicatorCardProps = {
   items: TechnicalIndicator[];
@@ -37,18 +37,24 @@ export function TechnicalIndicatorCard(props: TechnicalIndicatorCardProps) {
           ))}
         </div>
       </div>
-      <div className="mt-2 grid min-w-[720px] grid-cols-[repeat(6,minmax(100px,1fr))]">
-        {props.items.map((item, index) => (
-          <div key={item.name} className={["min-w-0 px-3", index > 0 ? "border-l border-[#edf1f7]" : ""].join(" ")}>
-            <div className="flex items-center gap-2 whitespace-nowrap text-[13px] font-semibold text-[#111827]">
-              {item.name}
-              <span className="app-number text-[#1f2937]">{item.value}</span>
-              <span className="text-[#ff4d4f]">{item.direction === "up" ? "↑" : item.direction === "down" ? "↓" : "-"}</span>
+      {props.items.length > 0 ? (
+        <div className="mt-2 grid min-w-[720px] grid-cols-[repeat(6,minmax(100px,1fr))]">
+          {props.items.map((item, index) => (
+            <div key={item.name} className={["min-w-0 px-3", index > 0 ? "border-l border-[#edf1f7]" : ""].join(" ")}>
+              <div className="flex items-center gap-2 whitespace-nowrap text-[13px] font-semibold text-[#111827]">
+                {item.name}
+                <span className="app-number text-[#1f2937]">{item.value}</span>
+                <span className="text-[#ff4d4f]">{item.direction === "up" ? "↑" : item.direction === "down" ? "↓" : "-"}</span>
+              </div>
+              <div className="mt-1 text-[12px] leading-4 text-[#8a94a6]">{item.desc}</div>
             </div>
-            <div className="mt-1 text-[12px] leading-4 text-[#8a94a6]">{item.desc}</div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="py-2">
+          <Empty description="暂无技术指标" />
+        </div>
+      )}
     </section>
   );
 }

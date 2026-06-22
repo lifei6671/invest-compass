@@ -1,5 +1,5 @@
 import { LoadingOutlined } from "@ant-design/icons";
-import { Button, Switch } from "antd";
+import { Button, Empty, Switch } from "antd";
 
 type StreamingOutputPanelProps = {
   autoScroll: boolean;
@@ -9,11 +9,13 @@ type StreamingOutputPanelProps = {
 };
 
 export function StreamingOutputPanel(props: StreamingOutputPanelProps) {
+  const hasContent = props.markdown.trim().length > 0;
+
   return (
     <section className="analysis-running-card analysis-running-stream-card">
       <div className="analysis-running-card-header">
         <h2 className="analysis-running-card-title">
-          流式输出 <span>（正在生成中...）</span>
+          流式输出 {hasContent ? <span>（正在生成中...）</span> : null}
         </h2>
         <div className="analysis-running-stream-tools">
           <span>自动滚动</span>
@@ -25,12 +27,14 @@ export function StreamingOutputPanel(props: StreamingOutputPanelProps) {
         </div>
       </div>
       <div className="analysis-running-stream-body">
-        <MarkdownPreview markdown={props.markdown} />
+        {hasContent ? <MarkdownPreview markdown={props.markdown} /> : <Empty description="暂无流式输出" />}
       </div>
-      <div className="analysis-running-generating-note">
-        <LoadingOutlined />
-        <span>内容持续生成中...</span>
-      </div>
+      {hasContent ? (
+        <div className="analysis-running-generating-note">
+          <LoadingOutlined />
+          <span>内容持续生成中...</span>
+        </div>
+      ) : null}
     </section>
   );
 }
