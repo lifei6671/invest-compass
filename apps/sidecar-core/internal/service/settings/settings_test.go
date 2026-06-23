@@ -100,6 +100,9 @@ func TestValidateSettingAcceptsKnownSettingValues(t *testing.T) {
 		{Key: SettingKeyNotificationsSystemEnabled, Value: "false"},
 		{Key: SettingKeyWindowCloseToTray, Value: "true"},
 		{Key: SettingKeyUpdateCheckOnStartup, Value: "false"},
+		{Key: SettingKeyDataSourceDefaultMarketSource, Value: DataSourceMarketSourceAutoFallback},
+		{Key: SettingKeyDataSourceDefaultMarketSource, Value: DataSourceMarketSourceSina},
+		{Key: SettingKeyDataSourceDefaultMarketSource, Value: DataSourceMarketSourceTencent},
 	} {
 		if err := ValidateSetting(setting); err != nil {
 			t.Fatalf("ValidateSetting(%+v) returned error: %v", setting, err)
@@ -115,6 +118,7 @@ func TestValidateSettingRejectsKnownSettingInvalidValue(t *testing.T) {
 		{Key: SettingKeyQuoteRefreshInterval, Value: "1s"},
 		{Key: SettingKeyKlineDefaultAdjust, Value: "forward"},
 		{Key: SettingKeyNotificationsTaskSuccess, Value: "yes"},
+		{Key: SettingKeyDataSourceDefaultMarketSource, Value: "unknown-provider"},
 	} {
 		if err := ValidateSetting(setting); err == nil {
 			t.Fatalf("ValidateSetting(%+v) should reject invalid value", setting)

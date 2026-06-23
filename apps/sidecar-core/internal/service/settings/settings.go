@@ -79,6 +79,8 @@ const (
 	SettingKeyWindowCloseToTray = "window.close_to_tray"
 	// SettingKeyUpdateCheckOnStartup 表示启动时检查更新开关。
 	SettingKeyUpdateCheckOnStartup = "update.check_on_startup"
+	// SettingKeyDataSourceDefaultMarketSource 表示数据源设置中的默认行情源。
+	SettingKeyDataSourceDefaultMarketSource = "data_source.default_market_source"
 
 	// DefaultAppTheme 是首版默认浅色主题。
 	DefaultAppTheme = "light"
@@ -92,6 +94,18 @@ const (
 	DefaultKlinePeriod = "day"
 	// DefaultKlineAdjust 是首版默认前复权。
 	DefaultKlineAdjust = "qfq"
+	// DataSourceMarketSourceAutoFallback 表示按已启用行情源自动降级。
+	DataSourceMarketSourceAutoFallback = "auto-fallback"
+	// DataSourceMarketSourceSina 表示新浪行情渠道。
+	DataSourceMarketSourceSina = "sina"
+	// DataSourceMarketSourceTencent 表示腾讯行情渠道。
+	DataSourceMarketSourceTencent = "tencent"
+	// DataSourceMarketSourceEastMoney 表示东方财富行情渠道。
+	DataSourceMarketSourceEastMoney = "eastmoney"
+	// DataSourceMarketSourceAkShareEastMoney 表示 AkShare / EastMoney 聚合渠道。
+	DataSourceMarketSourceAkShareEastMoney = "akshare-eastmoney"
+	// DataSourceMarketSourceCustom 表示自定义行情渠道。
+	DataSourceMarketSourceCustom = "custom"
 
 	// LicenseStatusFree 表示首版仅展示 FREE 占位。
 	LicenseStatusFree LicenseStatus = "FREE"
@@ -241,6 +255,17 @@ func validateKnownSettingValue(key string, value string) error {
 		return validateStringEnum(key, trimmed, "minute", DefaultKlinePeriod, "week", "month")
 	case SettingKeyKlineDefaultAdjust:
 		return validateStringEnum(key, trimmed, "none", DefaultKlineAdjust, "hfq")
+	case SettingKeyDataSourceDefaultMarketSource:
+		return validateStringEnum(
+			key,
+			trimmed,
+			DataSourceMarketSourceAutoFallback,
+			DataSourceMarketSourceSina,
+			DataSourceMarketSourceTencent,
+			DataSourceMarketSourceEastMoney,
+			DataSourceMarketSourceAkShareEastMoney,
+			DataSourceMarketSourceCustom,
+		)
 	case SettingKeyNotificationsInAppEnabled,
 		SettingKeyNotificationsSystemEnabled,
 		SettingKeyNotificationsTaskSuccess,

@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
 )
 
 const (
@@ -29,6 +32,28 @@ var providerCatalog = []Config{
 		Capability:         "行情 / K线",
 		AuthType:           AuthTypeNone,
 		BaseURL:            "https://quote.eastmoney.com",
+		CredentialStatus:   StatusNormal,
+		TimeoutSeconds:     15,
+		RateLimitPerMinute: 60,
+		MaskedCredential:   "无需凭据",
+	},
+	{
+		ProviderID:         "sina",
+		ProviderName:       "新浪财经",
+		Capability:         "股票搜索 / 实时行情",
+		AuthType:           AuthTypeNone,
+		BaseURL:            "https://hq.sinajs.cn",
+		CredentialStatus:   StatusNormal,
+		TimeoutSeconds:     15,
+		RateLimitPerMinute: 60,
+		MaskedCredential:   "无需凭据",
+	},
+	{
+		ProviderID:         "tencent",
+		ProviderName:       "腾讯财经",
+		Capability:         "K线 / 复权K线",
+		AuthType:           AuthTypeNone,
+		BaseURL:            "https://web.ifzq.gtimg.cn",
 		CredentialStatus:   StatusNormal,
 		TimeoutSeconds:     15,
 		RateLimitPerMinute: 60,
@@ -93,6 +118,8 @@ var providerCatalog = []Config{
 
 var providerIconTypes = map[string]string{
 	"eastmoney":     "eastmoney",
+	"sina":          "sina",
+	"tencent":       "tencent",
 	"akshare":       "akshare",
 	"alpha-vantage": "alpha",
 	"cls":           "cls",
@@ -113,6 +140,7 @@ type Service struct {
 	Store       Store
 	KeyProvider KeyProvider
 	Clock       Clock
+	HTTPClient  HTTPDoer
 }
 
 // NewService 构造数据源凭据 service。
@@ -130,16 +158,19 @@ func (service Service) List(ctx context.Context) (ListView, error) {
 		return ListView{}, err
 	}
 	configs := catalogConfigMap()
+	storedByProvider := make(map[string]model.DataSourceCredential, len(stored))
 	for _, item := range stored {
+		storedByProvider[item.ProviderID] = item
 		configs[item.ProviderID] = modelToConfig(item, configs[item.ProviderID])
 	}
 	providers := providersFromConfigs(configs)
+	selectedProvider := defaultSelectedProvider(configs)
 	return ListView{
 		Providers:        providers,
 		Configs:          configs,
-		SelectedProvider: defaultSelectedProvider(configs),
+		SelectedProvider: selectedProvider,
 		TestTargets:      defaultTestTargets(),
-		TestResult:       defaultTestResult(configs),
+		TestResult:       defaultTestResult(configs, storedByProvider, selectedProvider),
 		Overview:         overviewFromConfigs(configs, service.now()),
 		HealthItems:      healthItemsFromConfigs(configs),
 		OperationLogs:    operationLogs(stored),
@@ -212,7 +243,7 @@ func (service Service) Clear(ctx context.Context, providerID string) (Config, er
 	return catalogConfig, nil
 }
 
-// Test 执行本地预检，不访问真实外部网络。
+// Test 执行真实 HTTP 预检，只保存状态码、耗时和脱敏说明，不保存响应正文。
 func (service Service) Test(ctx context.Context, request TestRequest) (TestResult, error) {
 	if service.Store == nil {
 		return TestResult{}, fmt.Errorf("data source credential store is required")
@@ -222,17 +253,18 @@ func (service Service) Test(ctx context.Context, request TestRequest) (TestResul
 	if !ok {
 		return TestResult{}, fmt.Errorf("unknown data source provider")
 	}
-	if catalogConfig.AuthType == AuthTypeNone {
-		return TestResult{
-			Status:         testStatusSuccess,
-			ResponseTimeMS: 1,
-			TestedAt:       formatDisplayTime(service.now()),
-			Messages:       []string{"该 Provider 无需凭据，本地预检通过"},
-		}, nil
-	}
-	credential, exists, err := service.Store.GetDataSourceCredential(ctx, providerID)
-	if err != nil {
+	config := catalogConfig
+	var credential model.DataSourceCredential
+	var exists bool
+	var err error
+	if credential, exists, err = service.Store.GetDataSourceCredential(ctx, providerID); err != nil {
 		return TestResult{}, err
+	}
+	if exists {
+		config = modelToConfig(credential, catalogConfig)
+	}
+	if catalogConfig.AuthType == AuthTypeNone {
+		return service.runHTTPPreflight(ctx, config, RuntimeCredential{ProviderID: providerID, AuthType: AuthTypeNone}, nil, request.Target)
 	}
 	if !exists || strings.TrimSpace(credential.EncryptedCredential) == "" || strings.TrimSpace(credential.CredentialNonce) == "" {
 		return TestResult{
@@ -240,16 +272,176 @@ func (service Service) Test(ctx context.Context, request TestRequest) (TestResul
 			Messages: []string{"当前 Provider 尚未配置凭据"},
 		}, nil
 	}
-	result := TestResult{
-		Status:         testStatusSuccess,
-		ResponseTimeMS: 1,
-		TestedAt:       formatDisplayTime(service.now()),
-		Messages:       []string{"凭据密文存在", "本地配置预检通过"},
+	runtimeCredential, err := service.Resolve(ctx, providerID)
+	if err != nil {
+		return TestResult{}, err
 	}
-	if err := service.saveTestResult(ctx, credential, result); err != nil {
+	result, err := service.runHTTPPreflight(ctx, config, runtimeCredential, &credential, request.Target)
+	if err != nil {
 		return TestResult{}, err
 	}
 	return result, nil
+}
+
+// runHTTPPreflight 向目标 Provider 发起真实 HTTP 请求，并按状态码和响应数据判断可用性。
+func (service Service) runHTTPPreflight(ctx context.Context, config Config, credential RuntimeCredential, stored *model.DataSourceCredential, target string) (TestResult, error) {
+	targetURL, err := preflightURL(config, target)
+	if err != nil {
+		return TestResult{}, err
+	}
+	timeout := time.Duration(config.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	requestContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	httpRequest, err := http.NewRequestWithContext(requestContext, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return TestResult{}, err
+	}
+	applyCredentialHeaders(httpRequest, credential)
+	httpRequest.Header.Set("Accept", "application/json,text/plain,*/*")
+	httpRequest.Header.Set("User-Agent", "Invest Compass/0.1 data-source-preflight")
+
+	startedAt := time.Now()
+	response, err := service.httpClient(timeout).Do(httpRequest)
+	elapsed := time.Since(startedAt)
+	if err != nil {
+		result := TestResult{
+			Status:         testStatusFailed,
+			ResponseTimeMS: int(elapsed.Milliseconds()),
+			TestedAt:       formatDisplayTime(service.now()),
+			Messages:       []string{"真实请求失败", loggerSafeHTTPError(err)},
+		}
+		if stored != nil {
+			if saveErr := service.saveTestResult(ctx, *stored, result); saveErr != nil {
+				return TestResult{}, saveErr
+			}
+		}
+		return result, nil
+	}
+	defer response.Body.Close()
+
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, 64*1024+1))
+	if readErr != nil {
+		return TestResult{}, fmt.Errorf("read preflight response: %w", readErr)
+	}
+	result := resultFromHTTPResponse(response.StatusCode, len(body), int(elapsed.Milliseconds()), service.now())
+	if stored != nil {
+		if err := service.saveTestResult(ctx, *stored, result); err != nil {
+			return TestResult{}, err
+		}
+	}
+	return result, nil
+}
+
+// httpClient 返回真实连接预检使用的 HTTP client，默认带超时避免阻塞 UI。
+func (service Service) httpClient(timeout time.Duration) HTTPDoer {
+	if service.HTTPClient != nil {
+		return service.HTTPClient
+	}
+	return &http.Client{Timeout: timeout}
+}
+
+// preflightURL 根据 Provider 配置和测试目标生成真实预检 URL。
+func preflightURL(config Config, target string) (string, error) {
+	baseURL, err := url.Parse(strings.TrimSpace(config.BaseURL))
+	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
+		return "", fmt.Errorf("base url is invalid")
+	}
+	targetURL, err := url.Parse(preflightTargetPath(config.ProviderID, target))
+	if err != nil {
+		return "", fmt.Errorf("test target is invalid")
+	}
+	baseURL.Path = joinURLPath(baseURL.Path, targetURL.Path)
+	baseURL.RawQuery = targetURL.RawQuery
+	return baseURL.String(), nil
+}
+
+// preflightTargetPath 返回 Provider 对应的真实 HTTP 预检路径。
+func preflightTargetPath(providerID string, target string) string {
+	if providerID == "sina" {
+		return "/list=sh000001"
+	}
+	if providerID == "tencent" {
+		return "/appstock/app/fqkline/get?param=sh000001,day,,,2,qfq"
+	}
+	if providerID == "cls" && strings.TrimSpace(target) == "flash" {
+		return "/api/cache?app=CailianpressWeb&name=telegraph&os=web&sv=8.7.9"
+	}
+	switch strings.TrimSpace(target) {
+	case "calendar":
+		return "/api/calendar"
+	case "events":
+		return "/api/events"
+	default:
+		return "/api/flash"
+	}
+}
+
+// joinURLPath 拼接 base path 和目标 path，避免出现重复斜杠。
+func joinURLPath(basePath string, targetPath string) string {
+	left := strings.TrimRight(basePath, "/")
+	right := strings.TrimLeft(targetPath, "/")
+	if left == "" {
+		return "/" + right
+	}
+	if right == "" {
+		return left
+	}
+	return left + "/" + right
+}
+
+// applyCredentialHeaders 将运行时凭据注入真实预检请求，调用方不得记录请求头。
+func applyCredentialHeaders(request *http.Request, credential RuntimeCredential) {
+	switch credential.AuthType {
+	case AuthTypeCookie:
+		if strings.TrimSpace(credential.Cookie) != "" {
+			request.Header.Set("Cookie", credential.Cookie)
+		}
+	case AuthTypeAPIKey:
+		if strings.TrimSpace(credential.APIKey) != "" {
+			request.Header.Set("X-API-Key", credential.APIKey)
+		}
+	case AuthTypeBearerToken:
+		if strings.TrimSpace(credential.BearerToken) != "" {
+			request.Header.Set("Authorization", "Bearer "+credential.BearerToken)
+		}
+	case AuthTypeCustomHeader:
+		if strings.TrimSpace(credential.HeaderValue) != "" {
+			headerName := strings.TrimSpace(credential.HeaderName)
+			if headerName == "" {
+				headerName = "X-Invest-Compass-Credential"
+			}
+			request.Header.Set(headerName, credential.HeaderValue)
+		}
+	}
+}
+
+// resultFromHTTPResponse 根据 HTTP 状态码和响应数据长度生成脱敏测试结果。
+func resultFromHTTPResponse(statusCode int, bodySize int, elapsedMilliseconds int, testedAt time.Time) TestResult {
+	status := testStatusSuccess
+	messages := []string{fmt.Sprintf("HTTP 状态码：%d", statusCode)}
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		status = testStatusFailed
+		messages = append(messages, "远端返回非成功状态码")
+	} else if bodySize == 0 {
+		status = testStatusFailed
+		messages = append(messages, "响应数据为空")
+	} else {
+		messages = append(messages, "响应数据可读取")
+	}
+	return TestResult{
+		Status:         status,
+		ResponseTimeMS: elapsedMilliseconds,
+		TestedAt:       formatDisplayTime(testedAt),
+		Messages:       messages,
+	}
+}
+
+// loggerSafeHTTPError 返回脱敏后的 HTTP 错误说明。
+func loggerSafeHTTPError(err error) string {
+	return logger.RedactError(err)
 }
 
 // Resolve 解密并返回运行时 Provider 凭据，调用方不得记录或返回该结构。
@@ -432,12 +624,40 @@ func defaultTestTargets() []TestTarget {
 }
 
 // defaultTestResult 返回默认未测试状态。
-func defaultTestResult(configs map[string]Config) TestResult {
-	selected := configs[defaultSelectedProvider(configs)]
+func defaultTestResult(configs map[string]Config, storedByProvider map[string]model.DataSourceCredential, selectedProvider string) TestResult {
+	if stored, ok := storedByProvider[selectedProvider]; ok {
+		if result := testResultFromModel(stored); result.Status != "" {
+			return result
+		}
+	}
+	selected := configs[selectedProvider]
 	if selected.CredentialStatus == StatusNormal {
 		return TestResult{Status: testStatusUntested, Messages: []string{"尚未执行本地预检"}}
 	}
 	return TestResult{Status: testStatusUntested, Messages: []string{"当前 Provider 尚未配置凭据"}}
+}
+
+// testResultFromModel 从持久化模型恢复最近一次真实预检结果。
+func testResultFromModel(item model.DataSourceCredential) TestResult {
+	status := strings.TrimSpace(item.LastTestStatus)
+	if status == "" {
+		return TestResult{}
+	}
+	result := TestResult{
+		Status:         status,
+		ResponseTimeMS: item.LastTestResponseTime,
+		Messages:       []string{"尚未执行本地预检"},
+	}
+	if item.LastTestedAt != nil {
+		result.TestedAt = formatDisplayTime(*item.LastTestedAt)
+	}
+	if strings.TrimSpace(item.LastTestMessages) != "" {
+		var messages []string
+		if err := json.Unmarshal([]byte(item.LastTestMessages), &messages); err == nil && len(messages) > 0 {
+			result.Messages = messages
+		}
+	}
+	return result
 }
 
 // overviewFromConfigs 汇总凭据配置数量和过期风险。
@@ -468,7 +688,8 @@ func overviewFromConfigs(configs map[string]Config, now time.Time) Overview {
 // healthItemsFromConfigs 构造调用限制和健康状态展示项。
 func healthItemsFromConfigs(configs map[string]Config) []HealthItem {
 	return []HealthItem{
-		{Name: "行情源", Status: healthStatus(configs["eastmoney"]), RateLimitText: rateLimitText(configs["eastmoney"])},
+		{Name: "新浪行情源", Status: healthStatus(configs["sina"]), RateLimitText: rateLimitText(configs["sina"])},
+		{Name: "腾讯K线源", Status: healthStatus(configs["tencent"]), RateLimitText: rateLimitText(configs["tencent"])},
 		{Name: "新闻源", Status: healthStatus(configs["cls"]), RateLimitText: rateLimitText(configs["cls"])},
 		{Name: "海外源", Status: healthStatus(configs["alpha-vantage"]), RateLimitText: rateLimitText(configs["alpha-vantage"])},
 	}
@@ -532,6 +753,7 @@ func modelToConfig(item model.DataSourceCredential, fallback Config) Config {
 		RateLimitPerMinute: nonZero(item.RateLimitPerMinute, fallback.RateLimitPerMinute),
 		MaskedCredential:   nonEmpty(item.MaskedCredential, fallback.MaskedCredential),
 		Note:               item.Note,
+		LastTestResult:     nonEmptyTestResult(testResultFromModel(item), fallback.LastTestResult),
 	}
 }
 
@@ -624,6 +846,14 @@ func nonEmpty(value string, fallback string) string {
 // nonZero 返回首个非零整数。
 func nonZero(value int, fallback int) int {
 	if value != 0 {
+		return value
+	}
+	return fallback
+}
+
+// nonEmptyTestResult 返回首个有状态的测试结果。
+func nonEmptyTestResult(value TestResult, fallback TestResult) TestResult {
+	if strings.TrimSpace(value.Status) != "" {
 		return value
 	}
 	return fallback

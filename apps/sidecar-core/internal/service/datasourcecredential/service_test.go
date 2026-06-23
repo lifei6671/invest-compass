@@ -3,6 +3,8 @@ package datasourcecredential
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -145,17 +147,99 @@ func TestClearCredentialRemovesCiphertext(t *testing.T) {
 	}
 }
 
-// TestTestCredentialUsesLocalPrecheckOnly 验证连接测试只基于本地密文状态判断，不访问外部网络。
-func TestTestCredentialUsesLocalPrecheckOnly(t *testing.T) {
+// TestTestCredentialSendsRealRequestWithCookie 验证连接测试会发起真实 HTTP 请求并注入解密后的 Cookie。
+func TestTestCredentialSendsRealRequestWithCookie(t *testing.T) {
+	var receivedCookie string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/cache" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+		receivedCookie = request.Header.Get("Cookie")
+		_, _ = writer.Write([]byte(`{"errno":0,"data":{"roll_data":[]}}`))
+	}))
+	defer server.Close()
+
 	store := &memoryStore{items: map[string]model.DataSourceCredential{}}
-	service := Service{Store: store, KeyProvider: StaticKeyProvider([]byte("12345678901234567890123456789012"))}
+	service := Service{
+		Store:       store,
+		KeyProvider: StaticKeyProvider([]byte("12345678901234567890123456789012")),
+		Clock:       fakeClock{now: time.Date(2026, 6, 22, 15, 28, 41, 0, time.UTC)},
+		HTTPClient:  server.Client(),
+	}
+	_, err := service.Save(context.Background(), SaveRequest{
+		Config: Config{
+			ProviderID:         "cls",
+			ProviderName:       "财联社",
+			Capability:         "快讯 / 行业事件 / 日历",
+			AuthType:           AuthTypeCookie,
+			BaseURL:            server.URL,
+			CredentialStatus:   StatusNormal,
+			TimeoutSeconds:     15,
+			RateLimitPerMinute: 30,
+		},
+		Credential: "uid=real-user; token=real-token",
+	})
+	if err != nil {
+		t.Fatalf("save credential: %v", err)
+	}
 
 	result, err := service.Test(context.Background(), TestRequest{ProviderID: "cls", Target: "flash"})
 	if err != nil {
 		t.Fatalf("test credential: %v", err)
 	}
-	if result.Status != testStatusUntested {
+	if result.Status != testStatusSuccess {
 		t.Fatalf("result status = %s", result.Status)
+	}
+	if receivedCookie != "uid=real-user; token=real-token" {
+		t.Fatalf("received cookie = %q", receivedCookie)
+	}
+	stored := store.items["cls"]
+	if stored.LastTestStatus != testStatusSuccess || stored.LastTestedAt == nil {
+		t.Fatalf("test result should be persisted: %#v", stored)
+	}
+}
+
+// TestTestCredentialFailsOnRemoteError 验证真实预检会按 HTTP 状态码判断失败。
+func TestTestCredentialFailsOnRemoteError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = writer.Write([]byte(`{"error":"forbidden"}`))
+	}))
+	defer server.Close()
+
+	store := &memoryStore{items: map[string]model.DataSourceCredential{}}
+	service := Service{
+		Store:       store,
+		KeyProvider: StaticKeyProvider([]byte("12345678901234567890123456789012")),
+		Clock:       fakeClock{now: time.Date(2026, 6, 22, 15, 28, 41, 0, time.UTC)},
+		HTTPClient:  server.Client(),
+	}
+	_, err := service.Save(context.Background(), SaveRequest{
+		Config: Config{
+			ProviderID:         "cls",
+			ProviderName:       "财联社",
+			Capability:         "快讯 / 行业事件 / 日历",
+			AuthType:           AuthTypeCookie,
+			BaseURL:            server.URL,
+			CredentialStatus:   StatusNormal,
+			TimeoutSeconds:     15,
+			RateLimitPerMinute: 30,
+		},
+		Credential: "uid=real-user; token=real-token",
+	})
+	if err != nil {
+		t.Fatalf("save credential: %v", err)
+	}
+
+	result, err := service.Test(context.Background(), TestRequest{ProviderID: "cls", Target: "flash"})
+	if err != nil {
+		t.Fatalf("test credential: %v", err)
+	}
+	if result.Status != testStatusFailed {
+		t.Fatalf("result status = %s", result.Status)
+	}
+	if !strings.Contains(strings.Join(result.Messages, " "), "403") {
+		t.Fatalf("result should include status code: %+v", result.Messages)
 	}
 }
 
@@ -176,6 +260,82 @@ func TestResolveReturnsEmptyCredentialForCredentiallessProvider(t *testing.T) {
 	}
 	if credential.Cookie != "" || credential.APIKey != "" || credential.BearerToken != "" || credential.HeaderValue != "" {
 		t.Fatalf("credentialless provider should not expose secret fields: %#v", credential)
+	}
+}
+
+// TestListIncludesSplitSinaAndTencentStockProviders 验证股票行情 Provider 目录拆分展示新浪和腾讯渠道。
+func TestListIncludesSplitSinaAndTencentStockProviders(t *testing.T) {
+	service := Service{
+		Store:       &memoryStore{items: map[string]model.DataSourceCredential{}},
+		KeyProvider: StaticKeyProvider([]byte("12345678901234567890123456789012")),
+	}
+
+	view, err := service.List(context.Background())
+	if err != nil {
+		t.Fatalf("list credentials: %v", err)
+	}
+
+	expected := map[string]struct {
+		name     string
+		baseURL  string
+		iconType string
+	}{
+		"sina":    {name: "新浪财经", baseURL: "https://hq.sinajs.cn", iconType: "sina"},
+		"tencent": {name: "腾讯财经", baseURL: "https://web.ifzq.gtimg.cn", iconType: "tencent"},
+	}
+	for providerID, want := range expected {
+		config, ok := view.Configs[providerID]
+		if !ok {
+			t.Fatalf("%s provider config is missing", providerID)
+		}
+		if config.ProviderName != want.name || config.AuthType != AuthTypeNone || config.BaseURL != want.baseURL {
+			t.Fatalf("unexpected %s config: %#v", providerID, config)
+		}
+
+		var provider Provider
+		for _, item := range view.Providers {
+			if item.ID == providerID {
+				provider = item
+				break
+			}
+		}
+		if provider.Name != want.name || provider.Status != StatusNormal || provider.IconType != want.iconType {
+			t.Fatalf("unexpected %s provider: %#v", providerID, provider)
+		}
+	}
+}
+
+// TestPreflightURLSupportsSplitSinaAndTencentTargets 验证股票行情源预检分别命中新浪和腾讯渠道。
+func TestPreflightURLSupportsSplitSinaAndTencentTargets(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		target   string
+		expected string
+	}{
+		{
+			name:     "sina quote",
+			config:   Config{ProviderID: "sina", BaseURL: "https://hq.sinajs.cn"},
+			target:   "quote",
+			expected: "https://hq.sinajs.cn/list=sh000001",
+		},
+		{
+			name:     "tencent kline",
+			config:   Config{ProviderID: "tencent", BaseURL: "https://web.ifzq.gtimg.cn"},
+			target:   "kline",
+			expected: "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000001,day,,,2,qfq",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetURL, err := preflightURL(tt.config, tt.target)
+			if err != nil {
+				t.Fatalf("build preflight url: %v", err)
+			}
+			if targetURL != tt.expected {
+				t.Fatalf("preflight url = %q", targetURL)
+			}
+		})
 	}
 }
 
@@ -229,5 +389,45 @@ func TestResolveMissingCredentialFails(t *testing.T) {
 	_, err := service.Resolve(context.Background(), "xueqiu")
 	if !errors.Is(err, ErrCredentialNotConfigured) {
 		t.Fatalf("resolve error = %v", err)
+	}
+}
+
+// TestListRestoresLatestTestResult 验证凭据页重新加载时会展示最近一次真实预检结果。
+func TestListRestoresLatestTestResult(t *testing.T) {
+	testedAt := time.Date(2026, 6, 22, 15, 28, 41, 0, time.UTC)
+	store := &memoryStore{items: map[string]model.DataSourceCredential{
+		"cls": {
+			ProviderID:           "cls",
+			ProviderName:         "财联社",
+			Capability:           "快讯 / 行业事件 / 日历",
+			AuthType:             string(AuthTypeCookie),
+			BaseURL:              "https://www.cls.cn",
+			CredentialStatus:     string(StatusNormal),
+			MaskedCredential:     "uid=****",
+			LastTestStatus:       testStatusSuccess,
+			LastTestResponseTime: 186,
+			LastTestedAt:         &testedAt,
+			LastTestMessages:     `["HTTP 状态码：200","响应数据可读取"]`,
+			TimeoutSeconds:       15,
+			RateLimitPerMinute:   30,
+			EncryptedCredential:  "cipher",
+			CredentialNonce:      "nonce",
+		},
+	}}
+	service := Service{
+		Store:       store,
+		KeyProvider: StaticKeyProvider([]byte("12345678901234567890123456789012")),
+	}
+
+	view, err := service.List(context.Background())
+	if err != nil {
+		t.Fatalf("list credentials: %v", err)
+	}
+
+	if view.TestResult.Status != testStatusSuccess || view.TestResult.ResponseTimeMS != 186 {
+		t.Fatalf("test result not restored: %+v", view.TestResult)
+	}
+	if len(view.TestResult.Messages) != 2 || view.TestResult.Messages[0] != "HTTP 状态码：200" {
+		t.Fatalf("unexpected restored messages: %+v", view.TestResult.Messages)
 	}
 }

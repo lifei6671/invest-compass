@@ -1,5 +1,7 @@
 export type WatchlistItem = {
   id: number;
+  sourceSymbol: string;
+  sortOrder: number;
   starred: boolean;
   name: string;
   code: string;

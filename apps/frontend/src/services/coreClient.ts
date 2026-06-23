@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
 type CoreEnvelope<T> = {
@@ -9,9 +9,49 @@ type CoreEnvelope<T> = {
   requestId?: string;
 };
 
+export class CoreClientError extends Error {
+  code?: number;
+  requestId?: string;
+  traceId?: string;
+
+  constructor(message: string, options: { code?: number; requestId?: string; traceId?: string } = {}) {
+    super(message);
+    this.name = "CoreClientError";
+    this.code = options.code;
+    this.requestId = options.requestId;
+    this.traceId = options.traceId;
+  }
+}
+
 export type CoreHealth = {
   status: string;
   version: string;
+  dbStatus?: string;
+};
+
+export type AppBootStatus = {
+  ready: boolean;
+  progress: number;
+  currentStepId: string;
+  steps: Array<{
+    id: string;
+    index: number;
+    title: string;
+    status: "completed" | "running" | "pending" | "failed";
+    badgeText: string;
+  }>;
+  taskDetail: {
+    taskId: string;
+    elapsed: string;
+    currentStage: string;
+    remaining: string;
+  };
+  logs: Array<{
+    id: string;
+    time: string;
+    status: "success" | "running" | "pending" | "error";
+    message: string;
+  }>;
 };
 
 export type DashboardSummary = {
@@ -743,6 +783,7 @@ export type DataSourceCredentialConfig = {
   rateLimitPerMinute: number;
   maskedCredential: string;
   note?: string;
+  lastTestResult?: DataSourceCredentialTestResult;
 };
 
 export type DataSourceCredentialTestTarget = {
@@ -825,16 +866,49 @@ export type ExportLogsResult = {
   file_name: string;
 };
 
+async function invoke<T>(command: string, payload?: InvokeArgs): Promise<T> {
+  try {
+    return await tauriInvoke<T>(command, payload);
+  } catch (cause) {
+    throw normalizeCoreError(cause);
+  }
+}
+
 function unwrapCoreResponse<T>(response: CoreEnvelope<T>): T {
   if (response.code !== 0) {
-    throw new Error(response.message || "本地核心服务调用失败");
+    throw new CoreClientError(sanitizeCoreErrorMessage(response.message || "本地核心服务调用失败"), {
+      code: response.code,
+      requestId: response.requestId,
+      traceId: response.traceId,
+    });
   }
   return response.data;
+}
+
+function normalizeCoreError(cause: unknown): CoreClientError {
+  if (cause instanceof CoreClientError) {
+    return cause;
+  }
+  const message = cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "本地核心服务调用失败";
+  return new CoreClientError(sanitizeCoreErrorMessage(message));
+}
+
+function sanitizeCoreErrorMessage(message: string): string {
+  return message
+    .replace(/(Authorization|Proxy-Authorization)\s*:\s*[^,\n\r;]+/gi, "$1: [REDACTED]")
+    .replace(/(api[_-]?key|token|cookie|password|secret)=([^;&\s]+)/gi, "$1=[REDACTED]")
+    .replace(/sk-[A-Za-z0-9_-]{6,}/g, "[REDACTED]");
 }
 
 /// 通过固定 Rust command 读取 Go core 健康状态，前端不接触 Go core 地址或 token。
 export async function coreHealth(): Promise<CoreHealth> {
   const response = await invoke<CoreEnvelope<CoreHealth>>("core_health");
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取应用启动初始化状态，启动页不直接调用各业务接口。
+export async function appBootStatus(): Promise<AppBootStatus> {
+  const response = await invoke<CoreEnvelope<AppBootStatus>>("app_boot_status");
   return unwrapCoreResponse(response);
 }
 

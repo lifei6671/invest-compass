@@ -1,5 +1,6 @@
 pub mod ai_config;
 pub mod autostart;
+pub mod boot;
 pub mod core;
 pub mod dashboard;
 pub mod data_source_credentials;

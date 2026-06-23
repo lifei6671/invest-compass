@@ -243,7 +243,7 @@ FE7 自动化、桌面 smoke 和验收报告
 
 ### FE04 验证 sidecar 启动和 health 链路
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：FE03
 - 交付物：
   - 本地启动记录或自动化 smoke 输出。
@@ -258,10 +258,15 @@ FE7 自动化、桌面 smoke 和验收报告
   - token 不出现在日志、前端状态或错误消息中。
 - 退出条件：
   - 真实 invoke 主链路可作为后续页面接入基础。
+- 实施记录：
+  - 前端 `CoreHealth` 已接收 Go core 返回的 `dbStatus`，设置页左下角 SQLite 状态不再只按 Go Core 连接状态推断。
+  - 已通过 `core_health` 前端单测和 Rust sidecar 串行测试验证 token 不进入前端入参，sidecar 启动参数不包含 token。
+  - 待补真实 Tauri app 启动 smoke 记录；Go actions/main 相关测试当前受本机 SQLite FTS5 不可用阻塞。
+  - `make dev` 是长驻 Tauri/Vite GUI 开发命令，本清单推进时不在自动化步骤中直接挂起执行；真实桌面 smoke 需要用户本地启动后补记录。
 
 ### FE05 验证统一响应和错误解包
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：FE04
 - 交付物：
   - `apps/frontend/src/services/coreClient.test.ts`
@@ -275,10 +280,44 @@ FE7 自动化、桌面 smoke 和验收报告
   - 测试覆盖核心错误分支。
 - 退出条件：
   - 页面可以统一处理真实 command 的成功和失败。
+- 实施记录：
+  - `coreClient` 已统一包装 Tauri command 错误为 `CoreClientError`。
+  - 后端业务错误会保留 `code`、`requestId`、`traceId`，展示消息会脱敏 `Authorization`、`Proxy-Authorization`、`api_key`、`token`、`cookie`、`password`、`secret` 和 `sk-*` 形态密钥。
+  - `apps/frontend/src/services/coreClient.test.ts` 已覆盖成功响应、业务错误、Rust command/sidecar transport 错误。
+
+### FE05A 接入全局初始化等待页
+
+- 状态：`[~]`
+- 依赖：FE04、FE05
+- 交付物：
+  - `apps/frontend/src/pages/initialization/`
+  - `apps/frontend/src/app/App.tsx`
+  - `apps/desktop/src-tauri/src/commands/boot.rs`
+- 执行动作：
+  - 应用启动默认进入初始化等待页，业务 Sidebar 和 TopBar 处于锁定状态。
+  - React bundle 挂载前由 `index.html` 展示轻量启动占位，避免桌面窗口先出现白屏。
+  - 前端通过固定 Rust command `app_boot_status` 轮询启动状态，不使用前端定时器假完成。
+  - 后端首次即 ready 时，前端仍保留一段最短初始化页展示时间，避免从白屏直接跳到总览。
+  - Rust command 在初始化页期间启动 Go Core Sidecar，确认 `core_health`，读取 `/api/search/status`。
+  - 当搜索状态为 `NEED_REBUILD` 且 FTS5 可用时，启动期主动调用 `/api/search/rebuild` 的 `all` 范围并等待状态刷新。
+  - 当搜索状态为 `BUILDING` 时继续停留初始化页；当后端返回可进入状态时切换到总览页面。
+- 验收标准：
+  - 初始化期间不进入 Dashboard、自选股、AI 分析等业务页面。
+  - Sidecar、SQLite migration、搜索索引状态由后端真实状态驱动。
+  - 启动错误进入初始化页日志和步骤失败态，错误文案不泄露 token、cookie、API Key、Authorization 或真实敏感路径。
+  - FTS5 环境不可用时不永久阻塞启动页，但左侧状态和设置页搜索索引仍展示真实不可用状态。
+  - 需要端到端验证项：`make dev` 启动后确认初始化页出现、索引重建时停留、完成后进入总览。
+- 实施记录：
+  - 已新增 `app_boot_status` Rust command，并注册到 Tauri invoke handler。
+  - 已将 sidecar 同步启动从 Tauri setup 移到初始化页状态 command，避免窗口展示前阻塞。
+  - 已新增前端 `appBootStatus()` typed service 和启动页轮询逻辑。
+  - 已新增 HTML 级启动占位和最短初始化页展示窗口，处理 `make dev` 下 WebView 先白屏、后端快速 ready 直接进入总览的问题。
+  - 已验证：`pnpm --dir apps --filter @invest-compass/frontend test -- src/services/coreClient.test.ts src/app/App.test.tsx -t "appBootStatus|初始化"`。
+  - 已验证：`pnpm --dir apps --filter @invest-compass/frontend check`、`pnpm --dir apps --filter @invest-compass/frontend build`、`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml boot::tests -- --nocapture`、`cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`、`cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check`、`git diff --check`。
 
 ### FE06 验证 Provider 状态基线
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：FE04
 - 交付物：
   - Dashboard 或设置中心数据源状态验收记录。
@@ -292,10 +331,16 @@ FE7 自动化、桌面 smoke 和验收报告
   - Dashboard summary 不生成假行情、假新闻或假报告。
 - 退出条件：
   - 真实 Provider 阻塞项和 UI 对接项已拆开。
+- 实施记录：
+  - `providers_status()` 已通过固定 Rust command 读取 Go core `/api/providers/status`，后端统一返回脱敏后的 Provider summary。
+  - Dashboard provider summary 与 Provider 状态接口共用 `dashboard.ProviderStatusSummary`，不可用 Provider 不会被聚合为正常状态。
+  - 前端左下角和 Dashboard 状态展示已覆盖 Provider 不可用状态；不可用时显示“不可用”并保留脱敏错误信息。
+  - 已验证：`go test ./internal/actions -run 'TestProviderStatusReturnsSafeStatus|TestProviderStatusUsesNewsProviderStatus'`、`go test ./internal/service/dashboard -run 'TestProviderStatus|TestBuildSummary'`、`pnpm --dir apps --filter @invest-compass/frontend test -- App.test.tsx DashboardOverview.test.tsx`。
+  - 混合运行包含 Dashboard store 迁移的 Go 测试仍受本机 SQLite FTS5 不可用阻塞，不影响 Provider 状态基线结论。
 
 ### FE06A 建立数据拉取和验收数据基线
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：FE04-FE06
 - 交付物：
   - 数据准备记录，可放入本文附录或阶段验收记录。
@@ -312,6 +357,24 @@ FE7 自动化、桌面 smoke 和验收报告
   - 数据准备记录能解释哪些验证依赖真实外部环境，哪些可以本地自动化复测。
 - 退出条件：
   - 页面接入任务可以基于明确数据样本或明确阻塞项推进。
+- 初版数据基线：
+
+| 后续任务 | 页面 / 流程 | 主要 typed service | 数据来源 | 最小验收场景 | 阻塞 / 待确认 |
+| --- | --- | --- | --- | --- | --- |
+| FE07 | Dashboard 总览 | `coreHealth`、`dashboardSummary`、`providersStatus` | `watchlists`、`quotes`、`analysis_reports`、`tasks`、`news_items`、Provider 状态 | 空库展示空态；Provider 不可用展示不可用；有报告/任务/新闻时读取后端摘要 | 无新增阻塞；真实外部 Provider 样本待桌面 smoke |
+| FE08 / FE13 | 自选股列表和写操作 | `watchlistList`、`watchlistCreate`、`watchlistUpdate`、`watchlistDelete`、`stockSearch`、`marketQuote` | `watchlists`、`stocks`、`quotes`、Market Provider | 空自选展示空态；搜索后新增；删除后消失；行情失败不填假价格 | `[!]` S5-04：行业、趋势、星标等扩展字段口径待确认 |
+| FE09 | 个股详情 | `marketQuote`、`marketKline`、`marketIndicators`、`newsList`、`openExternalURL` | `quotes`、`klines`、`news_items`、Market/News Provider | 用自选股或搜索结果 symbol 验证 quote、K 线、指标、新闻加载/空态/错误态；非 HTTPS 外链不打开 | `[!]` S5-06：公司资料和标签接口待确认 |
+| FE10 | 资讯中心 | `newsMarket`、`newsList`、`openExternalURL` | `news_items`、News Provider | 市场新闻空态；个股新闻按 symbol 查询；Provider 未配置显示不可用；HTTPS 原文打开 | `[!]` S5-13：资讯侧栏统计、热点、加入上下文待确认 |
+| FE11 / FE20 | 报告历史、报告详情、复制和导出 | `reportList`、`reportGet`、`reportDelete`、`searchReports` | `analysis_reports`、`search_documents`、FTS | 空报告列表；报告详情失败态；有报告时列表和详情字段一致；复制/导出不含完整 `input_snapshot` | `[!]` S5-10：收藏、批量、统计接口待确认 |
+| FE12 / FE21 | 任务历史、事件回放、日志 | `taskList`、`taskGet`、`taskEvents`、`taskLogsList`、`taskLogGet`、`taskLogSummary`、`taskLogDiagnosis`、`taskLogContext`、`taskLogsExport` | `tasks`、`task_events`、`task_log_entries` | 空任务列表；FAILED 展示脱敏失败原因；事件按 ID 递增；日志空态和错误态 | `[!]` S5-15：任务重试和报告跳转规则待确认 |
+| FE14 | Prompt 配置 | `promptTemplatesList`、`promptTemplatesGet`、`promptTemplatesCreate`、`promptTemplatesUpdate`、`promptTemplatesDelete` | `prompt_templates` | 列表/详情/创建/更新/删除；非法变量拒绝；内置模板删除展示后端错误 | 无新增阻塞 |
+| FE15 / FE17-FE19 | 模型配置和 AI 分析任务 | `aiConfigList`、`aiConfigSave`、`aiConfigDelete`、`aiConfigTest`、`analysisTaskCreate`、`analysisTaskCancel`、`analysisTaskSubscribe`、`taskEvents`、`reportGet` | `ai_configs`、Rust vault、外部模型 Provider、`tasks`、`task_events`、`analysis_reports` | 未配置模型不能创建任务；配置模型后测试连接；任务创建后订阅事件；成功读取报告，失败展示脱敏原因 | 外部模型网络和用户密钥依赖真实环境 |
+| FE16 | 设置中心基础能力 | `settingsGet`、`settingsSet`、`workspaceGet`、`workspaceSet`、`workspaceOpen`、`workspaceMigrationPlan`、`workspaceMigrate`、`cacheStats`、`cacheClean`、`providersStatus`、`searchStatus`、`searchRebuild`、`checkUpdate`、`exportLogs` | `settings`、工作区文件系统、缓存目录、Provider 状态、搜索索引、日志目录 | 设置读取/保存后刷新回显；缓存清理确认；搜索索引刷新/重建；日志导出脱敏 | `[!]` S2-07：代理连接测试；`[!]` S6-03：LICENSE/手册/发布说明打开方式 |
+
+- 初版执行记录：
+  - 已基于 FE02 契约矩阵和 S0/S5 清单完成页面级数据来源梳理。
+  - 未通过真实 Tauri GUI 拉取最小样本；真实样本记录需在 FE04 桌面 smoke 后补充。
+  - 当前可先推进 FE07-FE12 的空态、错误态和 Provider 不可用态对接；涉及 `[!]` 的扩展能力不得继续 mock，需要先确认方案。
 
 ---
 
@@ -319,7 +382,7 @@ FE7 自动化、桌面 smoke 和验收报告
 
 ### FE07 接入 Dashboard 只读数据
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：FE06A
 - 交付物：
   - `apps/frontend/src/pages/dashboard/DashboardPage.tsx`
@@ -334,10 +397,16 @@ FE7 自动化、桌面 smoke 和验收报告
   - `App.test.tsx` 或页面测试覆盖主要状态。
 - 退出条件：
   - 首页能反映真实首版数据状态。
+- 实施记录：
+  - Dashboard store 已通过 `coreHealth()`、`dashboardSummary()`、`watchlistList()`、`marketQuote()`、`marketKline()` 编排首页真实数据。
+  - 总览页已展示后端返回的自选股摘要、最近报告、最近任务、市场新闻和 Provider 状态。
+  - 已移除首页热点区未闭环的行业热点、概念热点、重点观察入口；涨跌分布卡不再展示硬编码“暂未接入”统计占位。
+  - 自动化覆盖：`apps/frontend/src/stores/dashboardStore.test.ts`、`apps/frontend/src/components/dashboard/DashboardOverview.test.tsx`。
+  - 端到端待测：真实桌面环境中 Dashboard 正常态、空态、Provider 异常态和 K 线迷你走势由用户验收。
 
 ### FE08 接入自选股只读和详情入口
 
-- 状态：`[ ]`
+- 状态：`[~]`
 - 依赖：FE06A
 - 交付物：
   - `apps/frontend/src/components/watchlist/*`
@@ -346,12 +415,20 @@ FE7 自动化、桌面 smoke 和验收报告
   - 对每个 symbol 调用 `marketQuote()` 展示行情。
   - 行情失败时展示错误，不填假价格。
   - 点击 symbol 进入 `/stocks/:symbol`。
+  - 使用已加载的真实列表字段做市场和标签本地筛选，不新增后端接口。
 - 验收标准：
   - 空自选展示空态。
   - 行情失败不影响列表整体展示。
   - 详情入口携带标准 symbol。
 - 退出条件：
   - 自选股列表不再依赖本地 mock。
+- 执行记录：
+  - 2026-06-23 已确认自选股页面通过 `watchlistList()` 拉取列表，通过 `marketQuote()` 补行情；行情失败降级为空值，不填假价格。
+  - 2026-06-23 已确认新增、编辑、删除分别调用 `watchlistCreate()`、`watchlistUpdate()`、`watchlistDelete()`；新增前通过 `stockSearch()` 选取真实股票。
+  - 2026-06-23 已将市场和标签筛选改为基于已加载列表的本地过滤，移除“筛选功能待接入”假交互。
+  - 自动化覆盖：`apps/frontend/src/components/watchlist/WatchlistPage.test.tsx` 已覆盖空态、搜索新增、编辑、删除、备注范围搜索、市场/标签本地筛选。
+  - 待用户端到端验收：桌面环境连接真实 Go Core 后，空列表、新增、编辑、删除、刷新、详情跳转、行情 Provider 异常手工复核。
+  - 仍阻塞：行业、趋势、星标等扩展字段见 S5-04，未补假数据。
 
 ### FE09 接入个股详情、K 线、指标和新闻
 
@@ -860,8 +937,8 @@ pnpm --dir apps release:check:local
 | 搜索索引 | FTS/GSE 状态、索引数量、重建全部/分类索引 | `searchStatus`、`searchRebuild` | `search_status`、`search_rebuild` | `POST /api/search/status`、`POST /api/search/rebuild` | `search_index_*`、`stocks`、`analysis_reports`、`news_items`、`watchlists` | `[~]` S1-06；GSE 当前可显示 fallback，不作为阻塞 |
 | 桌面能力 | 开机自启、关闭后托盘 | `autostartGet`、`autostartSet`、`settingsGet`、`settingsSet` | `autostart_get`、`autostart_set`、`settings_get`、`settings_set` | Tauri autostart plugin、`POST /api/settings/*` | 系统登录项、`settings` | `[~]` S1-04；Windows/macOS 差异需手工验收 |
 | 代理设置 | 代理模式、代理地址、脱敏回显、编辑入口 | `settingsGet`、`settingsSet` | `settings_get`、`settings_set` | `POST /api/settings/*` | `settings`；代理密码应走 vault | `[!]` S2-06/S2-07；代理密码安全存储和连接测试接口需确认 |
-| 数据源概览 | Provider 真实状态、Provider 不可用空态 | `providersStatus` | `providers_status` | `POST /api/providers/status` | Provider runtime 状态 | `[ ]` S3-01；不能用假 Provider 状态 |
-| 凭据管理 | Provider 凭据脱敏状态、保存、清除、测试连接 | `dataSourceCredentialsList`、`dataSourceCredentialsSave`、`dataSourceCredentialsClear`、`dataSourceCredentialsTest` | `data_source_credentials_list`、`data_source_credentials_save`、`data_source_credentials_clear`、`data_source_credentials_test` | `POST /api/data-source/credentials/list`、`POST /api/data-source/credentials/save`、`POST /api/data-source/credentials/clear`、`POST /api/data-source/credentials/test` | `data_source_credentials`；AES-GCM 密文 + 工作区密钥文件 | `[~]` S3-02/S3-03 已完成；S3-04 待页面手工验收；S3-05 已补 resolver，生产 Provider 接入点待确认 |
+| 数据源概览 | Provider 真实状态、Provider 不可用空态；默认进入数据源设置时定位到概览 | `providersStatus` | `providers_status` | `POST /api/providers/status` | Provider runtime 状态 | `[ ]` S3-01；不能用假 Provider 状态；2026-06-23 已修正默认子 Tab 为数据源概览 |
+| 凭据管理 | Provider 凭据脱敏状态、保存、清除、测试连接；股票行情源配置 | `dataSourceCredentialsList`、`dataSourceCredentialsSave`、`dataSourceCredentialsClear`、`dataSourceCredentialsTest` | `data_source_credentials_list`、`data_source_credentials_save`、`data_source_credentials_clear`、`data_source_credentials_test` | `POST /api/data-source/credentials/list`、`POST /api/data-source/credentials/save`、`POST /api/data-source/credentials/clear`、`POST /api/data-source/credentials/test` | `data_source_credentials`；AES-GCM 密文 + 工作区密钥文件；`sina`、`tencent` 为无需凭据股票数据 Provider；`settings.data_source.default_market_source` | `[~]` S3-02/S3-03 已完成；S3-04 待页面手工验收；S3-05 已补 resolver；2026-06-23 已拆分“新浪财经 / 腾讯财经”配置和对应真实预检目标；“自动降级”已接入 Go runtime 设置读取，当前沿用新浪搜索/实时行情、腾讯 K 线、东财 K 线兜底链路；显式单一源路由策略待确认 |
 | 数据说明 | 数据范围、来源、时效、AI 上下文边界、FAQ | 静态说明 + 子 Tab 切换 + `message.info` | 无 | 无 | 文档型静态页面 | `[~]` S3-06；数据源概览、凭据管理跳转已接入，页面手工验收待补 |
 | 通知设置 / TopBar 通知 | 系统通知开关、应用内未读角标、通知列表浮层 | `settingsGet/settingsSet`、`notificationsList`、`notificationsUnreadCount`、`notificationsMarkRead`、`notificationsMarkAllRead`、`notificationsClearRead`、`sendConfiguredDesktopNotification` | `settings_get/settings_set`、`notifications_*`、Tauri notification plugin | `POST /api/settings/*`、`POST /api/notifications/*`；系统通知走 Rust/Tauri | `settings`、`notifications` | `[~]` S4-01/S4-02/S4-03 已接 settings、通知表/API、TopBar Badge/Popover；S4-04 系统通知服务和权限降级已接，真实事件触发和 macOS 手工验收待 S4-05 |
 | 关于应用 | 检查更新、日志导出 | `checkUpdate`、`exportLogs` | `check_update`、`export_logs` | `POST /api/update/check`、`POST /api/logs/export` | manifest 源、日志目录 | `[ ]` S6-01/S6-02；LICENSE/用户手册/发布说明打开方式见 S6-03 |

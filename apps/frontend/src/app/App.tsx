@@ -11,6 +11,7 @@ import {
   aiConfigList,
   aiConfigSave,
   aiConfigTest,
+  appBootStatus,
   autostartGet,
   autostartSet,
   cacheClean,
@@ -37,6 +38,7 @@ import {
   watchlistUpdate,
   workspaceGet,
   workspaceSet,
+  type AppBootStatus,
   type AIConfig,
   type AIConfigSavePayload,
   type AIConfigTestResult,
@@ -78,6 +80,7 @@ import {
 import { APP_FONT } from "../styles/fonts";
 import { appAntdLocale } from "../lib/antdLocale";
 import { AppShell } from "./AppShell";
+import { AppInitializationPage } from "../pages/initialization/AppInitializationPage";
 
 const DashboardPage = lazy(() =>
   import("../pages/dashboard/DashboardPage").then((module) => ({
@@ -209,7 +212,66 @@ export const APP_NAV_ITEMS = [
 
 export const APP_ROUTE_PATHS = Object.values(APP_ROUTES);
 
-export function App() {
+export type AppBootState = "initializing" | "ready" | "failed";
+
+type AppProps = {
+  initialBootState?: AppBootState;
+  bootStatusPollIntervalMs?: number;
+  minimumInitializationVisibleMs?: number;
+};
+
+const defaultBootStatusPollIntervalMs = 800;
+const defaultMinimumInitializationVisibleMs = 900;
+
+export function App(props: AppProps = {}) {
+  const [bootState, setBootState] = useState<AppBootState>(props.initialBootState ?? defaultBootState());
+  const [bootStatus, setBootStatus] = useState<AppBootStatus | null>(null);
+  const bootStatusPollIntervalMs = props.bootStatusPollIntervalMs ?? defaultBootStatusPollIntervalMs;
+  const minimumInitializationVisibleMs = props.minimumInitializationVisibleMs ?? defaultMinimumInitializationVisibleMs;
+
+  useEffect(() => {
+    if (bootState !== "initializing") {
+      return;
+    }
+    let active = true;
+    let timer: number | undefined;
+    const startedAt = Date.now();
+    const pollBootStatus = async () => {
+      try {
+        const nextStatus = await appBootStatus();
+        if (!active) {
+          return;
+        }
+        setBootStatus(nextStatus);
+        if (nextStatus.ready) {
+          const remainingVisibleMs = Math.max(0, minimumInitializationVisibleMs - (Date.now() - startedAt));
+          timer = window.setTimeout(() => {
+            if (active) {
+              setBootState("ready");
+            }
+          }, remainingVisibleMs);
+          return;
+        }
+      } catch {
+        if (!active) {
+          return;
+        }
+        // 启动状态 command 自身失败时，停留在初始化页并展示脱敏错误；下一轮轮询仍可恢复。
+        setBootStatus(buildBootStatusReadFailedState());
+      }
+      if (active) {
+        timer = window.setTimeout(pollBootStatus, bootStatusPollIntervalMs);
+      }
+    };
+    void pollBootStatus();
+    return () => {
+      active = false;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [bootState, bootStatusPollIntervalMs, minimumInitializationVisibleMs]);
+
   return (
     <ConfigProvider
       locale={appAntdLocale}
@@ -228,36 +290,76 @@ export function App() {
       <AntApp>
         <AppErrorBoundary>
           <HashRouter>
-            <AppShell routes={APP_ROUTES} navItems={APP_NAV_ITEMS}>
-              <Suspense
-                fallback={
-                  <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-                    正在连接本地核心服务 <Spin className="ml-2" size="small" />
-                  </div>
-                }
-              >
-                <Routes>
-                  <Route path={APP_ROUTES.home} element={<DashboardPage />} />
-                  <Route path={APP_ROUTES.watchlist} element={<WatchlistPage />} />
-                  <Route path={APP_ROUTES.stockDetail} element={<StockDetailRoute />} />
-                  <Route path={APP_ROUTES.news} element={<NewsCenterPage />} />
-                  <Route path={APP_ROUTES.scheduler} element={<SchedulerRoute />} />
-                  <Route path={APP_ROUTES.analysis} element={<AnalysisPage />} />
-                  <Route path={APP_ROUTES.analysisRunning} element={<AnalysisRunningPage />} />
-                  <Route path={APP_ROUTES.reports} element={<ReportHistoryPage />} />
-                  <Route path={APP_ROUTES.reportDetail} element={<ReportDetailPage />} />
-                  <Route path={APP_ROUTES.tasks} element={<TaskHistoryPage />} />
-                  <Route path={APP_ROUTES.settings} element={<SettingsPage />} />
-                  <Route path={APP_ROUTES.aiSettings} element={<AISettingsRoute />} />
-                  <Route path="*" element={<Alert title="页面不存在" type="warning" showIcon />} />
-                </Routes>
-              </Suspense>
+            <AppShell routes={APP_ROUTES} navItems={APP_NAV_ITEMS} locked={bootState === "initializing"}>
+              {bootState === "initializing" ? (
+                <AppInitializationPage state={bootStatus ?? undefined} />
+              ) : (
+                <Suspense
+                  fallback={
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                      正在连接本地核心服务 <Spin className="ml-2" size="small" />
+                    </div>
+                  }
+                >
+                  <Routes>
+                    <Route path={APP_ROUTES.home} element={<DashboardPage />} />
+                    <Route path={APP_ROUTES.watchlist} element={<WatchlistPage />} />
+                    <Route path={APP_ROUTES.stockDetail} element={<StockDetailRoute />} />
+                    <Route path={APP_ROUTES.news} element={<NewsCenterPage />} />
+                    <Route path={APP_ROUTES.scheduler} element={<SchedulerRoute />} />
+                    <Route path={APP_ROUTES.analysis} element={<AnalysisPage />} />
+                    <Route path={APP_ROUTES.analysisRunning} element={<AnalysisRunningPage />} />
+                    <Route path={APP_ROUTES.reports} element={<ReportHistoryPage />} />
+                    <Route path={APP_ROUTES.reportDetail} element={<ReportDetailPage />} />
+                    <Route path={APP_ROUTES.tasks} element={<TaskHistoryPage />} />
+                    <Route path={APP_ROUTES.settings} element={<SettingsPage />} />
+                    <Route path={APP_ROUTES.aiSettings} element={<AISettingsRoute />} />
+                    <Route path="*" element={<Alert title="页面不存在" type="warning" showIcon />} />
+                  </Routes>
+                </Suspense>
+              )}
             </AppShell>
           </HashRouter>
         </AppErrorBoundary>
       </AntApp>
     </ConfigProvider>
   );
+}
+
+function defaultBootState(): AppBootState {
+  const env = (import.meta as unknown as { env?: { MODE?: string } }).env;
+  return env?.MODE === "test" ? "ready" : "initializing";
+}
+
+function buildBootStatusReadFailedState(): AppBootStatus {
+  return {
+    ready: false,
+    progress: 10,
+    currentStepId: "sidecar",
+    steps: [
+      { id: "sidecar", index: 1, title: "启动 Go Core Sidecar", status: "failed", badgeText: "失败" },
+      { id: "workspace", index: 2, title: "检查本地工作区与目录权限", status: "pending", badgeText: "等待中" },
+      { id: "sqlite_migration", index: 3, title: "SQLite 数据库迁移 / 重建索引", status: "pending", badgeText: "等待中" },
+      { id: "tokenizer", index: 4, title: "加载分词器（GSE / 全文检索词典）", status: "pending", badgeText: "等待中" },
+      { id: "data_source", index: 5, title: "初始化数据源配置", status: "pending", badgeText: "等待中" },
+      { id: "market_cache", index: 6, title: "同步基础行情快照与资讯缓存", status: "pending", badgeText: "等待中" },
+      { id: "ready", index: 7, title: "完成基础检查并进入工作台", status: "pending", badgeText: "等待中" },
+    ],
+    taskDetail: {
+      taskId: "boot-status-read",
+      elapsed: "计算中",
+      currentStage: "启动状态读取失败",
+      remaining: "等待重试",
+    },
+    logs: [
+      {
+        id: "boot-status-read-failed",
+        time: "--:--:--",
+        status: "error",
+        message: "启动状态读取失败，请稍后重试",
+      },
+    ],
+  };
 }
 
 type SchedulerViewState = {

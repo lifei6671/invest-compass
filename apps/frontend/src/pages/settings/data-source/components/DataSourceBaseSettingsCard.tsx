@@ -17,9 +17,11 @@ type DataSourceBaseSettingsCardProps = {
 };
 
 const marketSourceOptions: Array<{ label: string; value: MarketSource }> = [
+  { label: "自动降级", value: "auto-fallback" },
   { label: "AkShare / EastMoney", value: "akshare-eastmoney" },
   { label: "EastMoney", value: "eastmoney" },
-  { label: "Sina / Tencent", value: "sina-tencent" },
+  { label: "新浪财经", value: "sina" },
+  { label: "腾讯财经", value: "tencent" },
   { label: "Custom Provider", value: "custom" },
 ];
 
@@ -101,7 +103,7 @@ export function DataSourceBaseSettingsCard(props: DataSourceBaseSettingsCardProp
           />
         </div>
       </div>
-      <p className="settings-data-source-note">数据源设置将影响总览、自选股、个股详情、资讯中心与 AI 分析的上下文构建。</p>
+      <p className="settings-data-source-note">选择自动降级时，会按已启用数据源顺序尝试；前一数据源无数据或数据不完整时使用下一个数据源备份。</p>
     </section>
   );
 }
@@ -117,6 +119,7 @@ function SelectField<Value extends string>(props: {
     <div className="settings-data-source-field">
       <label>{props.label}</label>
       <Select<Value>
+        aria-label={props.label}
         className="settings-basic-select settings-data-source-select"
         prefix={props.icon}
         value={props.value}

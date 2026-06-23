@@ -1845,6 +1845,16 @@ body {
   font-size: 15px;
 }
 
+.credential-provider-icon-sina {
+  background: #e11d2e;
+  font-size: 15px;
+}
+
+.credential-provider-icon-tencent {
+  background: #1677ff;
+  font-size: 15px;
+}
+
 .credential-provider-icon-alpha {
   background: #1f3b66;
 }

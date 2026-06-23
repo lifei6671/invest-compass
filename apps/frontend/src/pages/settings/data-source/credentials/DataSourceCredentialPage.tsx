@@ -11,6 +11,11 @@ import { CredentialOverviewCard } from "./components/CredentialOverviewCard";
 import { CredentialProviderList } from "./components/CredentialProviderList";
 import { CredentialSecurityCard } from "./components/CredentialSecurityCard";
 
+const stockTestTargetsByProvider: Record<string, Array<{ label: string; value: string }>> = {
+  sina: [{ label: "行情接口（/list）", value: "quote" }],
+  tencent: [{ label: "K线接口（/fqkline）", value: "kline" }],
+};
+
 export function DataSourceCredentialPage() {
   const { message, modal } = AntApp.useApp();
   const [providers, setProviders] = useState<DataSourceProvider[]>([]);
@@ -63,6 +68,16 @@ export function DataSourceCredentialPage() {
   const fallbackProviderId = providers[0]?.id ?? "";
   const selectedConfig = configs[selectedProviderId] ?? (fallbackProviderId ? configs[fallbackProviderId] : undefined);
   const selectedProvider = useMemo(() => providers.find((item) => item.id === selectedProviderId) ?? providers[0], [providers, selectedProviderId]);
+  const visibleTestTargets = useMemo(() => stockTestTargetsByProvider[selectedProviderId] ?? testTargets, [selectedProviderId, testTargets]);
+
+  useEffect(() => {
+    if (visibleTestTargets.length === 0) {
+      return;
+    }
+    if (!visibleTestTargets.some((item) => item.value === testTarget)) {
+      setTestTarget(visibleTestTargets[0].value);
+    }
+  }, [visibleTestTargets, testTarget]);
 
   const updateSelectedConfig = (value: CredentialConfig) => {
     setConfigs((current) => ({ ...current, [value.providerId]: value }));
@@ -77,6 +92,9 @@ export function DataSourceCredentialPage() {
     try {
       const data = await dataSourceCredentialsTest({ providerId: selectedProviderId, target: testTarget });
       setTestResult(data.result);
+      if (selectedConfig) {
+        updateSelectedConfig({ ...selectedConfig, lastTestResult: data.result });
+      }
       message.success("连接测试完成");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "连接测试失败");
@@ -88,7 +106,7 @@ export function DataSourceCredentialPage() {
   const selectProvider = (provider: DataSourceProvider) => {
     setSelectedProviderId(provider.id);
     setCredentialInput("");
-    setTestResult(provider.status === "not_configured" ? { status: "untested", messages: ["当前 Provider 尚未配置凭据"] } : { status: "untested", messages: ["尚未执行本地预检"] });
+    setTestResult(testResultForProvider(configs[provider.id], provider));
     message.info("已切换 Provider");
   };
 
@@ -171,7 +189,7 @@ export function DataSourceCredentialPage() {
             onClear={clearCredential}
           />
           <div className="credential-side-stack">
-            <CredentialConnectionTestCard targets={testTargets} target={testTarget} result={testResult} testing={testing} onTargetChange={setTestTarget} onRetest={runLocalConnectionTest} />
+            <CredentialConnectionTestCard targets={visibleTestTargets} target={testTarget} result={testResult} testing={testing} onTargetChange={setTestTarget} onRetest={runLocalConnectionTest} />
             <CredentialSecurityCard />
           </div>
         </div>
@@ -184,6 +202,16 @@ export function DataSourceCredentialPage() {
       <CredentialRiskNotice />
     </>
   );
+}
+
+function testResultForProvider(config: CredentialConfig | undefined, provider: DataSourceProvider): CredentialTestResult {
+  if (config?.lastTestResult?.status) {
+    return config.lastTestResult;
+  }
+  if (provider.status === "not_configured") {
+    return { status: "untested", messages: ["当前 Provider 尚未配置凭据"] };
+  }
+  return { status: "untested", messages: ["尚未执行真实连接测试"] };
 }
 
 function CredentialRiskNotice() {

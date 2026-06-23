@@ -1,5 +1,6 @@
-import { Badge, Button, Empty, Input, Layout, Popover, Space, Spin, Tag, Tooltip } from "antd";
+import { App as AntdApp, Badge, Button, Empty, Input, Layout, Popover, Space, Spin, Tag, Tooltip } from "antd";
 import {
+  BarChartOutlined,
   BellOutlined,
   CheckSquareOutlined,
   FileDoneOutlined,
@@ -62,6 +63,7 @@ const navIconByLabel = {
   总览: HomeOutlined,
   概览: HomeOutlined,
   自选股: StarOutlined,
+  个股详情: BarChartOutlined,
   "AI 分析": LineChartOutlined,
   报告历史: FileTextOutlined,
   资讯中心: FileDoneOutlined,
@@ -70,6 +72,17 @@ const navIconByLabel = {
 } as const;
 
 const notificationPollIntervalMs = 30_000;
+const lockedActionMessage = "系统初始化中，请稍候";
+const initializationNavItems = [
+  { path: "/", label: "总览" },
+  { path: "/watchlist", label: "自选股" },
+  { path: "/stocks", label: "个股详情" },
+  { path: "/analysis", label: "AI 分析" },
+  { path: "/reports", label: "报告历史" },
+  { path: "/news", label: "资讯中心" },
+  { path: "/tasks", label: "任务历史" },
+  { path: "/settings", label: "设置" },
+] as const;
 
 const desktopNotificationSettingKeys = [
   "notifications.system_enabled",
@@ -78,26 +91,57 @@ const desktopNotificationSettingKeys = [
   "notifications.provider_error",
 ] as const;
 
-export function AppShell(props: { routes: AppRouteMap; navItems: readonly AppNavItem[]; children: ReactNode }) {
+export function AppShell(props: { routes: AppRouteMap; navItems: readonly AppNavItem[]; children: ReactNode; locked?: boolean }) {
   const location = useLocation();
+  const { message } = AntdApp.useApp();
+  const locked = Boolean(props.locked);
+  const navItems = locked ? initializationNavItems : props.navItems;
+  const showLockedMessage = () => {
+    void message.info(lockedActionMessage);
+  };
   return (
     <Layout className="app-glass-root h-screen overflow-hidden">
       <Sider width={224} className="app-glass-sidebar !fixed bottom-0 left-0 top-0 z-20 h-screen shadow-[1px_0_0_#dfe7f2]">
         <aside className="flex h-full flex-col px-5 py-[18px]">
-          <Link to={props.routes.home} className="mb-8 flex items-center gap-3 text-slate-950 no-underline">
+          {locked ? (
+            <div className="mb-8 flex items-center gap-3 text-slate-950">
+              <img src={appIconUrl} alt="投研罗盘" className="h-10 w-10 shrink-0 rounded-[10px] object-cover" />
+              <div className="min-w-0">
+                <div className="whitespace-nowrap text-[16px] font-semibold leading-5">投研罗盘</div>
+                <div className="whitespace-nowrap text-[13px] leading-5 text-slate-700">Invest Compass</div>
+              </div>
+            </div>
+          ) : (
+            <Link to={props.routes.home} className="mb-8 flex items-center gap-3 text-slate-950 no-underline">
             <img src={appIconUrl} alt="投研罗盘" className="h-10 w-10 shrink-0 rounded-[10px] object-cover" />
             <div className="min-w-0">
               <div className="whitespace-nowrap text-[16px] font-semibold leading-5">投研罗盘</div>
               <div className="whitespace-nowrap text-[13px] leading-5 text-slate-700">Invest Compass</div>
             </div>
-          </Link>
+            </Link>
+          )}
           <nav aria-label="主导航" className="flex flex-col gap-2">
-            {props.navItems.map((item) => {
+            {navItems.map((item) => {
               const Icon = navIconByLabel[item.label as keyof typeof navIconByLabel] ?? HomeOutlined;
               const active =
-                item.path === props.routes.home
+                !locked &&
+                (item.path === props.routes.home
                   ? location.pathname === item.path
-                  : location.pathname.startsWith(item.path);
+                  : location.pathname.startsWith(item.path));
+              if (locked) {
+                return (
+                  <button
+                    key={item.path}
+                    type="button"
+                    aria-disabled="true"
+                    className="flex h-[42px] items-center gap-3 rounded-md border-0 bg-transparent px-5 text-left text-[14px] font-medium text-[#9ca3af] transition hover:bg-[#f8fafc]"
+                    onClick={showLockedMessage}
+                  >
+                    <Icon aria-hidden="true" className="text-[21px]" />
+                    {item.label}
+                  </button>
+                );
+              }
               return (
                 <Link
                   key={item.path}
@@ -114,12 +158,14 @@ export function AppShell(props: { routes: AppRouteMap; navItems: readonly AppNav
                 </Link>
               );
             })}
-            <Link to={props.routes.scheduler} className="sr-only">
-              任务调度
-            </Link>
+            {locked ? null : (
+              <Link to={props.routes.scheduler} className="sr-only">
+                任务调度
+              </Link>
+            )}
           </nav>
           <div className="flex-1" />
-          <ShellStatus />
+          <ShellStatus locked={locked} />
           <div className="mt-5 flex justify-end border-t border-[#e3e9f2] pt-4">
             <Tooltip title="侧栏折叠暂未接入">
               <Button aria-label="折叠侧栏" disabled type="text" icon={<MenuFoldOutlined />} />
@@ -128,19 +174,21 @@ export function AppShell(props: { routes: AppRouteMap; navItems: readonly AppNav
         </aside>
       </Sider>
       <Layout className="ml-[224px] h-screen overflow-hidden bg-transparent">
-        <TopBar />
+        <TopBar locked={locked} />
         <Content className="app-main-scroll h-[calc(100vh-72px)] overflow-y-auto px-8 py-6">{props.children}</Content>
       </Layout>
     </Layout>
   );
 }
 
-function TopBar() {
+function TopBar(props: { locked?: boolean }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { message } = AntdApp.useApp();
+  const locked = Boolean(props.locked);
   const load = useDashboardStore((store) => store.load);
   const state = useDashboardStore((store) => store.state);
-  const quoteStatus = dashboardQuoteStatus(state);
+  const quoteStatus = locked ? { badge: "success" as const, marketLabel: "A股 已收盘", timeLabel: "2025-05-22 15:29:45" } : dashboardQuoteStatus(state);
   const [keyword, setKeyword] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -195,6 +243,9 @@ function TopBar() {
   }, [loadNotificationUnreadCount]);
 
   useEffect(() => {
+    if (locked) {
+      return;
+    }
     loadNotificationUnreadCount()
       .catch(() => {
         previousUnreadCountRef.current = 0;
@@ -209,7 +260,11 @@ function TopBar() {
     return () => {
       window.clearInterval(timer);
     };
-  }, [loadNotificationUnreadCount]);
+  }, [loadNotificationUnreadCount, locked]);
+
+  const showLockedMessage = () => {
+    void message.info(lockedActionMessage);
+  };
 
   const handleNotificationOpenChange = (open: boolean) => {
     setNotificationOpen(open);
@@ -349,7 +404,7 @@ function TopBar() {
 
   return (
     <Header className="app-glass-topbar sticky top-0 z-10 flex h-[72px] items-center gap-4 overflow-visible border-b border-[#e3e9f2] !px-8 shadow-none">
-      <Tooltip title={searchError ?? "按 Enter 搜索股票"}>
+      <Tooltip title={locked ? lockedActionMessage : searchError ?? "按 Enter 搜索股票"}>
         <Input
           aria-label="全局搜索股票"
           className="h-9 min-w-[360px] max-w-[532px] flex-1 rounded-md border-[#d8e1ec] text-[14px]"
@@ -360,33 +415,39 @@ function TopBar() {
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
           onKeyDown={handleSearchKeyDown}
-          disabled={searching}
+          disabled={locked || searching}
         />
       </Tooltip>
       <Tag className="m-0 flex h-9 shrink-0 items-center rounded-md border-[#d8e7ff] bg-[#edf5ff] px-4 text-[14px] font-medium leading-9 text-[#1677ff]">{quoteStatus.marketLabel}</Tag>
       <div className="flex min-w-[190px] shrink-0 items-center gap-3 whitespace-nowrap text-[14px] text-slate-500">
-        <span>数据更新：</span>
+        <span>{locked ? "更新于" : "数据更新："}</span>
         <span>{quoteStatus.timeLabel}</span>
       </div>
       <Space className="ml-auto shrink-0" size={12} separator={<span className="h-5 w-px bg-[#e3e9f2]" />}>
-        <Button className="h-9 px-4 text-[14px]" icon={<ReloadOutlined />} onClick={() => void load()}>
+        <Button className="h-9 px-4 text-[14px]" icon={<ReloadOutlined />} onClick={locked ? showLockedMessage : () => void load()}>
           刷新
         </Button>
-        <Popover
-          arrow={false}
-          content={notificationContent}
-          open={notificationOpen}
-          placement="bottomRight"
-          trigger="click"
-          onOpenChange={handleNotificationOpenChange}
-        >
-          <Badge count={notificationUnreadCount} size="small" overflowCount={99}>
-            <Button aria-label="通知" className="h-9 px-3 text-[14px]" type="text" icon={<BellOutlined />}>
-              通知
-            </Button>
-          </Badge>
-        </Popover>
-        <Button className="h-9 px-3 text-[14px]" type="text" icon={<SettingOutlined />} onClick={() => navigate("/settings")}>
+        {locked ? (
+          <Button aria-label="通知" className="h-9 px-3 text-[14px] text-[#9ca3af]" type="text" icon={<BellOutlined />} onClick={showLockedMessage}>
+            通知
+          </Button>
+        ) : (
+          <Popover
+            arrow={false}
+            content={notificationContent}
+            open={notificationOpen}
+            placement="bottomRight"
+            trigger="click"
+            onOpenChange={handleNotificationOpenChange}
+          >
+            <Badge count={notificationUnreadCount} size="small" overflowCount={99}>
+              <Button aria-label="通知" className="h-9 px-3 text-[14px]" type="text" icon={<BellOutlined />}>
+                通知
+              </Button>
+            </Badge>
+          </Popover>
+        )}
+        <Button className="h-9 px-3 text-[14px]" type="text" icon={<SettingOutlined />} onClick={locked ? showLockedMessage : () => navigate("/settings")}>
           设置
         </Button>
       </Space>
@@ -480,7 +541,7 @@ function dashboardQuoteStatus(state: DashboardViewState | null): { badge: "defau
   return { badge: "default", marketLabel: "A股 等待数据", timeLabel: "--:--:--" };
 }
 
-function ShellStatus() {
+function ShellStatus(props: { locked?: boolean }) {
   const location = useLocation();
   const dashboardState = useDashboardStore((store) => store.state);
   const dashboardError = useDashboardStore((store) => store.error);
@@ -491,7 +552,7 @@ function ShellStatus() {
   });
 
   useEffect(() => {
-    if (!location.pathname.startsWith("/settings")) {
+    if (props.locked) {
       return;
     }
     let active = true;
@@ -499,7 +560,7 @@ function ShellStatus() {
       try {
         const healthRequest = coreHealth();
         const providersRequest = providersStatus()
-          .then((result) => ({ providers: result.items, error: null }))
+          .then((result) => ({ providers: Array.isArray(result.items) ? result.items : [], error: null }))
           .catch((cause) => ({
             providers: [] as ProviderStatusItem[],
             error: cause instanceof Error ? cause.message : "数据源状态读取失败",
@@ -528,19 +589,34 @@ function ShellStatus() {
       active = false;
       window.clearInterval(interval);
     };
-  }, [location.pathname]);
+  }, [location.pathname, props.locked]);
+
+  if (props.locked) {
+    return (
+      <div className="rounded-lg border border-[#e3e9f2] px-5 py-4 text-[14px] text-slate-700 shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
+        <div className="flex items-center gap-3">
+          <Spin size="small" />
+          <div>
+            <div className="font-medium text-[#374151]">系统初始化中...</div>
+            <div className="mt-1 text-[12px] text-[#64748b]">请稍候</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const health = status.health ?? dashboardState?.health ?? null;
-  const providers = status.health ? status.providers : dashboardState?.summary.provider_statuses ?? [];
+  const providers = status.health ? status.providers ?? [] : dashboardState?.summary.provider_statuses ?? [];
   const statusError = status.error ?? dashboardError;
   const coreOK = Boolean(health);
+  const sqliteOK = health?.dbStatus === "ok";
   const providerOK = providers.length > 0 && providers.every((provider) => provider.available);
   const providerError = providers.find((provider) => !provider.available)?.last_error || statusError;
   const rows = [
     { label: "Go Core", value: coreOK ? "已连接" : "未连接", ok: coreOK },
-    { label: "SQLite", value: coreOK ? "正常" : "未知", ok: coreOK },
+    { label: "SQLite", value: sqliteStatusText(health?.dbStatus, coreOK), ok: sqliteOK },
     { label: "数据源", value: coreOK ? (providerOK ? "正常" : "不可用") : "未知", ok: coreOK && providerOK },
-    { label: "版本号", value: health?.version || "v0.1.0", ok: true },
+    { label: "版本号", value: health?.version || "未知", ok: Boolean(health?.version) },
   ];
   return (
     <div className="app-glass-status-card rounded-lg border border-[#e3e9f2] px-5 py-4 text-[14px] text-slate-700 shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
@@ -560,7 +636,7 @@ function ShellStatus() {
       ))}
       <div className="mt-4 border-t border-[#e3e9f2] pt-4">
         <span className="mr-4 text-slate-500">版本号</span>
-        <span>{health?.version || "v0.1.0"}</span>
+        <span>{health?.version || "未知"}</span>
       </div>
       {providerError ? (
         <Tooltip title={providerError}>
@@ -584,6 +660,19 @@ function providerErrorText(value: string) {
     return "行情数据源未配置";
   }
   return value;
+}
+
+function sqliteStatusText(value: string | null | undefined, coreOK: boolean) {
+  if (!coreOK) {
+    return "未知";
+  }
+  if (value === "ok") {
+    return "正常";
+  }
+  if (value === "not_configured") {
+    return "未配置";
+  }
+  return value || "异常";
 }
 
 function formatDateTime(value: string | null | undefined) {

@@ -1,6 +1,9 @@
 package datasourcecredential
 
-import "time"
+import (
+	"net/http"
+	"time"
+)
 
 // AuthType 表示数据源凭据认证方式。
 type AuthType string
@@ -46,17 +49,18 @@ type Provider struct {
 
 // Config 描述单个 Provider 的凭据配置展示模型，不包含真实凭据明文。
 type Config struct {
-	ProviderID         string   `json:"providerId"`
-	ProviderName       string   `json:"providerName"`
-	Capability         string   `json:"capability"`
-	AuthType           AuthType `json:"authType"`
-	BaseURL            string   `json:"baseUrl"`
-	CredentialStatus   Status   `json:"credentialStatus"`
-	ExpiresAt          string   `json:"expiresAt"`
-	TimeoutSeconds     int      `json:"timeoutSeconds"`
-	RateLimitPerMinute int      `json:"rateLimitPerMinute"`
-	MaskedCredential   string   `json:"maskedCredential"`
-	Note               string   `json:"note"`
+	ProviderID         string     `json:"providerId"`
+	ProviderName       string     `json:"providerName"`
+	Capability         string     `json:"capability"`
+	AuthType           AuthType   `json:"authType"`
+	BaseURL            string     `json:"baseUrl"`
+	CredentialStatus   Status     `json:"credentialStatus"`
+	ExpiresAt          string     `json:"expiresAt"`
+	TimeoutSeconds     int        `json:"timeoutSeconds"`
+	RateLimitPerMinute int        `json:"rateLimitPerMinute"`
+	MaskedCredential   string     `json:"maskedCredential"`
+	Note               string     `json:"note"`
+	LastTestResult     TestResult `json:"lastTestResult"`
 }
 
 // SaveRequest 是保存凭据配置的 service 输入；Credential 只允许用于本次保存。
@@ -141,4 +145,9 @@ type SystemClock struct{}
 // Now 返回当前 UTC 时间，避免展示和持久化混用本地时区。
 func (SystemClock) Now() time.Time {
 	return time.Now().UTC()
+}
+
+// HTTPDoer 是真实连接预检依赖的最小 HTTP client 边界，便于单元测试替换。
+type HTTPDoer interface {
+	Do(request *http.Request) (*http.Response, error)
 }

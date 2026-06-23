@@ -10,6 +10,8 @@ import {
   analysisTaskCancel,
   analysisTaskCreate,
   analysisTaskSubscribe,
+  appBootStatus,
+  CoreClientError,
   coreHealth,
   dashboardSummary,
   marketIndicators,
@@ -84,6 +86,7 @@ describe("coreClient", () => {
         data: {
           status: "ok",
           version: "0.1.0",
+          dbStatus: "ok",
         },
       };
     });
@@ -91,6 +94,7 @@ describe("coreClient", () => {
     await expect(coreHealth()).resolves.toEqual({
       status: "ok",
       version: "0.1.0",
+      dbStatus: "ok",
     });
     expect(calls).toEqual([{ command: "core_health", payload: {} }]);
   });
@@ -98,13 +102,65 @@ describe("coreClient", () => {
   test("coreHealth 遇到统一错误响应时抛出业务错误", async () => {
     mockIPC(() => ({
       code: 50001,
-      message: "sidecar not ready",
+      message: "sidecar not ready token=secret-token",
       traceId: "trace-1",
       requestId: "request-1",
       data: null,
     }));
 
-    await expect(coreHealth()).rejects.toThrow("sidecar not ready");
+    await expect(coreHealth()).rejects.toMatchObject({
+      name: "CoreClientError",
+      message: "sidecar not ready token=[REDACTED]",
+      code: 50001,
+      traceId: "trace-1",
+      requestId: "request-1",
+    });
+  });
+
+  test("coreHealth 遇到 Rust command 错误时统一脱敏", async () => {
+    mockIPC(() => {
+      throw new Error("sidecar http error Authorization: Bearer sk-test-secret-token");
+    });
+
+    await expect(coreHealth()).rejects.toMatchObject({
+      name: "CoreClientError",
+      message: "sidecar http error Authorization: [REDACTED]",
+    });
+    await expect(coreHealth()).rejects.toBeInstanceOf(CoreClientError);
+  });
+
+  test("appBootStatus 通过固定 Tauri command 读取初始化状态", async () => {
+    const calls: Array<{ command: string; payload?: unknown }> = [];
+    mockIPC((command, payload) => {
+      calls.push({ command, payload });
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          ready: false,
+          progress: 68,
+          currentStepId: "sqlite_migration",
+          steps: [
+            { id: "sidecar", index: 1, title: "启动 Go Core Sidecar", status: "completed", badgeText: "已完成" },
+            { id: "sqlite_migration", index: 3, title: "SQLite 数据库迁移 / 重建索引", status: "running", badgeText: "进行中" },
+          ],
+          taskDetail: {
+            taskId: "boot-1",
+            elapsed: "00:00:01",
+            currentStage: "SQLite 数据库迁移 / 重建索引",
+            remaining: "计算中",
+          },
+          logs: [{ id: "1", time: "15:29:41", status: "success", message: "sidecar ready" }],
+        },
+      };
+    });
+
+    await expect(appBootStatus()).resolves.toMatchObject({
+      ready: false,
+      progress: 68,
+      currentStepId: "sqlite_migration",
+    });
+    expect(calls).toEqual([{ command: "app_boot_status", payload: {} }]);
   });
 
   test("dashboardSummary 通过固定 Tauri command 读取总览数据", async () => {

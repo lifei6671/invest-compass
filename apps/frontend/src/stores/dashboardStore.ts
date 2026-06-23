@@ -50,13 +50,13 @@ export const useDashboardStore = create<DashboardStoreState>((set) => ({
   load: async () => {
     set({ state: null, loading: true, error: null });
     try {
-	      const [health, summary, watchlist, indexQuotes, indexTrends] = await Promise.all([
-	        coreHealth(),
-	        dashboardSummary(),
-	        watchlistList(),
-	        loadQuoteStates(overviewIndexSymbols),
-	        loadIndexTrends(overviewIndexSymbols),
-	      ]);
+      const [health, summary, watchlist, indexQuotes, indexTrends] = await Promise.all([
+        coreHealth(),
+        dashboardSummary(),
+        watchlistList(),
+        loadQuoteStates(overviewIndexSymbols),
+        loadIndexTrends(overviewIndexSymbols),
+      ]);
       const watchlistRows = await loadWatchlistRows(watchlist.items);
       set({
         state: {

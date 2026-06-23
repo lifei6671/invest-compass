@@ -834,6 +834,9 @@ data_source_credentials
 推进记录：
 
 - 2026-06-23 已接入真实脱敏状态、保存、清除、本地预检。
+- 2026-06-23 已将股票数据源拆分为无需凭据的 `sina` 与 `tencent` 两个 Provider；凭据页分别展示“新浪财经”和“腾讯财经”，本地预检目标分别为新浪行情 `/list=sh000001` 与腾讯 K 线 `/appstock/app/fqkline/get?param=sh000001,day,,,2,qfq`。
+- 2026-06-23 数据源概览“默认行情源”已补充“自动降级”选项；Go runtime 已读取 `data_source.default_market_source`，并沿用当前新浪搜索/实时行情、腾讯 K 线、东财 K 线兜底的生产 Provider 链路。
+- 显式选择单一行情源后的完整按源路由策略仍需单独确认；本期只验收“自动降级”进入运行时读取链路。
 - 仍需在运行中页面手工验收 1440x900 布局、保存后刷新回显、清除后状态和错误提示。
 
 ### [~] S3-05 Provider 使用凭据的运行时注入
@@ -1355,7 +1358,7 @@ notificationsClearRead()
   - `pnpm --dir apps --filter @invest-compass/frontend build`
 - 待验收：真实桌面环境中 TopBar 搜索跳转、刷新行为和通知浮层手工复核。
 
-### [ ] S5-02 总览页恢复真实 dashboard 数据流
+### [~] S5-02 总览页恢复真实 dashboard 数据流
 
 依赖：S5-01。
 
@@ -1380,7 +1383,19 @@ notificationsClearRead()
 - 前端手工验收。
 - `pnpm --dir apps build`。
 
-### [ ] S5-03 自选股列表、增删改和行情补全
+执行记录：
+
+- 2026-06-23 已补齐 Dashboard 总览页数据源状态展示，直接使用 `dashboard_summary.provider_statuses`，空数据展示空态，不在前端构造 Provider 状态。
+- 2026-06-23 已补充自动化覆盖：
+  - Dashboard 页面展示后端返回的数据源状态。
+  - Dashboard store 保留 `dashboard_summary` 的最近报告、最近任务、市场新闻、Provider 状态。
+  - 指数迷你走势固定通过 `market_kline` 使用 `{ period: "day", adjust: "qfq", limit: 40 }` 拉取。
+- 2026-06-23 已移除首页热点区未闭环的行业热点、概念热点、重点观察入口；涨跌分布卡不再展示硬编码“暂未接入”统计占位。
+- 2026-06-23 已通过：
+  - `pnpm --dir apps --filter @invest-compass/frontend test -- src/stores/dashboardStore.test.ts src/components/dashboard/DashboardOverview.test.tsx -t Dashboard`
+- 待用户端到端验收：桌面环境中总览页连接真实 Go Core 后，正常态、空态、Provider 异常态和 K 线迷你走势手工复核。
+
+### [~] S5-03 自选股列表、增删改和行情补全
 
 依赖：S5-01。
 
@@ -1406,6 +1421,22 @@ notificationsClearRead()
 
 - Go watchlist 测试。
 - 前端手工验收。
+
+执行记录：
+
+- 2026-06-23 已将自选股页面 mount、批量刷新接入 `watchlist_list`，并逐项使用 `market_quote` 补行情展示。
+- 2026-06-23 已将新增、编辑、删除接入 `watchlist_create`、`watchlist_update`、`watchlist_delete`，新增失败时不会清空弹窗输入。
+- 2026-06-23 已补充自动化覆盖：
+  - 默认空态来自空后端列表，不展示伪造自选数据。
+  - 新增自选股必须先 `stock_search`，再调用 `watchlist_create`，并用 `market_quote` 补行情。
+  - 编辑备注和标签调用 `watchlist_update`。
+  - 删除调用 `watchlist_delete`。
+  - 市场和标签筛选只基于已加载自选列表本地过滤，不触发未定义后端接口。
+- 2026-06-23 已移除卡片视图中“筛选功能待接入”的假交互；当前市场、标签筛选使用真实列表字段，默认排序暂保留只读显示。
+- 2026-06-23 已通过：
+  - `pnpm --dir apps --filter @invest-compass/frontend test -- WatchlistPage.test.tsx`
+- 待用户端到端验收：桌面环境连接真实 Go Core 后，列表空态、新增、编辑、删除、刷新、详情跳转和 Provider 异常手工复核。
+- 待补后端字段：`watchlist_list` 当前只返回 `symbol`、`sort_order`、`tags`、`note`，不返回股票名称、行业等展示字段；页面重载后只能以代码作为名称降级展示。推荐后续由 Go watchlist API 关联 `stocks` 表补充 `name`、`code`、`market`、`exchange`、`industry`。
 
 ### [!] S5-04 自选股扩展字段确认
 

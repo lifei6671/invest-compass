@@ -131,7 +131,7 @@ func main() {
 	logSource := newRuntimeLogSource(os.Stderr, 500)
 	slog.SetDefault(slog.New(logger.NewTaskLogHandler(logSource, taskLogWriter)))
 
-	schedulerQueue, schedulerService, err := newProductionScheduler(store, time.Now)
+	schedulerQueue, schedulerService, err := newProductionScheduler(store, *workspace, time.Now)
 	if err != nil {
 		slog.Error("初始化调度服务失败", "error", err)
 		os.Exit(1)
@@ -281,31 +281,34 @@ func newRuntimeLogSource(output io.Writer, capacity int) *logexportservice.Memor
 }
 
 // newProductionScheduler 组装生产调度队列和 SchedulerService，确保启动恢复、手动触发和桌面管理使用同一执行队列。
-func newProductionScheduler(store *dao.Store, now func() time.Time) (*schedulerservice.ExecutionQueue, *schedulerservice.Service, error) {
+func newProductionScheduler(store *dao.Store, workspace string, now func() time.Time) (*schedulerservice.ExecutionQueue, *schedulerservice.Service, error) {
 	schedulerQueue := schedulerservice.NewExecutionQueue()
+	dataSourceCredentials := datasourcecredentialservice.NewService(store, datasourcecredentialservice.FileKeyProvider{Path: filepath.Join(workspace, "credentials", "data-source.key")})
+	marketProvider := buildMarketProvider(store)
+	newsProvider := buildNewsProvider(dataSourceCredentialCookieResolver{Service: dataSourceCredentials})
 	schedulerService, err := schedulerservice.NewService(schedulerservice.Config{
 		Store: store,
 		Queue: schedulerQueue,
 		Now:   now,
 		Runners: map[string]schedulerservice.Runner{
 			schedulerservice.CronTypeStockProfileRefresh: schedulerservice.StockProfileRefreshRunner{
-				Provider: marketservice.UnconfiguredProvider{},
+				Provider: marketProvider,
 				Store:    store,
 			},
 			schedulerservice.CronTypeCNAShareQuoteRefresh: schedulerservice.QuoteRefreshRunner{
-				Provider: marketservice.UnconfiguredProvider{},
+				Provider: marketProvider,
 				Store:    store,
 			},
 			schedulerservice.CronTypeCNAShareKlineRefresh: schedulerservice.KlineRefreshRunner{
-				Provider: marketservice.UnconfiguredProvider{},
+				Provider: marketProvider,
 				Store:    store,
 			},
 			schedulerservice.CronTypeMarketNewsRefresh: schedulerservice.NewsRefreshRunner{
-				Provider: newsservice.UnconfiguredProvider{},
+				Provider: newsProvider,
 				Store:    store,
 			},
 			schedulerservice.CronTypeSymbolNewsRefresh: schedulerservice.NewsRefreshRunner{
-				Provider: newsservice.UnconfiguredProvider{},
+				Provider: newsProvider,
 				Store:    store,
 			},
 		},
@@ -386,13 +389,16 @@ func applyTaskLogRetention(ctx context.Context, store *dao.Store, ndjsonWriter *
 func buildActionsConfig(token string, workspace string, store *dao.Store, schedulerQueue *schedulerservice.ExecutionQueue, schedulerService *schedulerservice.Service, taskLogService tasklogservice.Service, taskLogWriter tasklogservice.StageWriter, logSource *logexportservice.MemorySource, onShutdown func()) actions.Config {
 	dataSourceCredentialKeyPath := filepath.Join(workspace, "credentials", "data-source.key")
 	notificationService := notificationservice.NewService(store)
+	dataSourceCredentials := datasourcecredentialservice.NewService(store, datasourcecredentialservice.FileKeyProvider{Path: dataSourceCredentialKeyPath})
+	marketProvider := buildMarketProvider(store)
+	newsProvider := buildNewsProvider(dataSourceCredentialCookieResolver{Service: dataSourceCredentials})
 	return actions.Config{
 		Version:             version,
 		Token:               token,
 		DBStatus:            "ok",
 		Ready:               true,
-		MarketProvider:      marketservice.UnconfiguredProvider{},
-		NewsProvider:        newsservice.UnconfiguredProvider{},
+		MarketProvider:      marketProvider,
+		NewsProvider:        newsProvider,
 		CacheStatsProvider:  store,
 		CacheCleaner:        store,
 		StockStore:          store,
@@ -417,7 +423,7 @@ func buildActionsConfig(token string, workspace string, store *dao.Store, schedu
 		DashboardStore:        store,
 		SettingsStore:         store,
 		NotificationStore:     store,
-		DataSourceCredentials: datasourcecredentialservice.NewService(store, datasourcecredentialservice.FileKeyProvider{Path: dataSourceCredentialKeyPath}),
+		DataSourceCredentials: dataSourceCredentials,
 		SchedulerStore:        store,
 		SchedulerQueue:        schedulerQueue,
 		SchedulerService:      schedulerService,
@@ -430,6 +436,42 @@ func buildActionsConfig(token string, workspace string, store *dao.Store, schedu
 			onShutdown()
 		},
 	}
+}
+
+// buildMarketProvider 创建生产行情 Provider，初始化失败时明确回退为未配置状态。
+func buildMarketProvider(store marketservice.SettingsStore) marketservice.MarketProvider {
+	provider, err := marketservice.NewSinaTencentProvider(marketservice.SinaTencentConfig{})
+	if err != nil {
+		slog.Warn("初始化行情 Provider 失败", "error", logger.RedactError(err))
+		return marketservice.UnconfiguredProvider{}
+	}
+	return marketservice.NewSettingsBackedMarketProvider(store, provider)
+}
+
+// buildNewsProvider 创建生产资讯 Provider，财联社请求会按需读取本地加密 Cookie。
+func buildNewsProvider(resolver newsservice.CookieCredentialResolver) newsservice.Provider {
+	provider, err := newsservice.NewCailianpressProvider(newsservice.CailianpressConfig{
+		CredentialResolver: resolver,
+	})
+	if err != nil {
+		slog.Warn("初始化资讯 Provider 失败", "error", logger.RedactError(err))
+		return newsservice.UnconfiguredProvider{}
+	}
+	return provider
+}
+
+// dataSourceCredentialCookieResolver 适配新闻 Provider 所需的 Cookie 凭据读取接口。
+type dataSourceCredentialCookieResolver struct {
+	Service datasourcecredentialservice.Service
+}
+
+// ResolveCookie 从数据源凭据 service 解密指定 Provider 的 Cookie，调用方不得记录返回值。
+func (resolver dataSourceCredentialCookieResolver) ResolveCookie(ctx context.Context, providerID string) (string, error) {
+	credential, err := resolver.Service.Resolve(ctx, providerID)
+	if err != nil {
+		return "", err
+	}
+	return credential.Cookie, nil
 }
 
 // databasePathForWorkspace 从 Rust 传入的 app data 目录派生 SQLite 文件路径。

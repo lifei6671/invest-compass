@@ -3,6 +3,7 @@ package news
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -25,15 +26,22 @@ var sinaLiveLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
 
 // CailianpressConfig 描述财联社快讯 Provider 的运行配置。
 type CailianpressConfig struct {
-	TelegraphURL string
-	HTTPClient   *http.Client
-	Timeout      time.Duration
+	TelegraphURL       string
+	HTTPClient         *http.Client
+	Timeout            time.Duration
+	CredentialResolver CookieCredentialResolver
 }
 
 // CailianpressProvider 抓取财联社电报快讯并清洗成统一新闻模型。
 type CailianpressProvider struct {
-	telegraphURL string
-	client       *crawler.Client
+	telegraphURL       string
+	client             *crawler.Client
+	credentialResolver CookieCredentialResolver
+}
+
+// CookieCredentialResolver 为需要 Cookie 的新闻 Provider 提供运行时凭据。
+type CookieCredentialResolver interface {
+	ResolveCookie(ctx context.Context, providerID string) (string, error)
 }
 
 // NewCailianpressProvider 创建财联社快讯 Provider。
@@ -43,8 +51,9 @@ func NewCailianpressProvider(config CailianpressConfig) (*CailianpressProvider, 
 		return nil, err
 	}
 	return &CailianpressProvider{
-		telegraphURL: newsFirstNonEmpty(config.TelegraphURL, defaultCLSTelegraphURL),
-		client:       client,
+		telegraphURL:       newsFirstNonEmpty(config.TelegraphURL, defaultCLSTelegraphURL),
+		client:             client,
+		credentialResolver: config.CredentialResolver,
 	}, nil
 }
 
@@ -54,7 +63,25 @@ func (provider *CailianpressProvider) Name() string {
 }
 
 // Status 返回财联社快讯数据源状态说明。
-func (provider *CailianpressProvider) Status(context.Context) ProviderStatus {
+func (provider *CailianpressProvider) Status(ctx context.Context) ProviderStatus {
+	if provider == nil {
+		return ProviderStatus{Name: cailianpressProviderName, Source: "Cailianpress web telegraph endpoint", Available: false}
+	}
+	if provider.credentialResolver == nil {
+		return ProviderStatus{
+			Name:      provider.Name(),
+			Source:    "Cailianpress web telegraph endpoint",
+			Available: true,
+		}
+	}
+	if _, err := provider.credentialResolver.ResolveCookie(ctx, "cls"); err != nil {
+		return ProviderStatus{
+			Name:      provider.Name(),
+			Source:    "Cailianpress web telegraph endpoint",
+			Available: false,
+			LastError: redactProviderCredentialError(err),
+		}
+	}
 	return ProviderStatus{
 		Name:      provider.Name(),
 		Source:    "Cailianpress web telegraph endpoint",
@@ -69,6 +96,17 @@ func (provider *CailianpressProvider) List(context.Context, ListRequest) ([]Item
 
 // Market 抓取财联社市场快讯。
 func (provider *CailianpressProvider) Market(ctx context.Context, request MarketRequest) ([]Item, error) {
+	cookie, err := provider.resolveCookie(ctx)
+	if err != nil {
+		return nil, NewProviderError(provider.Name(), "credential_resolve", err)
+	}
+	headers := map[string]string{
+		"Accept":  "application/json,text/plain,*/*",
+		"Referer": "https://www.cls.cn/",
+	}
+	if cookie != "" {
+		headers["Cookie"] = cookie
+	}
 	result, err := provider.client.Fetch(ctx, crawler.Request{
 		URL: provider.telegraphURL,
 		Query: map[string]string{
@@ -77,10 +115,7 @@ func (provider *CailianpressProvider) Market(ctx context.Context, request Market
 			"os":   "web",
 			"sv":   "8.7.9",
 		},
-		Headers: map[string]string{
-			"Accept":  "application/json,text/plain,*/*",
-			"Referer": "https://www.cls.cn/",
-		},
+		Headers: headers,
 	})
 	if err != nil {
 		return nil, NewProviderError(provider.Name(), "market_fetch", err)
@@ -121,6 +156,25 @@ func (provider *CailianpressProvider) Market(ctx context.Context, request Market
 		})
 	}
 	return normalizeLimit(items, request.Limit)
+}
+
+// resolveCookie 读取财联社运行时 Cookie，未配置 resolver 时兼容公开接口请求。
+func (provider *CailianpressProvider) resolveCookie(ctx context.Context) (string, error) {
+	if provider.credentialResolver == nil {
+		return "", nil
+	}
+	return provider.credentialResolver.ResolveCookie(ctx, "cls")
+}
+
+// redactProviderCredentialError 返回可展示的脱敏凭据错误，不泄露真实 Cookie。
+func redactProviderCredentialError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err.Error()
+	}
+	return "data_source_credential_not_configured"
 }
 
 // SinaLiveConfig 描述新浪财经直播 Provider 的运行配置。

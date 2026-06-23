@@ -7,6 +7,7 @@ import type { WatchlistItem } from "./types";
 type WatchlistStockCardProps = {
   item: WatchlistItem;
   onDelete: (item: WatchlistItem) => void;
+  onEdit: (item: WatchlistItem) => void;
   onView: (item: WatchlistItem) => void;
 };
 
@@ -78,7 +79,7 @@ export function WatchlistStockCard(props: WatchlistStockCardProps) {
       <div className="mx-1 mt-auto grid h-11 shrink-0 grid-cols-4 items-center gap-1 border-t border-[#edf1f7] pt-2 pb-3">
         <ActionButton icon={<EyeOutlined />} label="详情" className="text-[#475569]" onClick={() => props.onView(props.item)} />
         <ActionButton icon={<RobotOutlined />} label="AI分析" className="text-[#1677ff]" onClick={() => message.info("进入 AI 分析待接入")} />
-        <ActionButton icon={<EditOutlined />} label="编辑" className="text-[#475569]" onClick={() => message.info("编辑备注待接入")} />
+        <ActionButton icon={<EditOutlined />} label="编辑" className="text-[#475569]" onClick={() => props.onEdit(props.item)} />
         <ActionButton icon={<DeleteOutlined />} label="删除" className="text-[#ff4d4f]" onClick={() => props.onDelete(props.item)} />
       </div>
     </article>

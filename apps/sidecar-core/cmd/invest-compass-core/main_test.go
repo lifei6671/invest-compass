@@ -282,8 +282,8 @@ func TestBuildActionsConfigInjectsProductionAIConfigTester(t *testing.T) {
 	}
 }
 
-// TestBuildActionsConfigKeepsMarketProviderUnconfiguredUntilComplianceReady 验证生产配置在授权验收前保持行情 Provider 安全未配置状态。
-func TestBuildActionsConfigKeepsMarketProviderUnconfiguredUntilComplianceReady(t *testing.T) {
+// TestBuildActionsConfigInjectsRealProviders 验证生产配置注入真实行情 Provider，并让资讯 Provider 受凭据状态约束。
+func TestBuildActionsConfigInjectsRealProviders(t *testing.T) {
 	store := newMainTestStore(t)
 	logSource := logexportservice.NewMemorySource(nil, 10)
 	queue := schedulerservice.NewExecutionQueue()
@@ -298,7 +298,7 @@ func TestBuildActionsConfigKeepsMarketProviderUnconfiguredUntilComplianceReady(t
 		t.Fatalf("production config must inject explicit provider implementations: %+v", config)
 	}
 	marketStatus := config.MarketProvider.Status(context.Background())
-	if marketStatus.Available || marketStatus.Source != "unconfigured" {
+	if !marketStatus.Available || marketStatus.Source == "unconfigured" {
 		t.Fatalf("unexpected market provider status: %+v", marketStatus)
 	}
 	newsStatus, ok := config.NewsProvider.(interface {
@@ -307,8 +307,9 @@ func TestBuildActionsConfigKeepsMarketProviderUnconfiguredUntilComplianceReady(t
 	if !ok {
 		t.Fatal("production news provider must expose status")
 	}
-	if newsStatus.Status(context.Background()).Available {
-		t.Fatal("unconfigured news provider must not report available")
+	newsProviderStatus := newsStatus.Status(context.Background())
+	if newsProviderStatus.Available || newsProviderStatus.LastError != "data_source_credential_not_configured" {
+		t.Fatalf("news provider must require credential before reporting available: %+v", newsProviderStatus)
 	}
 }
 
@@ -339,7 +340,7 @@ func TestNewProductionSchedulerRestoreCreatesMissedTodayRun(t *testing.T) {
 		t.Fatalf("save scheduler job: %v", err)
 	}
 
-	queue, schedulerService, err := newProductionScheduler(store, func() time.Time {
+	queue, schedulerService, err := newProductionScheduler(store, t.TempDir(), func() time.Time {
 		return time.Date(2026, 6, 19, 10, 0, 0, 0, location)
 	})
 	if err != nil {

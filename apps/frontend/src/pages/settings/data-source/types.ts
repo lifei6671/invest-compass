@@ -1,4 +1,4 @@
-export type MarketSource = "akshare-eastmoney" | "eastmoney" | "sina-tencent" | "custom";
+export type MarketSource = "auto-fallback" | "akshare-eastmoney" | "eastmoney" | "sina" | "tencent" | "custom";
 export type NewsSource = "aggregated" | "cls" | "sina" | "custom";
 export type MarketScope = "CN" | "HK" | "US" | "ALL";
 export type KlineRange = "1y" | "3y" | "5y" | "all";
@@ -50,7 +50,7 @@ export type HealthStatusItem = {
 };
 
 export const initialBaseSettings: DataSourceBaseSettings = {
-  defaultMarketSource: "akshare-eastmoney",
+  defaultMarketSource: "auto-fallback",
   defaultNewsSource: "aggregated",
   defaultMarketScope: "CN",
   klineRange: "5y",
@@ -61,7 +61,9 @@ export const initialBaseSettings: DataSourceBaseSettings = {
 };
 
 export const marketDataSources: MarketDataSourceItem[] = [
-  { label: "A股行情主源", status: "normal", source: "EastMoney" },
+  { label: "A股实时行情源", status: "normal", source: "新浪财经" },
+  { label: "A股K线数据源", status: "normal", source: "腾讯财经" },
+  { label: "A股行情备用源", status: "normal", source: "EastMoney" },
   { label: "港股 / 美股扩展源", status: "disabled", source: "Alpha Vantage" },
   { label: "K线历史数据", status: "normal", source: "AkShare" },
   { label: "估值与基础资料", status: "normal", source: "EastMoney" },

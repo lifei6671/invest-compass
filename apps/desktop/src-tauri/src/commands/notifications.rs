@@ -55,7 +55,12 @@ pub fn notifications_mark_read(
     payload: NotificationsMarkReadPayload,
 ) -> Result<serde_json::Value, String> {
     validate_mark_read_payload(&payload)?;
-    post_notifications_api(&app_handle, &state, "/api/notifications/mark-read", &payload)
+    post_notifications_api(
+        &app_handle,
+        &state,
+        "/api/notifications/mark-read",
+        &payload,
+    )
 }
 
 /// 标记全部应用内通知为已读，固定转发到 Go core `/api/notifications/mark-all-read`。
@@ -165,8 +170,9 @@ mod tests {
     #[test]
     /// 验证标记已读 Rust 边界拒绝空 ID 和非法 ID。
     fn validate_mark_read_payload_rejects_empty_or_invalid_ids() {
-        assert!(validate_mark_read_payload(&NotificationsMarkReadPayload { ids: vec![1, 2] })
-            .is_ok());
+        assert!(
+            validate_mark_read_payload(&NotificationsMarkReadPayload { ids: vec![1, 2] }).is_ok()
+        );
         assert_eq!(
             validate_mark_read_payload(&NotificationsMarkReadPayload { ids: vec![] })
                 .expect_err("empty ids should fail"),

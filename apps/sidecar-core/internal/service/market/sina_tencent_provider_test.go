@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
+	settingsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/settings"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/stock"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
@@ -328,6 +330,35 @@ func TestCompositeMarketProviderFallsBackToEastMoneyKline(t *testing.T) {
 	}
 }
 
+// TestSettingsBackedMarketProviderReadsDefaultSource 验证行情运行时会读取数据源默认行情源配置，并沿用自动降级链路。
+func TestSettingsBackedMarketProviderReadsDefaultSource(t *testing.T) {
+	sina := &recordingSinaSource{}
+	tencent := &recordingTencentSource{klineErr: errors.New("tencent unavailable")}
+	eastMoney := &recordingEastMoneySource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-19", Close: 1822}},
+	}
+	baseProvider := NewCompositeMarketProviderWithKlineFallback("composite-test", sina, tencent, eastMoney, nil)
+	store := &recordingMarketSettingsStore{
+		settings: []model.Setting{{Key: settingsservice.SettingKeyDataSourceDefaultMarketSource, Value: settingsservice.DataSourceMarketSourceAutoFallback}},
+	}
+	provider := NewSettingsBackedMarketProvider(store, baseProvider)
+	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
+
+	bars, err := provider.Kline(context.Background(), KlineRequest{Symbol: symbol, Period: PeriodDay, Adjust: AdjustForward, Limit: 1})
+	if err != nil {
+		t.Fatalf("Kline returned error: %v", err)
+	}
+	if len(store.requestedKeys) != 1 || store.requestedKeys[0] != settingsservice.SettingKeyDataSourceDefaultMarketSource {
+		t.Fatalf("expected provider to read default source setting, got %+v", store.requestedKeys)
+	}
+	if !tencent.klineCalled || !eastMoney.klineCalled {
+		t.Fatalf("expected auto fallback kline calls, tencent=%+v eastMoney=%+v", tencent, eastMoney)
+	}
+	if len(bars) != 1 || bars[0].Close != 1822 {
+		t.Fatalf("unexpected bars: %+v", bars)
+	}
+}
+
 // TestCompositeMarketProviderRejectsEmptyFallbackKline 验证兜底源返回空 K 线时不会被当作成功。
 func TestCompositeMarketProviderRejectsEmptyFallbackKline(t *testing.T) {
 	sina := &recordingSinaSource{}
@@ -418,6 +449,21 @@ func (source *recordingEastMoneySource) Kline(context.Context, KlineRequest) ([]
 		return nil, source.klineErr
 	}
 	return source.klineResult, nil
+}
+
+type recordingMarketSettingsStore struct {
+	requestedKeys []string
+	settings      []model.Setting
+	err           error
+}
+
+// GetSettings 记录行情 Provider 读取的配置 key，并返回测试预置配置。
+func (store *recordingMarketSettingsStore) GetSettings(_ context.Context, keys []string) ([]model.Setting, error) {
+	store.requestedKeys = append(store.requestedKeys, keys...)
+	if store.err != nil {
+		return nil, store.err
+	}
+	return store.settings, nil
 }
 
 // TestSinaTencentProviderStatusDescribesBoundary 验证真实 Provider 状态说明来源、授权和限频边界。

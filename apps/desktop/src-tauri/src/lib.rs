@@ -2,8 +2,6 @@ pub mod commands;
 pub mod desktop_runtime;
 pub mod sidecar;
 
-use std::time::Duration;
-
 use sidecar::CoreState;
 use tauri::Manager;
 
@@ -21,17 +19,7 @@ pub fn run() {
                     None,
                 ))
                 .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
-            let binary_path = sidecar::runtime_core_binary_path();
-            let workspace_path = desktop_runtime::default_workspace_path(app)?;
-            if binary_path.exists() {
-                let running = sidecar::start_core_sidecar(
-                    &binary_path,
-                    &workspace_path,
-                    Duration::from_secs(5),
-                )
-                .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
-                app.state::<CoreState>().install(running);
-            }
+            // sidecar 启动由 app_boot_status 在初始化页期间触发，避免 setup 阶段阻塞窗口展示。
             desktop_runtime::install_desktop_runtime(app)?;
 
             Ok(())
@@ -40,6 +28,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::core::core_start,
             commands::core::core_health,
+            commands::boot::app_boot_status,
             commands::autostart::autostart_get,
             commands::autostart::autostart_set,
             commands::settings::settings_get,

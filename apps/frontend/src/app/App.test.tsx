@@ -3,7 +3,7 @@
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import "@testing-library/jest-dom/vitest";
 import "../test/setupDom";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { App, AppErrorBoundary } from "./App";
 import * as AppModule from "./App";
@@ -91,8 +91,23 @@ const notificationSettingsGetPayload = {
   ],
 };
 
+const dataSourceSettingsGetPayload = {
+  keys: [
+    "data_source.default_market_source",
+    "data_source.default_news_source",
+    "data_source.default_market_scope",
+    "data_source.kline_range",
+    "data_source.quote_refresh_interval",
+    "data_source.news_sync_interval",
+    "data_source.sync_on_startup",
+    "data_source.reduce_frequency_outside_trading_hours",
+  ],
+};
+
 function withoutGlobalNotificationUnreadCalls<TCall extends { command: string }>(calls: TCall[]): TCall[] {
-  return calls.filter((call) => call.command !== "notifications_unread_count");
+  return calls.filter(
+    (call) => !["notifications_unread_count", "core_health", "providers_status"].includes(call.command),
+  );
 }
 
 const defaultAIConfig = {
@@ -114,6 +129,8 @@ const defaultAIConfig = {
 const dataSourceCredentialListFixture = {
   providers: [
     { id: "eastmoney", name: "EastMoney", capability: "行情 / K线", status: "normal", authType: "none", iconType: "eastmoney" },
+    { id: "sina", name: "新浪财经", capability: "股票搜索 / 实时行情", status: "normal", authType: "none", iconType: "sina" },
+    { id: "tencent", name: "腾讯财经", capability: "K线 / 复权K线", status: "normal", authType: "none", iconType: "tencent" },
     { id: "akshare", name: "AkShare", capability: "基础数据", status: "normal", authType: "none", iconType: "akshare" },
     { id: "alpha-vantage", name: "Alpha Vantage", capability: "海外行情", status: "not_configured", authType: "api_key", iconType: "alpha-vantage" },
     { id: "cls", name: "财联社", capability: "快讯 / 日历", status: "normal", authType: "cookie", iconType: "cls" },
@@ -131,6 +148,30 @@ const dataSourceCredentialListFixture = {
       timeoutSeconds: 15,
       rateLimitPerMinute: 30,
       maskedCredential: "",
+      note: "",
+    },
+    sina: {
+      providerId: "sina",
+      providerName: "新浪财经",
+      capability: "股票搜索 / 实时行情",
+      authType: "none",
+      baseUrl: "https://hq.sinajs.cn",
+      credentialStatus: "normal",
+      timeoutSeconds: 15,
+      rateLimitPerMinute: 60,
+      maskedCredential: "无需凭据",
+      note: "",
+    },
+    tencent: {
+      providerId: "tencent",
+      providerName: "腾讯财经",
+      capability: "K线 / 复权K线",
+      authType: "none",
+      baseUrl: "https://web.ifzq.gtimg.cn",
+      credentialStatus: "normal",
+      timeoutSeconds: 15,
+      rateLimitPerMinute: 60,
+      maskedCredential: "无需凭据",
       note: "",
     },
     akshare: {
@@ -209,7 +250,8 @@ const dataSourceCredentialListFixture = {
   },
   overview: { configuredCount: 3, expiringSoonCount: 1, expiredCount: 1 },
   healthItems: [
-    { name: "行情源", status: "normal", rateLimitText: "28 次/分钟" },
+    { name: "新浪行情源", status: "normal", rateLimitText: "60 次/分钟" },
+    { name: "腾讯K线源", status: "normal", rateLimitText: "60 次/分钟" },
     { name: "新闻源", status: "normal", rateLimitText: "26 次/分钟" },
     { name: "海外源", status: "limited", rateLimitText: "12 次/分钟" },
   ],
@@ -251,6 +293,195 @@ test("首版主导航和路由范围只包含 MVP 页面", () => {
   ]);
 });
 
+test("启动初始化期间展示等待页并锁定业务入口", async () => {
+  const calls: string[] = [];
+  mockIPC((command) => {
+    calls.push(command);
+    if (command === "app_boot_status") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          ready: false,
+          progress: 68,
+          currentStepId: "sqlite_migration",
+          steps: [
+            { id: "sidecar", index: 1, title: "启动 Go Core Sidecar", status: "completed", badgeText: "已完成" },
+            { id: "workspace", index: 2, title: "检查本地工作区与目录权限", status: "completed", badgeText: "已完成" },
+            { id: "sqlite_migration", index: 3, title: "SQLite 数据库迁移 / 重建索引", status: "running", badgeText: "进行中" },
+            { id: "tokenizer", index: 4, title: "加载分词器（GSE / 全文检索词典）", status: "pending", badgeText: "等待中" },
+            { id: "data_source", index: 5, title: "初始化数据源配置", status: "pending", badgeText: "等待中" },
+            { id: "market_cache", index: 6, title: "同步基础行情快照与资讯缓存", status: "pending", badgeText: "等待中" },
+            { id: "ready", index: 7, title: "完成基础检查并进入工作台", status: "pending", badgeText: "等待中" },
+          ],
+          taskDetail: {
+            taskId: "boot-1",
+            elapsed: "00:00:01",
+            currentStage: "SQLite 数据库迁移 / 重建索引",
+            remaining: "计算中",
+          },
+          logs: [{ id: "1", time: "15:29:41", status: "success", message: "sidecar ready" }],
+        },
+      };
+    }
+    throw new Error(`initialization should not call ${command}`);
+  });
+
+  render(<App initialBootState="initializing" bootStatusPollIntervalMs={60_000} />);
+
+  expect(screen.getByRole("heading", { name: "正在初始化本地数据环境" })).toBeInTheDocument();
+  expect(screen.getByText("初始化进度")).toBeInTheDocument();
+  expect(screen.getByText("68%")).toBeInTheDocument();
+  expect(screen.getByText("SQLite 数据库迁移 / 重建索引")).toBeInTheDocument();
+  expect(screen.getByText("5d3c7b7e-2f6a-4e2f-a8a6-3e9f1c6b7d92")).toBeInTheDocument();
+  expect(screen.getByText("sidecar ready")).toBeInTheDocument();
+  expect(screen.getByText("仅供研究，不构成投资建议")).toBeInTheDocument();
+  expect(screen.getByPlaceholderText("搜索股票名称 / 代码 / 拼音")).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "总览" }));
+
+  expect(window.location.hash).toBe("");
+  await waitFor(() => {
+    expect(calls).toEqual(["app_boot_status"]);
+  });
+});
+
+test("启动状态读取失败时停留初始化页并展示错误", async () => {
+  mockIPC((command) => {
+    if (command === "app_boot_status") {
+      throw new Error("sidecar http error: http://127.0.0.1:50001/api/internal/boot");
+    }
+    throw new Error(`initialization should not call ${command}`);
+  });
+
+  render(<App initialBootState="initializing" bootStatusPollIntervalMs={60_000} />);
+
+  expect(screen.getByRole("heading", { name: "正在初始化本地数据环境" })).toBeInTheDocument();
+  expect(await screen.findByText("启动状态读取失败，请稍后重试")).toBeInTheDocument();
+  expect(screen.getByText("启动状态读取失败")).toBeInTheDocument();
+  expect(screen.queryByText("自选股涨跌分布")).not.toBeInTheDocument();
+});
+
+test("初始化等待完成后进入总览页面", async () => {
+  vi.useFakeTimers();
+  let bootStatusCallCount = 0;
+  mockIPC((command) => {
+    switch (command) {
+      case "app_boot_status":
+        bootStatusCallCount += 1;
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            ready: bootStatusCallCount >= 2,
+            progress: bootStatusCallCount >= 2 ? 100 : 68,
+            currentStepId: bootStatusCallCount >= 2 ? "ready" : "sqlite_migration",
+            steps: [
+              { id: "sidecar", index: 1, title: "启动 Go Core Sidecar", status: "completed", badgeText: "已完成" },
+              { id: "sqlite_migration", index: 3, title: "SQLite 数据库迁移 / 重建索引", status: bootStatusCallCount >= 2 ? "completed" : "running", badgeText: bootStatusCallCount >= 2 ? "已完成" : "进行中" },
+              { id: "ready", index: 7, title: "完成基础检查并进入工作台", status: bootStatusCallCount >= 2 ? "completed" : "pending", badgeText: bootStatusCallCount >= 2 ? "已完成" : "等待中" },
+            ],
+            taskDetail: {
+              taskId: "boot-1",
+              elapsed: "00:00:01",
+              currentStage: bootStatusCallCount >= 2 ? "完成基础检查并进入工作台" : "SQLite 数据库迁移 / 重建索引",
+              remaining: bootStatusCallCount >= 2 ? "00:00:00" : "计算中",
+            },
+            logs: [{ id: "1", time: "15:29:41", status: "success", message: "sidecar ready" }],
+          },
+        };
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0", dbStatus: "ok" } };
+      case "dashboard_summary":
+        return { code: 0, message: "ok", data: emptyDashboardFixture };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App initialBootState="initializing" bootStatusPollIntervalMs={20} minimumInitializationVisibleMs={0} />);
+
+  expect(screen.getByRole("heading", { name: "正在初始化本地数据环境" })).toBeInTheDocument();
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(bootStatusCallCount).toBe(1);
+
+  await act(async () => {
+    vi.advanceTimersByTime(20);
+    await Promise.resolve();
+  });
+  await act(async () => {
+    vi.advanceTimersByTime(0);
+    await Promise.resolve();
+  });
+  vi.useRealTimers();
+
+  expect(await screen.findByText("自选股涨跌分布")).toBeInTheDocument();
+});
+
+test("初始化首次即 ready 时仍保留启动页最短展示时间", async () => {
+  vi.useFakeTimers();
+  mockIPC((command) => {
+    switch (command) {
+      case "app_boot_status":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            ready: true,
+            progress: 100,
+            currentStepId: "ready",
+            steps: [
+              { id: "sidecar", index: 1, title: "启动 Go Core Sidecar", status: "completed", badgeText: "已完成" },
+              { id: "ready", index: 7, title: "完成基础检查并进入工作台", status: "completed", badgeText: "已完成" },
+            ],
+            taskDetail: {
+              taskId: "boot-1",
+              elapsed: "00:00:01",
+              currentStage: "完成基础检查并进入工作台",
+              remaining: "00:00:00",
+            },
+            logs: [{ id: "1", time: "15:29:41", status: "success", message: "initialization completed" }],
+          },
+        };
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0", dbStatus: "ok" } };
+      case "dashboard_summary":
+        return { code: 0, message: "ok", data: emptyDashboardFixture };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App initialBootState="initializing" bootStatusPollIntervalMs={20} minimumInitializationVisibleMs={1000} />);
+
+  expect(screen.getByRole("heading", { name: "正在初始化本地数据环境" })).toBeInTheDocument();
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.getByText("100%")).toBeInTheDocument();
+  expect(screen.queryByText("自选股涨跌分布")).not.toBeInTheDocument();
+
+  await act(async () => {
+    vi.advanceTimersByTime(999);
+    await Promise.resolve();
+  });
+  expect(screen.queryByText("自选股涨跌分布")).not.toBeInTheDocument();
+
+  await act(async () => {
+    vi.advanceTimersByTime(1);
+    await Promise.resolve();
+  });
+  vi.useRealTimers();
+
+  expect(await screen.findByText("自选股涨跌分布")).toBeInTheDocument();
+});
+
 test("App 默认不伪装 core health，刷新后通过 typed invoke service 展示状态", async () => {
   mockIPC((command) => {
     if (command === "dashboard_summary") {
@@ -262,6 +493,13 @@ test("App 默认不伪装 core health，刷新后通过 typed invoke service 展
     if (command === "market_quote") {
       return { code: 0, message: "ok", data: { symbol: "000001.SH", price: 3181.3, change: -12.18, change_percent: -0.38 } };
     }
+    if (command === "providers_status") {
+      return {
+        code: 0,
+        message: "ok",
+        data: { items: [{ name: "market", source: "sina", available: true, last_error: "" }] },
+      };
+    }
     expect(command).toBe("core_health");
     return {
       code: 0,
@@ -269,6 +507,7 @@ test("App 默认不伪装 core health，刷新后通过 typed invoke service 展
       data: {
         status: "ok",
         version: "0.1.0",
+        dbStatus: "ok",
       },
     };
   });
@@ -278,7 +517,6 @@ test("App 默认不伪装 core health，刷新后通过 typed invoke service 展
   await waitFor(() => {
     expect(screen.getByText("自选股涨跌分布")).toBeInTheDocument();
   });
-  expect(screen.queryByText(/本地核心服务已连接/)).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: /刷新/ }));
 
@@ -286,6 +524,46 @@ test("App 默认不伪装 core health，刷新后通过 typed invoke service 展
     expect(screen.getByText(/本地核心服务已连接/)).toBeInTheDocument();
   });
   expect(screen.getByText(/版本\s*0\.1\.0/)).toBeInTheDocument();
+});
+
+test("运行期左下角状态在总览页也主动刷新 core 和数据源状态", async () => {
+  const calls: string[] = [];
+  mockIPC((command) => {
+    calls.push(command);
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { version: "0.1.0", dbStatus: "ok" } };
+      case "providers_status":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [{ name: "market", source: "sina", available: true, last_error: "" }],
+          },
+        };
+      case "dashboard_summary":
+        return { code: 0, message: "ok", data: { ...emptyDashboardFixture, provider_statuses: [] } };
+      case "watchlist_list":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "market_quote":
+        return { code: 0, message: "ok", data: { symbol: "000001.SH", price: 3181.3, change: 0, change_percent: 0 } };
+      case "market_kline":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(calls).toContain("providers_status");
+  });
+  const dataSourceRow = screen.getByText("数据源").closest("div");
+  expect(dataSourceRow).not.toBeNull();
+  expect(within(dataSourceRow as HTMLElement).getByText("正常")).toBeInTheDocument();
 });
 
 test("App 提供基础路由外壳和错误边界", async () => {
@@ -596,6 +874,9 @@ test("自选股页面默认展示空态并支持备注范围搜索", async () =>
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
+    if (command === "watchlist_list") {
+      return { code: 0, message: "ok", data: { items: [] } };
+    }
     if (command === "search_watchlist_notes") {
       return {
         code: 0,
@@ -641,6 +922,10 @@ test("自选股页面默认展示空态并支持备注范围搜索", async () =>
   });
   expect(screen.getByText("北美客户订单")).toBeInTheDocument();
   expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([
+    {
+      command: "watchlist_list",
+      payload: {},
+    },
     {
       command: "search_watchlist_notes",
       payload: { payload: { keyword: "北美客户", symbols: [], limit: 20, offset: 0, sort: "relevance" } },
@@ -1569,11 +1854,21 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
 
   fireEvent.click(screen.getByRole("tab", { name: "数据源设置" }));
   expect(screen.getByRole("tab", { name: "数据源设置" })).toHaveAttribute("aria-selected", "true");
-  fireEvent.click(screen.getByRole("tab", { name: "数据源概览" }));
   expect(screen.getByRole("tab", { name: "数据源概览" })).toHaveAttribute("aria-selected", "true");
   expect(screen.getByText("数据源基础设置")).toBeInTheDocument();
   expect(screen.getByText("默认行情源")).toBeInTheDocument();
-  expect(screen.getByText("AkShare / EastMoney")).toBeInTheDocument();
+  expect(screen.getByText("自动降级")).toBeInTheDocument();
+  expect(screen.getByText("选择自动降级时，会按已启用数据源顺序尝试；前一数据源无数据或数据不完整时使用下一个数据源备份。")).toBeInTheDocument();
+  const marketSourceField = screen.getByText("默认行情源").closest(".settings-data-source-field") as HTMLElement;
+  const marketSourceSelector = marketSourceField.querySelector(".ant-select-content") as HTMLElement;
+  fireEvent.mouseDown(marketSourceSelector);
+  fireEvent.click(screen.getByTitle("AkShare / EastMoney"));
+  await waitFor(() => {
+    expect(calls).toContainEqual({
+      command: "settings_set",
+      payload: { payload: { items: [{ key: "data_source.default_market_source", value: "akshare-eastmoney" }] } },
+    });
+  });
   expect(screen.getByText("新闻同步频率")).toBeInTheDocument();
   expect(screen.getByText("启动时自动同步")).toBeInTheDocument();
   expect(screen.getByText("行情数据源")).toBeInTheDocument();
@@ -1583,6 +1878,8 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.getByText("数据源状态摘要")).toBeInTheDocument();
   expect(screen.getByText("数据合规与说明")).toBeInTheDocument();
   expect(screen.getAllByText("EastMoney").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("新浪财经").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("腾讯财经").length).toBeGreaterThan(0);
   expect(screen.getByText("Alpha Vantage")).toBeInTheDocument();
   expect(screen.getByText("186.4 MB")).toBeInTheDocument();
   expect(screen.getByText("2025-05-20 15:28:41")).toBeInTheDocument();
@@ -1689,8 +1986,6 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.queryByText("立即更新")).not.toBeInTheDocument();
 
   expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([
-    { command: "core_health", payload: {} },
-    { command: "providers_status", payload: {} },
     { command: "settings_get", payload: basicSettingsGetPayload },
     { command: "ai_config_list", payload: {} },
     { command: "workspace_get", payload: {} },
@@ -1703,6 +1998,8 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
     { command: "cache_clean", payload: { payload: { targets: ["quote", "task_logs"] } } },
     { command: "cache_stats", payload: {} },
     { command: "ai_config_list", payload: {} },
+    { command: "settings_get", payload: dataSourceSettingsGetPayload },
+    { command: "settings_set", payload: { payload: { items: [{ key: "data_source.default_market_source", value: "akshare-eastmoney" }] } } },
   ]);
 }, 10_000);
 
@@ -1762,7 +2059,7 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
   });
   fireEvent.click(screen.getByRole("tab", { name: "数据源设置" }));
 
-  expect(screen.getByRole("tab", { name: "数据说明" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("tab", { name: "数据源概览" })).toHaveAttribute("aria-selected", "true");
   fireEvent.click(screen.getByRole("tab", { name: "凭据管理" }));
   expect(screen.getByRole("tab", { name: "凭据管理" })).toHaveAttribute("aria-selected", "true");
   await waitFor(() => {
@@ -1775,7 +2072,7 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
   expect(screen.getByText("调用限制与健康状态")).toBeInTheDocument();
   expect(screen.getByText("凭据操作日志")).toBeInTheDocument();
 
-  ["EastMoney", "AkShare", "Alpha Vantage", "财联社", "雪球", "Custom HTTP"].forEach((name) => {
+  ["EastMoney", "新浪财经", "腾讯财经", "AkShare", "Alpha Vantage", "财联社", "雪球", "Custom HTTP"].forEach((name) => {
     expect(screen.getAllByText(name).length).toBeGreaterThan(0);
   });
   expect(screen.getByDisplayValue("财联社")).toBeInTheDocument();
@@ -1816,8 +2113,6 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
   expect(screen.queryByRole("tab", { name: "同步策略" })).not.toBeInTheDocument();
 
   expect(withoutGlobalNotificationUnreadCalls(calls).map((call) => call.command)).toEqual([
-    "core_health",
-    "providers_status",
     "settings_get",
     "ai_config_list",
     "workspace_get",
@@ -1826,6 +2121,7 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
     "search_status",
     "autostart_get",
     "settings_get",
+    "settings_get",
     "data_source_credentials_list",
     "data_source_credentials_save",
     "data_source_credentials_test",
@@ -1833,6 +2129,7 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
   ]);
   expect(calls).toContainEqual({ command: "settings_get", payload: basicSettingsGetPayload });
   expect(calls).toContainEqual({ command: "settings_get", payload: notificationSettingsGetPayload });
+  expect(calls).toContainEqual({ command: "settings_get", payload: dataSourceSettingsGetPayload });
   expect(calls).toContainEqual({ command: "data_source_credentials_clear", payload: { payload: { providerId: "alpha-vantage" } } });
 }, 10_000);
 
@@ -1892,6 +2189,8 @@ test("数据源设置数据说明页展示说明模块并仅使用本地交互",
   });
   fireEvent.click(screen.getByRole("tab", { name: "数据源设置" }));
 
+  expect(screen.getByRole("tab", { name: "数据源概览" })).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(screen.getByRole("tab", { name: "数据说明" }));
   expect(screen.getByRole("tab", { name: "数据说明" })).toHaveAttribute("aria-selected", "true");
   expect(screen.getByText("数据使用与来源说明")).toBeInTheDocument();
   expect(screen.getByText("说明行情、资讯、缓存与 AI 上下文使用边界")).toBeInTheDocument();
@@ -1979,8 +2278,6 @@ test("数据源设置数据说明页展示说明模块并仅使用本地交互",
   expect(screen.getByRole("tab", { name: "数据说明" })).toHaveAttribute("aria-selected", "true");
 
   expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([
-    { command: "core_health", payload: {} },
-    { command: "providers_status", payload: {} },
     { command: "settings_get", payload: basicSettingsGetPayload },
     { command: "ai_config_list", payload: {} },
     { command: "workspace_get", payload: {} },
@@ -1989,6 +2286,7 @@ test("数据源设置数据说明页展示说明模块并仅使用本地交互",
     { command: "search_status", payload: {} },
     { command: "autostart_get", payload: {} },
     { command: "settings_get", payload: { keys: ["window.close_to_tray"] } },
+    { command: "settings_get", payload: dataSourceSettingsGetPayload },
     { command: "data_source_credentials_list", payload: {} },
   ]);
 }, 10_000);

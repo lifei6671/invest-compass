@@ -1,8 +1,13 @@
-import { App as AntApp, Button, ConfigProvider, Empty, Input, Pagination, Select } from "antd";
+import { Button, ConfigProvider, Empty, Input, Pagination, Select } from "antd";
 import { FilterOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { appAntdLocale } from "../../lib/antdLocale";
 import { WatchlistStockCard } from "./WatchlistStockCard";
 import type { WatchlistItem } from "./types";
+
+type FilterOption = {
+  value: string;
+  label: string;
+};
 
 type WatchlistCardGridProps = {
   items: WatchlistItem[];
@@ -10,21 +15,23 @@ type WatchlistCardGridProps = {
   onKeywordChange: (value: string) => void;
   onAdd: () => void;
   onDelete: (item: WatchlistItem) => void;
+  onEdit: (item: WatchlistItem) => void;
   onView: (item: WatchlistItem) => void;
   onRefresh: () => void;
   onSearch: () => void;
   isSearching?: boolean;
   emptyDescription?: string;
   totalCount: number;
+  marketFilter: string;
+  tagFilter: string;
+  marketOptions: FilterOption[];
+  tagOptions: FilterOption[];
+  onMarketFilterChange: (value: string) => void;
+  onTagFilterChange: (value: string) => void;
 };
 
 export function WatchlistCardGrid(props: WatchlistCardGridProps) {
-  const { message } = AntApp.useApp();
   const visibleItems = props.items.slice(0, 8);
-
-  const handleFilterChange = () => {
-    message.info("筛选功能待接入");
-  };
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -46,16 +53,16 @@ export function WatchlistCardGrid(props: WatchlistCardGridProps) {
           批量刷新
         </Button>
         <div className="ml-auto flex shrink-0 items-center gap-3">
-          <Select className="w-[124px]" value="all" options={[{ value: "all", label: "全部市场" }]} onChange={handleFilterChange} />
-          <Select className="w-[124px]" value="default" options={[{ value: "default", label: "默认排序" }]} onChange={handleFilterChange} />
-          <Select className="w-[124px]" value="tag" suffixIcon={<FilterOutlined />} options={[{ value: "tag", label: "标签筛选" }]} onChange={handleFilterChange} />
+          <Select className="w-[124px]" value={props.marketFilter} options={props.marketOptions} onChange={props.onMarketFilterChange} />
+          <Select className="w-[124px]" value="default" options={[{ value: "default", label: "默认排序" }]} />
+          <Select className="w-[124px]" value={props.tagFilter} suffixIcon={<FilterOutlined />} options={props.tagOptions} onChange={props.onTagFilterChange} />
         </div>
       </div>
 
       {visibleItems.length > 0 ? (
         <div className="grid min-w-0 grid-cols-[repeat(auto-fill,256px)] justify-start gap-4 overflow-x-auto pt-1 pb-1">
           {visibleItems.map((item) => (
-            <WatchlistStockCard key={item.id} item={item} onDelete={props.onDelete} onView={props.onView} />
+            <WatchlistStockCard key={item.id} item={item} onDelete={props.onDelete} onEdit={props.onEdit} onView={props.onView} />
           ))}
         </div>
       ) : (

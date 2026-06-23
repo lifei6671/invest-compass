@@ -23,6 +23,7 @@ export type CredentialConfig = {
   rateLimitPerMinute: number;
   maskedCredential: string;
   note?: string;
+  lastTestResult?: CredentialTestResult;
 };
 
 export type CredentialTestTarget = {

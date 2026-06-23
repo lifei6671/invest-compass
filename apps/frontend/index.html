@@ -4,9 +4,111 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>投研罗盘</title>
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        background: #f6f8fb;
+        color: #111827;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      .boot-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        min-height: 100vh;
+        width: 100vw;
+        align-items: center;
+        justify-content: center;
+        background: #f6f8fb;
+        overflow: hidden;
+      }
+
+      .boot-splash-card {
+        width: min(520px, calc(100vw - 48px));
+        border: 1px solid #e5eaf3;
+        border-radius: 16px;
+        background: #ffffff;
+        padding: 36px 40px;
+        text-align: center;
+        box-shadow: 0 12px 36px rgba(15, 23, 42, 0.08);
+      }
+
+      .boot-splash-logo {
+        margin: 0 auto 18px;
+        height: 48px;
+        width: 48px;
+        border-radius: 14px;
+        object-fit: cover;
+      }
+
+      .boot-splash-title {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 30px;
+      }
+
+      .boot-splash-subtitle {
+        margin: 10px 0 0;
+        color: #64748b;
+        font-size: 14px;
+        line-height: 22px;
+      }
+
+      .boot-splash-progress {
+        margin-top: 24px;
+        height: 8px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e5e7eb;
+      }
+
+      .boot-splash-progress span {
+        display: block;
+        height: 100%;
+        width: 42%;
+        border-radius: inherit;
+        background: #1677ff;
+        animation: boot-splash-progress 1.2s ease-in-out infinite alternate;
+      }
+
+      @keyframes boot-splash-progress {
+        from {
+          transform: translateX(-30%);
+        }
+        to {
+          transform: translateX(160%);
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot-splash" aria-label="应用初始化中">
+        <section class="boot-splash-card">
+          <img class="boot-splash-logo" src="/src/assets/invest-compass-icon.png" alt="投研罗盘" />
+          <h1 class="boot-splash-title">正在初始化本地数据环境</h1>
+          <p class="boot-splash-subtitle">正在加载前端工作台并准备连接本地核心服务，请稍候</p>
+          <div class="boot-splash-progress" aria-hidden="true"><span></span></div>
+        </section>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

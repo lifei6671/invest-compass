@@ -37,6 +37,12 @@ function ProviderIcon({ type }: { type: string }) {
   if (type === "akshare") {
     return <span className="credential-provider-icon credential-provider-icon-akshare">▲</span>;
   }
+  if (type === "sina") {
+    return <span className="credential-provider-icon credential-provider-icon-sina">S</span>;
+  }
+  if (type === "tencent") {
+    return <span className="credential-provider-icon credential-provider-icon-tencent">T</span>;
+  }
   if (type === "alpha") {
     return <span className="credential-provider-icon credential-provider-icon-alpha">AV</span>;
   }

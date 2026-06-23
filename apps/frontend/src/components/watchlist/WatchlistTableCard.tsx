@@ -3,18 +3,30 @@ import { DeleteOutlined, EditOutlined, EyeOutlined, FilterOutlined, ReloadOutlin
 import { appAntdLocale } from "../../lib/antdLocale";
 import type { WatchlistItem } from "./types";
 
+type FilterOption = {
+  value: string;
+  label: string;
+};
+
 type WatchlistTableCardProps = {
   items: WatchlistItem[];
   keyword: string;
   onKeywordChange: (value: string) => void;
   onAdd: () => void;
   onDelete: (item: WatchlistItem) => void;
+  onEdit: (item: WatchlistItem) => void;
   onView: (item: WatchlistItem) => void;
   onRefresh: () => void;
   onSearch: () => void;
   isSearching?: boolean;
   emptyDescription?: string;
   totalCount: number;
+  marketFilter: string;
+  tagFilter: string;
+  marketOptions: FilterOption[];
+  tagOptions: FilterOption[];
+  onMarketFilterChange: (value: string) => void;
+  onTagFilterChange: (value: string) => void;
 };
 
 const tagClassByName: Record<string, string> = {
@@ -83,7 +95,7 @@ export function WatchlistTableCard(props: WatchlistTableCardProps) {
             <Button aria-label={`AI 分析 ${record.name}`} type="text" size="small" className="text-[#1677ff]" icon={<RobotOutlined />} onClick={() => message.info("进入 AI 分析待接入")} />
           </Tooltip>
           <Tooltip title="编辑">
-            <Button aria-label={`编辑 ${record.name}`} type="text" size="small" icon={<EditOutlined />} onClick={() => message.info("编辑备注待接入")} />
+            <Button aria-label={`编辑 ${record.name}`} type="text" size="small" icon={<EditOutlined />} onClick={() => props.onEdit(record)} />
           </Tooltip>
           <Tooltip title="删除">
             <Button aria-label={`删除 ${record.name}`} type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => props.onDelete(record)} />
@@ -113,9 +125,9 @@ export function WatchlistTableCard(props: WatchlistTableCardProps) {
           批量刷新
         </Button>
         <div className="ml-auto flex shrink-0 items-center gap-3">
-          <Select className="w-[124px]" value="all" options={[{ value: "all", label: "全部市场" }]} />
+          <Select className="w-[124px]" value={props.marketFilter} options={props.marketOptions} onChange={props.onMarketFilterChange} />
           <Select className="w-[124px]" value="default" options={[{ value: "default", label: "默认排序" }]} />
-          <Select className="w-[124px]" value="tag" suffixIcon={<FilterOutlined />} options={[{ value: "tag", label: "标签筛选" }]} />
+          <Select className="w-[124px]" value={props.tagFilter} suffixIcon={<FilterOutlined />} options={props.tagOptions} onChange={props.onTagFilterChange} />
         </div>
       </div>
       <Table

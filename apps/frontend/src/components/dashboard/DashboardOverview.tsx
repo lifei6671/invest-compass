@@ -1,4 +1,4 @@
-import { Button, Card, Empty, Progress, Spin, Table, Tabs, Tag, Tooltip } from "antd";
+import { Button, Card, Empty, Progress, Spin, Table, Tag, Tooltip } from "antd";
 import { ArrowRightOutlined, FileDoneOutlined, InfoCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { useEffect, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -40,6 +40,7 @@ export function DashboardOverview() {
         <RecentReportsCard state={state} />
         <RecentTasksCard state={state} />
       </div>
+      <ProviderStatusCard state={state} />
       <ComplianceBanner tips={state.summary.risk_tips} />
     </section>
   );
@@ -114,7 +115,7 @@ function WatchlistDistributionCard(props: { state: DashboardViewState }) {
           </div>
           <MetricLine label="平均涨跌幅" value={averageWatchlistChange(props.state.watchlistRows)} tone={percentTone(averageWatchlistChangeNumber(props.state.watchlistRows))} />
           <MetricLine label="上涨概率" value={total > 0 ? `${((upCount / total) * 100).toFixed(2)}%` : "--"} tone="up" />
-          <MetricLine label="较昨日变化" value="暂未接入" tone="flat" />
+          <MetricLine label="统计样本" value={total > 0 ? `${total} 只` : "--"} tone="flat" />
         </div>
       </div>
     </DashboardCard>
@@ -125,16 +126,7 @@ function HotNewsCard(props: { state: DashboardViewState }) {
   const newsRows = props.state.summary.market_news.slice(0, 5);
   return (
     <DashboardCard className="h-[270px] overflow-hidden" title="今日热点">
-      <Tabs
-        className="dashboard-tabs dashboard-hot-tabs"
-        defaultActiveKey="market"
-        items={[
-          { key: "industry", label: "行业热点", children: <UnavailablePanel text="行业热点榜暂未接入真实数据源" /> },
-          { key: "concept", label: "概念热点", children: <UnavailablePanel text="概念热点榜暂未接入真实数据源" /> },
-          { key: "market", label: "市场新闻", children: <MarketNewsList rows={newsRows} /> },
-          { key: "watch", label: "重点观察", children: <UnavailablePanel text="重点观察规则暂未配置" /> },
-        ]}
-      />
+      <MarketNewsList rows={newsRows} />
     </DashboardCard>
   );
 }
@@ -196,6 +188,30 @@ function RecentTasksCard(props: { state: DashboardViewState }) {
         <EmptyDashboardPanel className="flex-1" text="暂无任务记录" />
       )}
       <CardAction label="查看全部任务" to="/tasks" />
+    </DashboardCard>
+  );
+}
+
+function ProviderStatusCard(props: { state: DashboardViewState }) {
+  const rows = props.state.summary.provider_statuses;
+  return (
+    <DashboardCard className="overflow-hidden" title="数据源状态">
+      {rows.length > 0 ? (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {rows.map((row) => (
+            <div key={row.name} className="min-w-0 rounded-md border border-[#edf1f7] bg-[#fbfdff] px-4 py-3">
+              <div className="flex min-w-0 items-center justify-between gap-3">
+                <div className="truncate text-[14px] font-medium text-slate-900">{row.name}</div>
+                <Tag className={providerStatusTagClass(row.available)}>{row.available ? "可用" : "异常"}</Tag>
+              </div>
+              <div className="mt-2 truncate text-[13px] text-slate-500">{row.source || "未提供来源说明"}</div>
+              {!row.available && row.last_error ? <div className="mt-1 truncate text-[12px] text-[#ff4d4f]">{row.last_error}</div> : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyDashboardPanel text="暂无数据源状态" />
+      )}
     </DashboardCard>
   );
 }
@@ -370,6 +386,10 @@ function AnalysisTypeTag(props: { value?: string }) {
 function TaskStatusTag(props: { status: string }) {
   const color = props.status === "RUNNING" ? "processing" : props.status === "SUCCESS" ? "success" : props.status === "FAILED" ? "error" : "default";
   return <Tag color={color}>{props.status}</Tag>;
+}
+
+function providerStatusTagClass(available: boolean) {
+  return available ? "m-0 rounded-md border-0 bg-[#e9f8ef] text-[#16a34a]" : "m-0 rounded-md border-0 bg-[#fff1f0] text-[#ff4d4f]";
 }
 
 function watchlistCount(value: number) {

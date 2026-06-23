@@ -59,6 +59,38 @@ func TestCailianpressProviderFetchesTelegraphs(t *testing.T) {
 	}
 }
 
+// TestCailianpressProviderInjectsCredentialCookie 验证财联社 Provider 会把本地凭据 Cookie 注入真实请求。
+func TestCailianpressProviderInjectsCredentialCookie(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Cookie") != "uid=real-user; token=real-token" {
+			t.Fatalf("unexpected cookie: %q", request.Header.Get("Cookie"))
+		}
+		_, _ = writer.Write([]byte(`{"errno":0,"data":{"roll_data":[]}}`))
+	}))
+	defer server.Close()
+
+	provider := newTestCailianpressProvider(t, CailianpressConfig{
+		TelegraphURL:       server.URL,
+		CredentialResolver: staticCookieResolver("uid=real-user; token=real-token"),
+	})
+
+	if _, err := provider.Market(context.Background(), MarketRequest{Limit: 10}); err != nil {
+		t.Fatalf("Market returned error: %v", err)
+	}
+}
+
+// TestCailianpressProviderStatusRequiresCredential 验证启用凭据 resolver 后未配置 Cookie 会显式不可用。
+func TestCailianpressProviderStatusRequiresCredential(t *testing.T) {
+	provider := newTestCailianpressProvider(t, CailianpressConfig{
+		CredentialResolver: failingCookieResolver{},
+	})
+
+	status := provider.Status(context.Background())
+	if status.Available || status.LastError != "data_source_credential_not_configured" {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+}
+
 // TestMarketNewsProvidersRejectStockNewsList 验证只支持市场快讯的 Provider 不会把个股新闻能力伪装成空成功。
 func TestMarketNewsProvidersRejectStockNewsList(t *testing.T) {
 	providers := []Provider{
@@ -374,4 +406,18 @@ func newTestSinaLiveProvider(t *testing.T, config SinaLiveConfig) *SinaLiveProvi
 		t.Fatalf("NewSinaLiveProvider returned error: %v", err)
 	}
 	return provider
+}
+
+type staticCookieResolver string
+
+// ResolveCookie 返回测试固定 Cookie，模拟从本地凭据存储解密成功。
+func (resolver staticCookieResolver) ResolveCookie(context.Context, string) (string, error) {
+	return string(resolver), nil
+}
+
+type failingCookieResolver struct{}
+
+// ResolveCookie 返回失败，模拟用户尚未配置数据源凭据。
+func (failingCookieResolver) ResolveCookie(context.Context, string) (string, error) {
+	return "", errors.New("credential missing")
 }

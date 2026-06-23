@@ -6,7 +6,7 @@ import { stockSearch, type StockSearchResult } from "../../services/coreClient";
 type AddWatchlistModalProps = {
   open: boolean;
   onClose: () => void;
-  onConfirm: (payload: { stock: StockSearchResult; tags: string[]; note: string }) => void;
+  onConfirm: (payload: { stock: StockSearchResult; tags: string[]; note: string }) => Promise<void>;
 };
 
 const defaultTags = ["核心标的", "长期跟踪", "消费"];
@@ -26,6 +26,7 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
   const [note, setNote] = useState("");
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const resetState = () => {
     setKeyword("");
@@ -35,6 +36,7 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
     setNote("");
     setSearchResults([]);
     setIsSearching(false);
+    setIsSubmitting(false);
   };
 
   const closeModal = () => {
@@ -42,13 +44,20 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
     resetState();
   };
 
-  const confirmAdd = () => {
+  const confirmAdd = async () => {
     if (!selectedStock) {
       message.warning("请先选择要添加的股票");
       return;
     }
-    props.onConfirm({ stock: selectedStock, tags, note });
-    resetState();
+    try {
+      setIsSubmitting(true);
+      await props.onConfirm({ stock: selectedStock, tags, note });
+      resetState();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "添加自选股失败");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSearch = async () => {
@@ -222,7 +231,7 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
             <Button className="h-8 w-16 rounded-md border-[#d9e2f1] bg-white px-0 text-[13px] text-[#374151]" onClick={closeModal}>
               取消
             </Button>
-            <Button type="primary" className="h-8 w-[88px] rounded-md bg-[#1677ff] px-0 text-[13px] hover:!bg-[#4096ff]" onClick={confirmAdd}>
+            <Button type="primary" loading={isSubmitting} className="h-8 w-[88px] rounded-md bg-[#1677ff] px-0 text-[13px] hover:!bg-[#4096ff]" onClick={confirmAdd}>
               确认添加
             </Button>
           </div>
