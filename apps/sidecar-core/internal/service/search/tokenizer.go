@@ -10,12 +10,62 @@ type Tokenizer interface {
 	Tokenize(text string) []string
 }
 
+// TokenizerMetadata 描述当前索引使用的分词器版本，用于设置中心展示和 batch 可追溯。
+type TokenizerMetadata struct {
+	Name           string
+	Version        string
+	DictionaryHash string
+}
+
+// MetadataTokenizer 表示可暴露索引元数据的分词器。
+type MetadataTokenizer interface {
+	Tokenizer
+	Metadata() TokenizerMetadata
+}
+
 // SimpleTokenizer 是 GSE 不可用时的可预测降级分词器。
 type SimpleTokenizer struct{}
 
 // Tokenize 按中文连续片段、英文数字片段切词，并保持去重后的稳定顺序。
 func (SimpleTokenizer) Tokenize(text string) []string {
 	return uniqueTokens(splitSimpleTokens(text, true))
+}
+
+// Metadata 返回 simple 分词器的稳定元数据。
+func (SimpleTokenizer) Metadata() TokenizerMetadata {
+	return TokenizerMetadata{Name: "simple", Version: "1", DictionaryHash: "builtin"}
+}
+
+// DefaultTokenizer 优先使用 GSE 中文搜索分词；初始化失败时才降级为 simple。
+func DefaultTokenizer() Tokenizer {
+	tokenizer, err := NewGSETokenizer(DefaultDomainWords())
+	if err != nil {
+		return SimpleTokenizer{}
+	}
+	return tokenizer
+}
+
+// DefaultDomainWords 返回投研范围搜索需要强保留的领域词。
+func DefaultDomainWords() []string {
+	return []string{
+		"A股",
+		"AI分析",
+		"Alpha Vantage",
+		"AkShare",
+		"EastMoney",
+		"MACD",
+		"KDJ",
+		"RSI",
+		"K线",
+		"财联社",
+		"雪球",
+		"市盈率",
+		"换手率",
+		"成交额",
+		"光模块",
+		"AI服务器",
+		"CPO",
+	}
 }
 
 // splitSimpleTokens 执行轻量切词，keepColon 控制是否保留 symbol 里的冒号。

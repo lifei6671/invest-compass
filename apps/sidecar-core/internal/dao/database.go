@@ -116,6 +116,11 @@ func BackupBeforeMigration(ctx context.Context, config BackupConfig) (BackupResu
 	if err := os.MkdirAll(config.BackupDir, 0o700); err != nil {
 		return BackupResult{}, fmt.Errorf("create sqlite backup dir: %w", err)
 	}
+	if exists, err := sqliteBackupExistsForDay(config.BackupDir, config.Path, backupTime); err != nil {
+		return BackupResult{}, err
+	} else if exists {
+		return BackupResult{}, nil
+	}
 
 	sources := sqliteBackupSources(config.Path)
 	files := make([]string, 0, len(sources))
@@ -241,6 +246,29 @@ func sqliteBackupPath(backupDir string, source string, backupTime time.Time) str
 	name := strings.TrimSuffix(baseName, extension)
 	timestamp := backupTime.Format("20060102T150405000000000Z")
 	return filepath.Join(backupDir, fmt.Sprintf("%s-%s%s.bak", name, timestamp, extension))
+}
+
+// sqliteBackupExistsForDay 判断同一主库当天是否已经生成过自动迁移备份，避免频繁重启刷出大量备份文件。
+func sqliteBackupExistsForDay(backupDir string, source string, backupTime time.Time) (bool, error) {
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		return false, fmt.Errorf("read sqlite backup dir: %w", err)
+	}
+	baseName := filepath.Base(source)
+	extension := filepath.Ext(baseName)
+	name := strings.TrimSuffix(baseName, extension)
+	prefix := fmt.Sprintf("%s-%sT", name, backupTime.Format("20060102"))
+	suffix := extension + ".bak"
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		fileName := entry.Name()
+		if strings.HasPrefix(fileName, prefix) && strings.HasSuffix(fileName, suffix) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // copyFileNoOverwrite 复制文件并拒绝覆盖已有备份，避免破坏用户可恢复点。

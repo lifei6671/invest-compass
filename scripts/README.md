@@ -24,7 +24,7 @@ settings data survived. It is an automated pre-release check, not a substitute
 for upgrading a real installed user profile after packaging.
 
 Use `pnpm --dir apps sidecar:smoke` after producing the Apple Silicon macOS
-`.app` to start the packaged `invest-compas-core`, send the stdin runtime token
+`.app` to start the packaged `invest-compass-core`, send the stdin runtime token
 handshake, call `/internal/health`, and close it through `/internal/shutdown`.
 
 ## Sidecar target verification

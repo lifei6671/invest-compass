@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions"
 	analysisaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/analysis"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/httpx"
 	updatecheckaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/updatecheck"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/dao"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
@@ -62,6 +65,7 @@ func main() {
 		slog.Error("sidecar stdin 握手失败", "error", "invalid_or_timeout")
 		os.Exit(1)
 	}
+	lifecycleDiagnostic("handshake", "keepalive_stdin", handshake.KeepaliveStdin)
 
 	var readyPort int
 	if _, err := fmt.Sscanf(listenPort, "%d", &readyPort); err != nil {
@@ -122,7 +126,7 @@ func main() {
 	defer shutdownTaskLogWriter(taskLogWriter)
 	applyTaskLogRetention(dbCtx, store, ndjsonWriter)
 
-	logSource := logexportservice.NewMemorySource(slog.Default().Handler(), 500)
+	logSource := newRuntimeLogSource(os.Stderr, 500)
 	slog.SetDefault(slog.New(logger.NewTaskLogHandler(logSource, taskLogWriter)))
 
 	schedulerQueue, schedulerService, err := newProductionScheduler(store, time.Now)
@@ -137,16 +141,6 @@ func main() {
 		os.Exit(1)
 	}
 	schedulerCancel()
-	if err := json.NewEncoder(os.Stdout).Encode(sidecar.ReadyMessage{
-		Status:          "ready",
-		Port:            readyPort,
-		PID:             os.Getpid(),
-		ProtocolVersion: sidecar.ProtocolVersion,
-	}); err != nil {
-		slog.Error("输出 ready JSON 失败", "error", err)
-		os.Exit(1)
-	}
-
 	shutdownRequested := make(chan struct{}, 1)
 	lifecycle := newShutdownLifecycle(schedulerService.Shutdown, func() {
 		select {
@@ -155,12 +149,133 @@ func main() {
 		}
 	})
 	defer lifecycle.stopScheduler()
-	handler := actions.NewHandler(buildActionsConfig(handshake.Token, store, schedulerQueue, schedulerService, taskLogService, taskLogWriter, logSource, lifecycle.requestShutdown))
+	if handshake.KeepaliveStdin {
+		watchParentStdinEOF(os.Stdin, func() {
+			lifecycleDiagnostic("shutdown_requested", "source", "stdin_eof")
+			lifecycle.requestShutdown()
+		})
+	}
+	handler := actions.NewHandler(buildActionsConfig(handshake.Token, store, schedulerQueue, schedulerService, taskLogService, taskLogWriter, logSource, func() {
+		lifecycleDiagnostic("shutdown_requested", "source", "internal_api")
+		lifecycle.requestShutdown()
+	}))
+	serveResult := serveCoreHTTP(listener, handler, shutdownRequested)
+	select {
+	case err := <-serveResult:
+		lifecycleDiagnostic("serve_result_before_ready", "error", err)
+		slog.Error("本地 HTTP server 启动失败", "error", err)
+		os.Exit(1)
+	default:
+	}
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if err := waitForCoreHTTPReady(readyCtx, readyPort, handshake.Token); err != nil {
+		readyCancel()
+		lifecycleDiagnostic("shutdown_requested", "source", "ready_check_failed")
+		lifecycle.requestShutdown()
+		slog.Error("等待本地 HTTP server ready 失败", "error", err)
+		os.Exit(1)
+	}
+	readyCancel()
 
-	if err := server.Serve(listener, handler, shutdownRequested); err != nil {
+	if err := json.NewEncoder(os.Stdout).Encode(sidecar.ReadyMessage{
+		Status:          "ready",
+		Port:            readyPort,
+		PID:             os.Getpid(),
+		ProtocolVersion: sidecar.ProtocolVersion,
+	}); err != nil {
+		lifecycleDiagnostic("shutdown_requested", "source", "ready_output_failed")
+		lifecycle.requestShutdown()
+		slog.Error("输出 ready JSON 失败", "error", err)
+		os.Exit(1)
+	}
+
+	if err := <-serveResult; err != nil {
+		lifecycleDiagnostic("serve_result", "error", err)
 		slog.Error("本地 HTTP server 异常退出", "error", err)
 		os.Exit(1)
 	}
+	lifecycleDiagnostic("serve_result", "error", "nil")
+}
+
+// serveCoreHTTP 在后台启动本地 HTTP server；调用方必须在 ready 前启动它，避免 Rust 收到 ready 后立刻请求时连接被拒绝。
+func serveCoreHTTP(listener net.Listener, handler http.Handler, shutdown <-chan struct{}) <-chan error {
+	result := make(chan error, 1)
+	go func() {
+		result <- server.Serve(listener, handler, shutdown)
+	}()
+	return result
+}
+
+// waitForCoreHTTPReady 在输出 ready JSON 前做一次本机认证健康检查，确保 Rust 收到 ready 后立即调用业务 API 不会撞上监听竞态。
+func waitForCoreHTTPReady(ctx context.Context, port int, token string) error {
+	client := http.Client{Timeout: 200 * time.Millisecond}
+	url := fmt.Sprintf("http://127.0.0.1:%d/internal/health", port)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastErr error
+	for {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader("{}"))
+		if err != nil {
+			return err
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set(httpx.TokenHeader, token)
+
+		response, err := client.Do(request)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			closeErr := response.Body.Close()
+			if response.StatusCode == http.StatusOK && closeErr == nil {
+				return nil
+			}
+			if closeErr != nil {
+				lastErr = closeErr
+			} else {
+				lastErr = fmt.Errorf("health status %d", response.StatusCode)
+			}
+		} else {
+			lastErr = err
+		}
+
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("wait core http ready: %w", lastErr)
+			}
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// watchParentStdinEOF 监听 Rust 父进程持有的 stdin 管道；父进程退出或断开时主动关闭 Go core。
+func watchParentStdinEOF(reader io.Reader, requestShutdown func()) {
+	go func() {
+		lifecycleDiagnostic("stdin_watch_start")
+		_, err := io.Copy(io.Discard, reader)
+		if err != nil {
+			lifecycleDiagnostic("stdin_watch_end", "error", err)
+		} else {
+			lifecycleDiagnostic("stdin_watch_end", "error", "eof")
+		}
+		requestShutdown()
+	}()
+}
+
+// lifecycleDiagnostic 输出不含 token 和凭据的 sidecar 生命周期诊断，专门用于定位父子进程边界问题。
+func lifecycleDiagnostic(message string, attrs ...any) {
+	fields := []string{fmt.Sprintf("go_lifecycle %s", message)}
+	for index := 0; index+1 < len(attrs); index += 2 {
+		fields = append(fields, fmt.Sprintf("%v=%v", attrs[index], attrs[index+1]))
+	}
+	_, _ = fmt.Fprintln(os.Stderr, strings.Join(fields, " "))
+}
+
+// newRuntimeLogSource 构造生产运行期日志采集器。
+// 下游直接写 stderr，避免第三方库使用标准 log 时再次回到 log.Logger 导致重入死锁。
+func newRuntimeLogSource(output io.Writer, capacity int) *logexportservice.MemorySource {
+	return logexportservice.NewMemorySource(slog.NewTextHandler(output, nil), capacity)
 }
 
 // newProductionScheduler 组装生产调度队列和 SchedulerService，确保启动恢复、手动触发和桌面管理使用同一执行队列。

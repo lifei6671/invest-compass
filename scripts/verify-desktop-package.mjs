@@ -7,11 +7,11 @@ const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const platformLayouts = {
   darwin: {
     desktopBinary: ["Contents", "MacOS", "invest-compass-desktop"],
-    sidecarBinary: ["Contents", "MacOS", "invest-compas-core"],
+    sidecarBinary: ["Contents", "MacOS", "invest-compass-core"],
   },
   win32: {
     desktopBinary: ["invest-compass-desktop.exe"],
-    sidecarBinary: ["invest-compas-core.exe"],
+    sidecarBinary: ["invest-compass-core.exe"],
   },
 };
 

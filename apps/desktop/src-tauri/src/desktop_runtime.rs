@@ -1,5 +1,6 @@
 use crate::sidecar::{CoreClient, CoreState};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -17,6 +18,21 @@ const WINDOW_WIDTH_SETTING_KEY: &str = "window.main.width";
 const WINDOW_HEIGHT_SETTING_KEY: &str = "window.main.height";
 const MIN_RESTORED_WINDOW_WIDTH: u32 = 640;
 const MIN_RESTORED_WINDOW_HEIGHT: u32 = 480;
+
+/// 返回默认工作区路径，优先遵循用户 Documents 目录，便于用户备份和迁移本地数据。
+pub fn default_workspace_path<R: tauri::Runtime, M: Manager<R>>(
+    manager: &M,
+) -> tauri::Result<PathBuf> {
+    manager
+        .path()
+        .document_dir()
+        .map(workspace_path_from_documents_dir)
+}
+
+/// 基于系统 Documents 目录生成应用默认工作区路径，供启动和测试复用。
+fn workspace_path_from_documents_dir(documents_dir: PathBuf) -> PathBuf {
+    documents_dir.join("Invest Compass")
+}
 
 #[derive(Serialize)]
 struct RuntimeSettingsGetRequest {
@@ -343,6 +359,16 @@ fn desktop_tray_available() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    /// 验证默认工作区遵循用户 Documents 目录，避免业务数据默认落到应用安装或缓存目录。
+    fn workspace_path_from_documents_dir_uses_invest_compass_folder() {
+        let path = workspace_path_from_documents_dir(PathBuf::from("/Users/demo/Documents"));
+        assert_eq!(
+            path,
+            PathBuf::from("/Users/demo/Documents").join("Invest Compass")
+        );
+    }
 
     #[test]
     /// 验证关闭到托盘只接受明确开启值，缺省或其他值都保持直接退出。

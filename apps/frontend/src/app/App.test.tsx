@@ -8,6 +8,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { App, AppErrorBoundary } from "./App";
 import * as AppModule from "./App";
 import { appDatePickerLocale } from "../lib/antdLocale";
+import { useDashboardStore } from "../stores/dashboardStore";
 
 Object.defineProperty(window, "matchMedia", {
   writable: true,
@@ -46,6 +47,7 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 
 afterEach(() => {
   clearMocks();
+  useDashboardStore.setState({ state: null, loading: false, error: null, lastLoadedAt: null });
   dialogOpenMock.mockReset();
   notificationIsPermissionGrantedMock.mockReset();
   notificationRequestPermissionMock.mockReset();
@@ -73,6 +75,26 @@ const emptyDashboardFixture = {
   market_news: [],
   risk_tips: ["仅作研究辅助，不构成投资建议"],
   provider_statuses: [{ name: "market", source: "unconfigured", available: false, last_error: "provider_unconfigured" }],
+};
+
+const basicSettingsGetPayload = {
+  keys: ["app.theme", "app.language", "market.default", "quote.refresh_interval", "kline.default_period", "kline.default_adjust"],
+};
+
+const defaultAIConfig = {
+  id: 1,
+  name: "DeepSeek",
+  provider: "openai-compatible",
+  base_url: "https://api.deepseek.com",
+  api_key_ref: "local-vault://ai-config/deepseek-1",
+  masked_api_key: "sk-...seek",
+  has_api_key: true,
+  model_name: "DeepSeek-V3",
+  temperature: 0.2,
+  max_tokens: 4096,
+  timeout_seconds: 120,
+  stream_enabled: true,
+  is_default: true,
 };
 
 test("首版主导航和路由范围只包含 MVP 页面", () => {
@@ -106,7 +128,7 @@ test("首版主导航和路由范围只包含 MVP 页面", () => {
   ]);
 });
 
-test("App 启动后通过 typed invoke service 展示 core health 状态", async () => {
+test("App 默认不伪装 core health，刷新后通过 typed invoke service 展示状态", async () => {
   mockIPC((command) => {
     if (command === "dashboard_summary") {
       return { code: 0, message: "ok", data: dashboardFixture };
@@ -130,7 +152,12 @@ test("App 启动后通过 typed invoke service 展示 core health 状态", async
 
   render(<App />);
 
-  expect(screen.getByText("正在连接本地核心服务")).toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.getByText("自选股涨跌分布")).toBeInTheDocument();
+  });
+  expect(screen.queryByText(/本地核心服务已连接/)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /刷新/ }));
 
   await waitFor(() => {
     expect(screen.getByText(/本地核心服务已连接/)).toBeInTheDocument();
@@ -167,9 +194,7 @@ test("App 提供基础路由外壳和错误边界", async () => {
   expect(screen.getByRole("link", { name: "AI 分析" })).toHaveAttribute("href", "#/analysis");
   expect(screen.getByRole("link", { name: "资讯中心" })).toHaveAttribute("href", "#/news");
 
-  await waitFor(() => {
-    expect(screen.getByText(/本地核心服务已连接/)).toBeInTheDocument();
-  });
+  expect(screen.queryByText(/本地核心服务已连接/)).not.toBeInTheDocument();
 });
 
 test("Dashboard 首页展示真实数据空态且不拉取伪数据", async () => {
@@ -975,6 +1000,18 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
   mockIPC((command, payload) => {
     calls.push({ command, payload });
+    if (command === "core_health") {
+      return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+    }
+    if (command === "providers_status") {
+      return { code: 0, message: "ok", data: [{ name: "market", source: "sina", available: true, last_error: "" }] };
+    }
+    if (command === "settings_get") {
+      return { code: 0, message: "ok", data: { items: [] } };
+    }
+    if (command === "ai_config_list") {
+      return { code: 0, message: "ok", data: { items: [defaultAIConfig] } };
+    }
     if (command === "cache_stats") {
       return {
         code: 0,
@@ -1030,7 +1067,7 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.queryByRole("tab", { name: "检查更新" })).not.toBeInTheDocument();
   expect(screen.getByText("配置应用的基本行为与偏好设置")).toBeInTheDocument();
   expect(screen.getByText("默认 AI 模型")).toBeInTheDocument();
-  expect(screen.getByText("DeepSeek-V3")).toBeInTheDocument();
+  expect(screen.getByText("DeepSeek / DeepSeek-V3")).toBeInTheDocument();
   expect(screen.getByText("行情刷新频率")).toBeInTheDocument();
   expect(screen.getByText("默认 K 线周期")).toBeInTheDocument();
   expect(screen.getByText("默认复权类型")).toBeInTheDocument();
@@ -1047,21 +1084,24 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.getByText("stock-ready-1")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /重建报告索引/ })).toBeInTheDocument();
   expect(screen.getByText("系统代理")).toBeInTheDocument();
-  expect(screen.getByText("帮助我们改进产品（不会收集个人信息）")).toBeInTheDocument();
+  expect(screen.queryByText("其他设置")).not.toBeInTheDocument();
+  expect(screen.queryByText("帮助我们改进产品（不会收集个人信息）")).not.toBeInTheDocument();
   expect(screen.getByText("敏感信息会脱敏保存；日志导出前将自动清理 API Key 与代理密码。")).toBeInTheDocument();
 
   const switches = screen.getAllByRole("switch");
-  expect(switches).toHaveLength(6);
+  expect(switches).toHaveLength(4);
   expect(switches[0]).toBeChecked();
   expect(switches[1]).toBeChecked();
   expect(switches[2]).not.toBeChecked();
   expect(switches[3]).toBeChecked();
-  expect(switches[4]).toBeChecked();
-  expect(switches[5]).toBeChecked();
 
   fireEvent.click(screen.getByRole("button", { name: "选择目录" }));
   fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
   fireEvent.click(screen.getByRole("button", { name: /清理缓存/ }));
+  await waitFor(() => {
+    expect(screen.getByText("确认清理缓存")).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByRole("button", { name: "确认清理" }));
   await waitFor(() => {
     expect(calls.filter((call) => call.command === "cache_clean")).toHaveLength(1);
   });
@@ -1242,10 +1282,19 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.queryByText("立即更新")).not.toBeInTheDocument();
 
   expect(calls).toEqual([
+    { command: "core_health", payload: {} },
+    { command: "providers_status", payload: {} },
+    { command: "settings_get", payload: basicSettingsGetPayload },
+    { command: "ai_config_list", payload: {} },
+    { command: "workspace_get", payload: {} },
     { command: "cache_stats", payload: {} },
     { command: "search_status", payload: {} },
+    { command: "autostart_get", payload: {} },
+    { command: "settings_get", payload: { keys: ["window.close_to_tray"] } },
+    { command: "workspace_open", payload: {} },
     { command: "cache_clean", payload: { payload: { targets: ["quote", "task_logs"] } } },
     { command: "cache_stats", payload: {} },
+    { command: "ai_config_list", payload: {} },
   ]);
 }, 10_000);
 
@@ -1254,6 +1303,18 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
+    if (command === "core_health") {
+      return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+    }
+    if (command === "providers_status") {
+      return { code: 0, message: "ok", data: [{ name: "market", source: "sina", available: true, last_error: "" }] };
+    }
+    if (command === "settings_get") {
+      return { code: 0, message: "ok", data: { items: [] } };
+    }
+    if (command === "ai_config_list") {
+      return { code: 0, message: "ok", data: { items: [defaultAIConfig] } };
+    }
     if (command === "cache_stats") {
       return { code: 0, message: "ok", data: { total_bytes: 0, items: [] } };
     }
@@ -1341,8 +1402,15 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
   expect(screen.queryByRole("tab", { name: "同步策略" })).not.toBeInTheDocument();
 
   expect(calls).toEqual([
+    { command: "core_health", payload: {} },
+    { command: "providers_status", payload: {} },
+    { command: "settings_get", payload: basicSettingsGetPayload },
+    { command: "ai_config_list", payload: {} },
+    { command: "workspace_get", payload: {} },
     { command: "cache_stats", payload: {} },
     { command: "search_status", payload: {} },
+    { command: "autostart_get", payload: {} },
+    { command: "settings_get", payload: { keys: ["window.close_to_tray"] } },
   ]);
 }, 10_000);
 
@@ -1351,6 +1419,18 @@ test("数据源设置数据说明页展示说明模块并仅使用本地交互",
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
+    if (command === "core_health") {
+      return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+    }
+    if (command === "providers_status") {
+      return { code: 0, message: "ok", data: [{ name: "market", source: "sina", available: true, last_error: "" }] };
+    }
+    if (command === "settings_get") {
+      return { code: 0, message: "ok", data: { items: [] } };
+    }
+    if (command === "ai_config_list") {
+      return { code: 0, message: "ok", data: { items: [defaultAIConfig] } };
+    }
     if (command === "cache_stats") {
       return { code: 0, message: "ok", data: { total_bytes: 0, items: [] } };
     }
@@ -1459,8 +1539,15 @@ test("数据源设置数据说明页展示说明模块并仅使用本地交互",
   expect(screen.getByRole("tab", { name: "数据说明" })).toHaveAttribute("aria-selected", "true");
 
   expect(calls).toEqual([
+    { command: "core_health", payload: {} },
+    { command: "providers_status", payload: {} },
+    { command: "settings_get", payload: basicSettingsGetPayload },
+    { command: "ai_config_list", payload: {} },
+    { command: "workspace_get", payload: {} },
     { command: "cache_stats", payload: {} },
     { command: "search_status", payload: {} },
+    { command: "autostart_get", payload: {} },
+    { command: "settings_get", payload: { keys: ["window.close_to_tray"] } },
   ]);
 }, 10_000);
 

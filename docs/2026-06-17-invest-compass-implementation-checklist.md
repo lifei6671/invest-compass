@@ -236,7 +236,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 当前进展：
   - 已实现 Rust sidecar token、stdin 握手、ready JSON 解析、protocolVersion 兼容性校验、health/shutdown client 和 `core_health` 白名单 command。
   - 已补 Go `/internal/shutdown`，合法 token 才能触发关闭回调。
-  - 已补 `pnpm sidecar:build`，默认产物为 `apps/desktop/src-tauri/binaries/invest-compas-core`。
+  - 已补 `pnpm sidecar:build`，默认产物为 `apps/desktop/src-tauri/binaries/invest-compass-core`。
   - 已验证项目内 sidecar 二进制 stdin 握手、health、非 POST 拒绝和 shutdown 后进程退出。
   - Go server 优雅关闭失败会返回错误，Rust 侧仍保留 `/internal/shutdown` 失败后 kill 子进程的兜底清理。
 
@@ -1457,18 +1457,18 @@ P7 跨平台桌面能力、打包、发布验收
   - 已覆盖 `aarch64-apple-darwin`、`x86_64-apple-darwin`、`x86_64-pc-windows-msvc` 的文件名。
   - 当前平台默认 core 二进制路径复用同一命名规则。
   - 单测覆盖三类首版目标平台文件名。
-  - 已在 `tauri.conf.json` 配置 `bundle.externalBin = ["binaries/invest-compas-core"]`，按 Tauri sidecar 基名声明随包二进制。
+  - 已在 `tauri.conf.json` 配置 `bundle.externalBin = ["binaries/invest-compass-core"]`，按 Tauri sidecar 基名声明随包二进制。
   - 已新增 `scripts/build-sidecar.mjs`，`pnpm --dir apps sidecar:build` 会按当前平台生成 target triple 文件名的 Go sidecar，并保留本地兼容副本。
   - `scripts/build-sidecar.mjs` 已支持 `--target=<triple>` 和 `--all-targets` 目标选择，覆盖 `aarch64-apple-darwin`、`x86_64-apple-darwin`、`x86_64-pc-windows-msvc` 三类首版 sidecar 命名。
   - 已实际生成三类首版 sidecar 产物：Apple Silicon 为 Mach-O arm64、macOS Intel 为 Mach-O x86_64、Windows x64 为 PE32+ x86-64。
   - Windows x64 sidecar 构建已使用 `-ldflags "-H windowsgui"`，产物为 GUI subsystem，降低桌面应用启动 sidecar 时弹出控制台窗口的风险。
   - 已新增 `scripts/verify-sidecar-targets.mjs`、`pnpm --dir apps sidecar:verify-targets` 和 `pnpm --dir apps sidecar:check-targets`，可重复构建并复核三类首版 sidecar target 产物的存在性、非 symlink、非空、macOS 执行位、Mach-O / PE 架构和 Windows GUI subsystem。
   - 本机已通过 `pnpm --dir apps build` 生成 macOS Apple Silicon release 可执行文件，并通过 `tauri build --bundles app` 生成 `投研罗盘.app`。
-  - 已确认 `投研罗盘.app/Contents/MacOS/` 内同时包含 `invest-compass-desktop` 和 `invest-compas-core`，包内 sidecar 为 Mach-O arm64。
-  - 已用包内 `invest-compas-core` 执行 stdin 握手、ready JSON `protocolVersion=1` 和 `/internal/shutdown` 回环关闭验证；首次沙箱运行因本地监听权限失败，提权后验证通过。
+  - 已确认 `投研罗盘.app/Contents/MacOS/` 内同时包含 `invest-compass-desktop` 和 `invest-compass-core`，包内 sidecar 为 Mach-O arm64。
+  - 已用包内 `invest-compass-core` 执行 stdin 握手、ready JSON `protocolVersion=1` 和 `/internal/shutdown` 回环关闭验证；首次沙箱运行因本地监听权限失败，提权后验证通过。
   - 已新增 `scripts/verify-sidecar-runtime.mjs` 和 `pnpm --dir apps sidecar:smoke`，可重复验证 Apple Silicon `.app` 包内 Go core 完成 stdin token 握手、`/internal/health` 和 `/internal/shutdown`，并已接入 `release:check:local`。
-  - Rust 运行期已优先解析发布包内 `Contents/MacOS/invest-compas-core`，环境变量覆盖仅用于本地调试，源码目录 `src-tauri/binaries` 只作为开发 fallback。
-  - 本机 Apple Silicon 已真实启动 `投研罗盘.app`，进程参数确认 Go core 来自 `.app/Contents/MacOS/invest-compas-core`，退出应用后 `invest-compass-desktop` 和 `invest-compas-core` 均无残留进程。
+  - Rust 运行期已优先解析发布包内 `Contents/MacOS/invest-compass-core`，环境变量覆盖仅用于本地调试，源码目录 `src-tauri/binaries` 只作为开发 fallback。
+  - 本机 Apple Silicon 已真实启动 `投研罗盘.app`，进程参数确认 Go core 来自 `.app/Contents/MacOS/invest-compass-core`，退出应用后 `invest-compass-desktop` 和 `invest-compass-core` 均无残留进程。
   - Go core ready JSON 已携带 `protocolVersion`，Rust sidecar ready 解析会拒绝不匹配版本，避免 desktop/core 二进制版本不兼容时继续启动。
   - `pnpm --dir apps test` 已纳入 `scripts/build-sidecar.test.mjs`，覆盖默认当前平台、显式 target、all-targets 目标选择、Windows GUI subsystem 构建参数，以及三类首版 target sidecar 文件名必须匹配 Tauri `externalBin` 基名，且测试 import 脚本不会触发真实构建。
   - 已新增 `scripts/verify-desktop-package.mjs`，用于在生成桌面包后检查 macOS `.app` 或 Windows 解包目录中主程序和 Go sidecar 是否同时存在且非空；该脚本只验证包结构和基础文件有效性，不替代真实目标平台启动验收。

@@ -1,4 +1,7 @@
-use crate::sidecar::{CoreClient, CoreState};
+use crate::{
+    desktop_runtime,
+    sidecar::{runtime_core_binary_path, CoreClient, CoreState},
+};
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -8,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use tauri::State;
+use tauri::{AppHandle, State};
 
 const CREDENTIAL_DIR_ENV: &str = "INVEST_COMPASS_CREDENTIAL_DIR";
 const LOCAL_VAULT_REF_PREFIX: &str = "local-vault://ai-config/";
@@ -322,20 +325,26 @@ impl LocalCredentialVault {
 
 /// 读取 AI 配置列表，固定转发到 Go core `/api/ai/configs/list`。
 #[tauri::command]
-pub fn ai_config_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
-    let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/ai/configs/list", &AIConfigListRequest {})
-        .map_err(|error| error.to_string())
+pub fn ai_config_list(
+    app_handle: AppHandle,
+    state: State<'_, CoreState>,
+) -> Result<serde_json::Value, String> {
+    post_ai_config_read_api(
+        &app_handle,
+        &state,
+        "/api/ai/configs/list",
+        &AIConfigListRequest {},
+    )
 }
 
 /// 保存 AI 配置元数据，固定转发到 Go core `/api/ai/configs/save`。
 #[tauri::command]
 pub fn ai_config_save(
+    app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: AIConfigSavePayload,
 ) -> Result<serde_json::Value, String> {
-    let client = state.client().map_err(|error| error.to_string())?;
+    let client = ai_config_client(&app_handle, &state)?;
     let vault = LocalCredentialVault::default();
     let credential_metadata = resolve_ai_config_credential_metadata(&client, payload.id)?;
     let plan = build_forward_payload(payload, &vault, credential_metadata.as_ref())
@@ -356,11 +365,22 @@ pub fn ai_config_save(
 
 /// 测试 AI 配置连通性，固定读取本地 vault 后转发到 Go core `/api/ai/configs/test`。
 #[tauri::command]
-pub fn ai_config_test(
+pub async fn ai_config_test(
+    app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: AIConfigTestPayload,
 ) -> Result<serde_json::Value, String> {
-    let client = state.client().map_err(|error| error.to_string())?;
+    let client = ai_config_client(&app_handle, &state)?;
+    tauri::async_runtime::spawn_blocking(move || ai_config_test_blocking(client, payload))
+        .await
+        .map_err(|error| format!("ai config test task failed: {error}"))?
+}
+
+/// 执行阻塞式模型连通性测试请求，避免外部 Provider 网络等待卡住 Tauri command 调度线程。
+fn ai_config_test_blocking(
+    client: CoreClient,
+    payload: AIConfigTestPayload,
+) -> Result<serde_json::Value, String> {
     let vault = LocalCredentialVault::default();
     let credential_metadata = resolve_ai_config_credential_metadata(&client, payload.id)?;
     let metadata = credential_metadata.ok_or_else(|| "ai config not found".to_string())?;
@@ -385,10 +405,11 @@ pub fn ai_config_test(
 /// 删除 AI 配置元数据和可选本地 vault 密钥，固定转发到 Go core `/api/ai/configs/delete`。
 #[tauri::command]
 pub fn ai_config_delete(
+    app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: AIConfigDeletePayload,
 ) -> Result<serde_json::Value, String> {
-    let client = state.client().map_err(|error| error.to_string())?;
+    let client = ai_config_client(&app_handle, &state)?;
     let vault = LocalCredentialVault::default();
     validate_ai_config_id(payload.id).map_err(|error| error.to_string())?;
     let credential_metadata = resolve_ai_config_credential_metadata(&client, payload.id)?;
@@ -399,6 +420,45 @@ pub fn ai_config_delete(
         .map_err(|error| error.to_string())?;
     cleanup_delete_request(&plan, &vault).map_err(|error| error.to_string())?;
     Ok(response)
+}
+
+/// 获取 AI 配置命令使用的 core client；若子进程已退出，则用当前桌面默认工作区恢复启动。
+fn ai_config_client(app_handle: &AppHandle, state: &CoreState) -> Result<CoreClient, String> {
+    match state.client() {
+        Ok(client) => Ok(client),
+        Err(_) => {
+            let binary_path = runtime_core_binary_path();
+            let workspace_path = desktop_runtime::default_workspace_path(app_handle)
+                .map_err(|error| error.to_string())?;
+            state
+                .start(&binary_path, &workspace_path, Duration::from_secs(5))
+                .map_err(|error| error.to_string())
+        }
+    }
+}
+
+/// 模型配置读取类命令统一走可恢复调用，避免启动瞬间旧端口失效导致设置页初始化误报。
+fn post_ai_config_read_api<TRequest>(
+    app_handle: &AppHandle,
+    state: &CoreState,
+    path: &str,
+    payload: &TRequest,
+) -> Result<serde_json::Value, String>
+where
+    TRequest: Serialize,
+{
+    let binary_path = runtime_core_binary_path();
+    let workspace_path =
+        desktop_runtime::default_workspace_path(app_handle).map_err(|error| error.to_string())?;
+    state
+        .post_api_with_recovery(
+            &binary_path,
+            &workspace_path,
+            Duration::from_secs(5),
+            path,
+            payload,
+        )
+        .map_err(|error| error.to_string())
 }
 
 /// 构造模型连通性测试请求，真实密钥只在 Rust 内部读取后注入给 Go core。

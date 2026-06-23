@@ -194,7 +194,7 @@ test("桌面运行期必须提供真实托盘恢复入口", () => {
 test("Tauri externalBin 必须随包声明 Go sidecar", () => {
   assert.deepEqual(
     tauriConfig.bundle?.externalBin,
-    ["binaries/invest-compas-core"],
+    ["binaries/invest-compass-core"],
     "externalBin 必须使用 Tauri sidecar 基名，实际文件由构建脚本补 target triple 后缀",
   );
   assert.match(
@@ -382,6 +382,22 @@ test("AI 配置 Rust command 必须固定映射到 Go API", () => {
       `AI config command 必须固定映射到 ${path}`,
     );
   }
+});
+
+test("AI 配置连通性测试不能阻塞 Tauri 同步 command", () => {
+  const aiConfigSource = commandSources.find((source) =>
+    source.includes("pub async fn ai_config_test"),
+  );
+  assert.notEqual(
+    aiConfigSource,
+    undefined,
+    "ai_config_test 必须是 async command，避免外部模型网络测试阻塞桌面 UI",
+  );
+  assert.match(
+    aiConfigSource,
+    /tauri::async_runtime::spawn_blocking/,
+    "ai_config_test 中的阻塞式 Go core 请求必须放到 blocking 线程执行",
+  );
 });
 
 test("任务历史 Rust command 必须固定映射到 Go API", () => {

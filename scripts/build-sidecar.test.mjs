@@ -33,7 +33,7 @@ test("selectBuildTargets supports all first-version desktop targets", () => {
 
 test("buildGoCommand uses GUI subsystem for Windows sidecar", () => {
   const [target] = selectBuildTargets(["--target=x86_64-pc-windows-msvc"], "darwin", "arm64");
-  const command = buildGoCommand(target, "/tmp/invest-compas-core.exe");
+  const command = buildGoCommand(target, "/tmp/invest-compass-core.exe");
 
   assert.deepEqual(command.args, [
     "build",
@@ -43,14 +43,14 @@ test("buildGoCommand uses GUI subsystem for Windows sidecar", () => {
     "-ldflags",
     "-H windowsgui",
     "-o",
-    "/tmp/invest-compas-core.exe",
+    "/tmp/invest-compass-core.exe",
     "./cmd/invest-compass-core",
   ]);
 });
 
 test("buildGoCommand does not modify Go module files", () => {
   const [target] = selectBuildTargets(["--target=aarch64-apple-darwin"], "darwin", "arm64");
-  const command = buildGoCommand(target, "/tmp/invest-compas-core");
+  const command = buildGoCommand(target, "/tmp/invest-compass-core");
 
   assert.deepEqual(command.args, [
     "build",
@@ -58,7 +58,7 @@ test("buildGoCommand does not modify Go module files", () => {
     "-tags",
     "sqlite_fts5",
     "-o",
-    "/tmp/invest-compas-core",
+    "/tmp/invest-compass-core",
     "./cmd/invest-compass-core",
   ]);
 });
@@ -121,7 +121,7 @@ test("Makefile delegates sidecar build to target-aware script", async () => {
   );
   assert.doesNotMatch(
     makefile,
-    /go build -o \.\.\/desktop\/src-tauri\/binaries\/invest-compas-core /,
+    /go build -o \.\.\/desktop\/src-tauri\/binaries\/invest-compass-core /,
     "go-build must not emit only the legacy non-target sidecar filename",
   );
 });

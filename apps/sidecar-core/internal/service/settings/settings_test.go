@@ -87,6 +87,41 @@ func TestValidateSettingRejectsUnmaskedAPIKeyDisplay(t *testing.T) {
 	assertSettingsErrorCode(t, err, xerr.SettingsSensitiveSetting)
 }
 
+// TestValidateSettingAcceptsKnownSettingValues 验证设置中心已定义 key 的合法值域可保存。
+func TestValidateSettingAcceptsKnownSettingValues(t *testing.T) {
+	for _, setting := range []Setting{
+		{Key: SettingKeyAppTheme, Value: "system"},
+		{Key: SettingKeyAppLanguage, Value: DefaultAppLanguage},
+		{Key: SettingKeyMarketDefault, Value: DefaultMarket},
+		{Key: SettingKeyQuoteRefreshInterval, Value: "manual"},
+		{Key: SettingKeyKlineDefaultPeriod, Value: DefaultKlinePeriod},
+		{Key: SettingKeyKlineDefaultAdjust, Value: DefaultKlineAdjust},
+		{Key: SettingKeyNotificationsInAppEnabled, Value: "true"},
+		{Key: SettingKeyNotificationsSystemEnabled, Value: "false"},
+		{Key: SettingKeyWindowCloseToTray, Value: "true"},
+		{Key: SettingKeyUpdateCheckOnStartup, Value: "false"},
+	} {
+		if err := ValidateSetting(setting); err != nil {
+			t.Fatalf("ValidateSetting(%+v) returned error: %v", setting, err)
+		}
+	}
+}
+
+// TestValidateSettingRejectsKnownSettingInvalidValue 验证已定义 key 不接受不可解释的配置值。
+func TestValidateSettingRejectsKnownSettingInvalidValue(t *testing.T) {
+	for _, setting := range []Setting{
+		{Key: SettingKeyAppTheme, Value: "blue"},
+		{Key: SettingKeyMarketDefault, Value: "crypto"},
+		{Key: SettingKeyQuoteRefreshInterval, Value: "1s"},
+		{Key: SettingKeyKlineDefaultAdjust, Value: "forward"},
+		{Key: SettingKeyNotificationsTaskSuccess, Value: "yes"},
+	} {
+		if err := ValidateSetting(setting); err == nil {
+			t.Fatalf("ValidateSetting(%+v) should reject invalid value", setting)
+		}
+	}
+}
+
 // TestValidateWorkspacePathRequiresAbsolutePath 验证工作区路径必须是绝对路径。
 func TestValidateWorkspacePathRequiresAbsolutePath(t *testing.T) {
 	err := ValidateWorkspacePath("relative/workspace")

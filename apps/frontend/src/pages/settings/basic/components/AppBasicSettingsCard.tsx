@@ -13,6 +13,7 @@ import type { BasicSettingsState, AdjustType, KlinePeriod, Language, Market, Ref
 
 type AppBasicSettingsCardProps = {
   value: BasicSettingsState;
+  aiModelOptions: Array<{ label: string; value: string }>;
   onChange: (value: BasicSettingsState) => void;
 };
 
@@ -21,6 +22,7 @@ type SettingFieldProps<Value extends string> = {
   label: string;
   value: Value;
   options: Array<{ label: string; value: Value }>;
+  disabled?: boolean;
   note?: string;
   onChange: (value: Value) => void;
 };
@@ -40,13 +42,6 @@ const marketOptions: Array<{ label: string; value: Market }> = [
   { label: "A股", value: "CN" },
   { label: "港股", value: "HK" },
   { label: "美股", value: "US" },
-];
-
-const aiModelOptions = [
-  { label: "DeepSeek-V3", value: "DeepSeek-V3" },
-  { label: "gpt-4o", value: "gpt-4o" },
-  { label: "qwen-max", value: "qwen-max" },
-  { label: "Ollama Local", value: "Ollama Local" },
 ];
 
 const refreshOptions: Array<{ label: string; value: RefreshInterval }> = [
@@ -90,7 +85,8 @@ export function AppBasicSettingsCard(props: AppBasicSettingsCardProps) {
             icon={<RobotOutlined />}
             label="默认 AI 模型"
             value={props.value.defaultAIModel}
-            options={aiModelOptions}
+            options={props.aiModelOptions}
+            disabled={props.aiModelOptions.length === 0}
             note="用于新建分析任务时的默认模型，可在模型配置中管理更多模型。"
             onChange={(value) => update("defaultAIModel", value)}
           />
@@ -117,6 +113,7 @@ function SettingField<Value extends string>(props: SettingFieldProps<Value>) {
           className="settings-basic-select"
           value={props.value}
           options={props.options}
+          disabled={props.disabled}
           onChange={props.onChange}
         />
         {props.note ? <p>{props.note}</p> : null}

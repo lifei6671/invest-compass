@@ -558,8 +558,8 @@ export type SettingsGetResult = {
 export type SettingsSetPayload = {
   items: SettingItem[];
   proxy_password?: string;
-  proxy_credential_ref: string;
-  clear_proxy_credential: boolean;
+  proxy_credential_ref?: string;
+  clear_proxy_credential?: boolean;
 };
 
 export type SettingsSetResult = {
@@ -572,6 +572,35 @@ export type AutostartState = {
 
 export type WorkspaceResult = {
   path: string;
+};
+
+export type WorkspaceMigrationPlan = {
+  current_path: string;
+  target_path: string;
+  can_migrate: boolean;
+  reason: string;
+  warnings: string[];
+  source_size_bytes: number;
+  available_space_bytes: number | null;
+  target_exists: boolean;
+  target_empty: boolean;
+  will_create_target: boolean;
+};
+
+export type WorkspaceMigratePayload = {
+  target_path: string;
+  include_cache: boolean;
+  create_backup: boolean;
+};
+
+export type WorkspaceMigrateResult = {
+  path: string;
+  migrated_files: string[];
+  backup_path?: string | null;
+};
+
+export type WorkspaceOpenResult = {
+  opened: boolean;
 };
 
 export type CacheStatsItem = {
@@ -609,7 +638,6 @@ export type SearchIndexStatus = {
 
 export type SearchRebuildPayload = {
   scope: "all" | "stock" | "reports" | "news" | "watchlist_notes";
-  force: boolean;
 };
 
 export type SearchRebuildResult = {
@@ -1092,6 +1120,25 @@ export async function workspaceSet(path: string): Promise<WorkspaceResult> {
   return unwrapCoreResponse(response);
 }
 
+/// 通过固定 Rust command 打开当前工作区目录，前端不传任意路径。
+export async function workspaceOpen(): Promise<WorkspaceOpenResult> {
+  return invoke<WorkspaceOpenResult>("workspace_open");
+}
+
+/// 通过固定 Rust command 生成工作区迁移预检计划，不修改本地数据。
+export async function workspaceMigrationPlan(targetPath: string): Promise<WorkspaceMigrationPlan> {
+  const response = await invoke<CoreEnvelope<WorkspaceMigrationPlan>>("workspace_migration_plan", {
+    payload: { target_path: targetPath },
+  });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 执行工作区迁移；Rust 会停止并重启 Go core。
+export async function workspaceMigrate(payload: WorkspaceMigratePayload): Promise<WorkspaceMigrateResult> {
+  const response = await invoke<CoreEnvelope<WorkspaceMigrateResult>>("workspace_migrate", { payload });
+  return unwrapCoreResponse(response);
+}
+
 /// 通过固定 Rust command 读取可清理缓存统计。
 export async function cacheStats(): Promise<CacheStatsResult> {
   const response = await invoke<CoreEnvelope<CacheStatsResult>>("cache_stats");
@@ -1136,8 +1183,9 @@ export async function searchWatchlistNotes(payload: DocumentSearchPayload): Prom
 
 /// 通过固定 Rust command 读取数据源状态。
 export async function providersStatus(): Promise<ProvidersStatusResult> {
-  const response = await invoke<CoreEnvelope<ProviderStatusItem[]>>("providers_status");
-  return { items: unwrapCoreResponse(response) };
+  const response = await invoke<CoreEnvelope<ProviderStatusItem[] | ProvidersStatusResult>>("providers_status");
+  const data = unwrapCoreResponse(response);
+  return { items: Array.isArray(data) ? data : data.items };
 }
 
 /// 通过固定 Rust command 检查更新提示。

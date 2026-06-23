@@ -788,7 +788,7 @@ describe("coreClient", () => {
       active_stock_batch_id: "stock-ready-1",
       active_document_batch_id: "doc-ready-1",
     });
-    await expect(searchRebuild({ scope: "reports", force: false })).resolves.toEqual({
+    await expect(searchRebuild({ scope: "reports" })).resolves.toEqual({
       task_id: "task-search-1",
       scope: "reports",
       stock_batch_id: "stock-ready-1",
@@ -797,7 +797,7 @@ describe("coreClient", () => {
 
     expect(calls).toEqual([
       { command: "search_status", payload: {} },
-      { command: "search_rebuild", payload: { payload: { scope: "reports", force: false } } },
+      { command: "search_rebuild", payload: { payload: { scope: "reports" } } },
     ]);
   });
 

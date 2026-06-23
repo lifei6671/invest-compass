@@ -13,10 +13,10 @@ import {
   StarOutlined,
 } from "@ant-design/icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useDashboardStore, type DashboardViewState } from "../stores/dashboardStore";
 import { formatClock, latestDashboardQuoteTime } from "../components/dashboard/dashboardUtils";
-import { stockSearch } from "../services/coreClient";
+import { coreHealth, providersStatus, stockSearch, type CoreHealth, type ProviderStatusItem } from "../services/coreClient";
 import appIconUrl from "../assets/invest-compass-icon.png";
 
 const { Content, Header, Sider } = Layout;
@@ -197,20 +197,72 @@ function dashboardQuoteStatus(state: DashboardViewState | null): { badge: "defau
 }
 
 function ShellStatus() {
-  const state = useDashboardStore((store) => store.state);
-  const providerOK = state ? state.summary.provider_statuses.every((provider) => provider.available) : false;
-  const providerError = state?.summary.provider_statuses.find((provider) => !provider.available)?.last_error;
+  const location = useLocation();
+  const dashboardState = useDashboardStore((store) => store.state);
+  const dashboardError = useDashboardStore((store) => store.error);
+  const [status, setStatus] = useState<ShellRuntimeStatus>({
+    health: null,
+    providers: [],
+    error: null,
+  });
+
+  useEffect(() => {
+    if (!location.pathname.startsWith("/settings")) {
+      return;
+    }
+    let active = true;
+    const loadStatus = async () => {
+      try {
+        const healthRequest = coreHealth();
+        const providersRequest = providersStatus()
+          .then((result) => ({ providers: result.items, error: null }))
+          .catch((cause) => ({
+            providers: [] as ProviderStatusItem[],
+            error: cause instanceof Error ? cause.message : "数据源状态读取失败",
+          }));
+        const health = await healthRequest;
+        const providerStatus = await providersRequest;
+        if (!active) {
+          return;
+        }
+        setStatus({ health, providers: providerStatus.providers, error: providerStatus.error });
+      } catch (cause) {
+        if (!active) {
+          return;
+        }
+        setStatus({
+          health: null,
+          providers: [],
+          error: cause instanceof Error ? cause.message : "本地核心服务连接失败",
+        });
+      }
+    };
+
+    void loadStatus();
+    const interval = window.setInterval(() => void loadStatus(), 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [location.pathname]);
+
+  const health = status.health ?? dashboardState?.health ?? null;
+  const providers = status.health ? status.providers : dashboardState?.summary.provider_statuses ?? [];
+  const statusError = status.error ?? dashboardError;
+  const coreOK = Boolean(health);
+  const providerOK = providers.length > 0 && providers.every((provider) => provider.available);
+  const providerError = providers.find((provider) => !provider.available)?.last_error || statusError;
   const rows = [
-    { label: "Go Core", value: state ? "已连接" : "已连接", ok: true },
-    { label: "SQLite", value: state ? "正常" : "正常", ok: true },
-    { label: "数据源", value: providerOK || !state ? "正常" : "不可用", ok: providerOK || !state },
-    { label: "版本号", value: state?.health.version || "v0.1.0", ok: true },
+    { label: "Go Core", value: coreOK ? "已连接" : "未连接", ok: coreOK },
+    { label: "SQLite", value: coreOK ? "正常" : "未知", ok: coreOK },
+    { label: "数据源", value: coreOK ? (providerOK ? "正常" : "不可用") : "未知", ok: coreOK && providerOK },
+    { label: "版本号", value: health?.version || "v0.1.0", ok: true },
   ];
   return (
     <div className="app-glass-status-card rounded-lg border border-[#e3e9f2] px-5 py-4 text-[14px] text-slate-700 shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
-      {state ? (
+      {health ? (
         <span className="sr-only">
-          本地核心服务已连接，版本 {state.health.version}
+          本地核心服务已连接，版本 {health.version}
         </span>
       ) : null}
       {rows.slice(0, 3).map((row) => (
@@ -224,7 +276,7 @@ function ShellStatus() {
       ))}
       <div className="mt-4 border-t border-[#e3e9f2] pt-4">
         <span className="mr-4 text-slate-500">版本号</span>
-        <span>{state?.health.version || "v0.1.0"}</span>
+        <span>{health?.version || "v0.1.0"}</span>
       </div>
       {providerError ? (
         <Tooltip title={providerError}>
@@ -236,6 +288,12 @@ function ShellStatus() {
     </div>
   );
 }
+
+type ShellRuntimeStatus = {
+  health: CoreHealth | null;
+  providers: ProviderStatusItem[];
+  error: string | null;
+};
 
 function providerErrorText(value: string) {
   if (value.includes("market_provider_unconfigured")) {

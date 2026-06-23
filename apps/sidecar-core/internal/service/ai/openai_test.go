@@ -99,6 +99,35 @@ func TestOpenAIConfigTesterUsesResolvedAPIKey(t *testing.T) {
 	}
 }
 
+// TestOpenAIConfigTesterSupportsDeepSeekProvider 验证 DeepSeek Provider 复用 OpenAI-compatible 连通性测试协议。
+func TestOpenAIConfigTesterSupportsDeepSeekProvider(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		gotPath = request.URL.Path
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"id":"chatcmpl-deepseek","choices":[{"message":{"content":" ok "}}]}`))
+	}))
+	defer server.Close()
+
+	result, err := OpenAIConfigTester{}.TestAIConfig(context.Background(), Config{
+		Provider:       ProviderDeepSeek,
+		BaseURL:        server.URL,
+		ModelName:      "deepseek-chat",
+		Temperature:    0.2,
+		TimeoutSeconds: 1,
+	}, "sk-runtime-secret")
+	if err != nil {
+		t.Fatalf("TestAIConfig returned error: %v", err)
+	}
+
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("unexpected path: %s", gotPath)
+	}
+	if !result.OK || result.Provider != ProviderDeepSeek || result.Model != "deepseek-chat" || result.Message != "ok" {
+		t.Fatalf("unexpected safe test result: %+v", result)
+	}
+}
+
 // TestOpenAIConfigTesterRejectsMissingRuntimeKey 验证连通性测试必须由 Rust 注入运行期密钥。
 func TestOpenAIConfigTesterRejectsMissingRuntimeKey(t *testing.T) {
 	_, err := OpenAIConfigTester{}.TestAIConfig(context.Background(), Config{

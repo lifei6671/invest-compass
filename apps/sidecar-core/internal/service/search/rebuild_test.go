@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,30 @@ func TestSearchRebuildManagerRebuildsAllAndActivatesReadyBatches(t *testing.T) {
 	assertBatchStatus(t, store, "document-new", dao.SearchIndexBatchStatusReady)
 }
 
+// TestScopedDocumentSearchServiceRebuildUsesConfiguredTokenizer 验证 API service 触发重建时不会丢失已配置的中文分词器。
+func TestScopedDocumentSearchServiceRebuildUsesConfiguredTokenizer(t *testing.T) {
+	store := newFakeSearchRebuildStore()
+	store.stocks = []model.Stock{{Symbol: "CN:SH:600519", Market: "CN", Exchange: "SH", Code: "600519", Name: "贵州茅台"}}
+	tokenizer := fakeMetadataTokenizer{
+		metadata: TokenizerMetadata{Name: "gse", Version: "1", DictionaryHash: "test-domain"},
+		tokens:   []string{"贵州", "茅台"},
+	}
+	service := NewScopedDocumentSearchService(DocumentSearchConfig{Store: store, Tokenizer: tokenizer})
+
+	_, err := service.Rebuild(context.Background(), SearchRebuildRequest{Scope: SearchRebuildScopeAll})
+	if err != nil {
+		t.Fatalf("rebuild with configured tokenizer: %v", err)
+	}
+
+	stockBatch := store.batches[store.activatedStockBatchID]
+	if stockBatch.TokenizerName != "gse" || stockBatch.TokenizerVersion != "1" || stockBatch.DictionaryHash != "test-domain" {
+		t.Fatalf("expected configured tokenizer metadata, got %+v", stockBatch)
+	}
+	if len(store.stockRows) != 1 || !strings.Contains(store.stockRows[0].NameIndex, "贵州") {
+		t.Fatalf("expected stock index to use configured tokenizer, got %+v", store.stockRows)
+	}
+}
+
 // TestSearchRebuildManagerFailureKeepsOldActiveBatch 验证重建失败时标记 FAILED，且不切换 active batch。
 func TestSearchRebuildManagerFailureKeepsOldActiveBatch(t *testing.T) {
 	store := newFakeSearchRebuildStore()
@@ -75,6 +100,19 @@ func TestSearchRebuildManagerFailureKeepsOldActiveBatch(t *testing.T) {
 	if len(store.events) == 0 || containsReportSearchForbiddenText(store.events[len(store.events)-1].Payload) {
 		t.Fatalf("expected redacted failed event, got %+v", store.events)
 	}
+}
+
+type fakeMetadataTokenizer struct {
+	metadata TokenizerMetadata
+	tokens   []string
+}
+
+func (tokenizer fakeMetadataTokenizer) Tokenize(_ string) []string {
+	return tokenizer.tokens
+}
+
+func (tokenizer fakeMetadataTokenizer) Metadata() TokenizerMetadata {
+	return tokenizer.metadata
 }
 
 // TestSearchRebuildManagerFirstBuildWithoutOldBatch 验证首次无旧 active batch 时也能激活新索引。

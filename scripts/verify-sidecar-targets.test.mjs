@@ -30,9 +30,9 @@ function peMachine(machine, subsystem = 2) {
 async function writeSidecarTargets(binariesDir, overrides = {}) {
   await mkdir(binariesDir, { recursive: true });
   const files = {
-    "invest-compas-core-aarch64-apple-darwin": machO64CpuType(0x0100000c),
-    "invest-compas-core-x86_64-apple-darwin": machO64CpuType(0x01000007),
-    "invest-compas-core-x86_64-pc-windows-msvc.exe": peMachine(0x8664),
+    "invest-compass-core-aarch64-apple-darwin": machO64CpuType(0x0100000c),
+    "invest-compass-core-x86_64-apple-darwin": machO64CpuType(0x01000007),
+    "invest-compass-core-x86_64-pc-windows-msvc.exe": peMachine(0x8664),
     ...overrides,
   };
   for (const [fileName, content] of Object.entries(files)) {
@@ -66,7 +66,7 @@ test("verifySidecarTargets rejects Windows console subsystem binaries", async ()
   try {
     const binariesDir = join(root, "binaries");
     await writeSidecarTargets(binariesDir, {
-      "invest-compas-core-x86_64-pc-windows-msvc.exe": peMachine(0x8664, 3),
+      "invest-compass-core-x86_64-pc-windows-msvc.exe": peMachine(0x8664, 3),
     });
 
     await assert.rejects(
@@ -83,7 +83,7 @@ test("verifySidecarTargets rejects Windows sidecars built without CGO", async ()
   try {
     const binariesDir = join(root, "binaries");
     await writeSidecarTargets(binariesDir, {
-      "invest-compas-core-x86_64-pc-windows-msvc.exe": Buffer.concat([
+      "invest-compass-core-x86_64-pc-windows-msvc.exe": Buffer.concat([
         peMachine(0x8664),
         Buffer.from("\nbuild\tCGO_ENABLED=0\n", "utf8"),
       ]),
@@ -103,7 +103,7 @@ test("verifySidecarTargets rejects missing target binaries", async () => {
   try {
     const binariesDir = join(root, "binaries");
     await writeSidecarTargets(binariesDir);
-    await rm(join(binariesDir, "invest-compas-core-x86_64-apple-darwin"), { force: true });
+    await rm(join(binariesDir, "invest-compass-core-x86_64-apple-darwin"), { force: true });
 
     await assert.rejects(
       () => verifySidecarTargets({ binariesDir }),

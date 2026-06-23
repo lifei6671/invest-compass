@@ -26,7 +26,8 @@ type DocumentSearchStore interface {
 
 // DocumentSearchConfig 是菜单范围搜索 service 配置。
 type DocumentSearchConfig struct {
-	Store DocumentSearchStore
+	Store     DocumentSearchStore
+	Tokenizer Tokenizer
 }
 
 // DocumentSearchRequest 是固定菜单范围搜索请求，不包含可由前端任意传入的 doc_type。
@@ -54,12 +55,17 @@ type DocumentSearchResult struct {
 
 // ScopedDocumentSearchService 提供 report、news、watchlist_note 三个固定范围搜索入口。
 type ScopedDocumentSearchService struct {
-	store DocumentSearchStore
+	store     DocumentSearchStore
+	tokenizer Tokenizer
 }
 
 // NewScopedDocumentSearchService 创建固定范围文档搜索 service。
 func NewScopedDocumentSearchService(config DocumentSearchConfig) *ScopedDocumentSearchService {
-	return &ScopedDocumentSearchService{store: config.Store}
+	tokenizer := config.Tokenizer
+	if tokenizer == nil {
+		tokenizer = DefaultTokenizer()
+	}
+	return &ScopedDocumentSearchService{store: config.Store, tokenizer: tokenizer}
 }
 
 // SearchReports 搜索报告历史范围，只返回 report 文档。

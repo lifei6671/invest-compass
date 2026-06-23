@@ -45,3 +45,8 @@ func (tokenizer *GSETokenizer) Tokenize(text string) []string {
 	}
 	return uniqueTokens(tokenizer.segmenter.CutSearch(normalizeFullWidth(text), true))
 }
+
+// Metadata 返回 GSE 分词器的稳定元数据。
+func (tokenizer *GSETokenizer) Metadata() TokenizerMetadata {
+	return TokenizerMetadata{Name: "gse", Version: "1", DictionaryHash: "zh_s+builtin-domain"}
+}

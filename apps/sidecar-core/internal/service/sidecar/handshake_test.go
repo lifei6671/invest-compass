@@ -21,6 +21,17 @@ func TestReadHandshakeAcceptsValidJSONLine(t *testing.T) {
 	}
 }
 
+// TestReadHandshakeAcceptsKeepaliveStdinFlag 验证新桌面端可声明保持 stdin 管道用于父进程存活检测。
+func TestReadHandshakeAcceptsKeepaliveStdinFlag(t *testing.T) {
+	handshake, err := ReadHandshake(context.Background(), strings.NewReader(`{"token":"test-token","protocolVersion":"1","keepaliveStdin":true}`+"\n"))
+	if err != nil {
+		t.Fatalf("expected valid handshake, got %v", err)
+	}
+	if !handshake.KeepaliveStdin {
+		t.Fatalf("expected keepaliveStdin flag to be preserved: %+v", handshake)
+	}
+}
+
 // TestReadHandshakeRejectsInvalidJSON 验证非法 JSON 不会被当作有效握手。
 func TestReadHandshakeRejectsInvalidJSON(t *testing.T) {
 	_, err := ReadHandshake(context.Background(), strings.NewReader(`{"token":"test-token"`+"\n"))

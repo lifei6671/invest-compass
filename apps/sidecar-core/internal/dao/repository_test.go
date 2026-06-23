@@ -3,6 +3,7 @@ package dao
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -363,6 +364,103 @@ func TestAIConfigRepositoryHidesSoftDeletedRows(t *testing.T) {
 	}
 	if len(configs) != 0 {
 		t.Fatalf("expected soft deleted ai config to be hidden, got %+v", configs)
+	}
+}
+
+// TestAIConfigRepositoryKeepsSingleDefault 验证默认模型是 ai_configs 的唯一状态。
+func TestAIConfigRepositoryKeepsSingleDefault(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	first := model.AIConfig{Name: "First", Provider: "openai-compatible", ModelName: "gpt-4o", IsDefault: true}
+	if err := store.SaveAIConfig(ctx, &first); err != nil {
+		t.Fatalf("save first ai config: %v", err)
+	}
+	second := model.AIConfig{Name: "Second", Provider: "openai-compatible", ModelName: "qwen-max", IsDefault: true}
+	if err := store.SaveAIConfig(ctx, &second); err != nil {
+		t.Fatalf("save second ai config: %v", err)
+	}
+
+	configs, err := store.ListAIConfigs(ctx)
+	if err != nil {
+		t.Fatalf("list ai configs: %v", err)
+	}
+	defaultIDs := make([]int64, 0)
+	for _, config := range configs {
+		if config.IsDefault {
+			defaultIDs = append(defaultIDs, config.ID)
+		}
+	}
+	if len(defaultIDs) != 1 || defaultIDs[0] != second.ID {
+		t.Fatalf("expected only second config as default, got default ids %+v from %+v", defaultIDs, configs)
+	}
+}
+
+// TestAIConfigRepositoryPersistsAfterDatabaseReopen 验证新增模型配置写入文件型 SQLite 后可跨进程重启读取。
+func TestAIConfigRepositoryPersistsAfterDatabaseReopen(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "invest-compass.sqlite3")
+
+	db, err := Open(ctx, Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open sqlite database: %v", err)
+	}
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate sqlite database: %v", err)
+	}
+	store, err := NewStore(db)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	config := model.AIConfig{
+		Name:           "DeepSeek",
+		Provider:       "deepseek",
+		APIKeyRef:      "local-vault://ai-config/deepseek-test",
+		MaskedAPIKey:   "sk-3****88f4",
+		HasAPIKey:      true,
+		ModelName:      "deepseek-v4-flash",
+		Temperature:    0.7,
+		MaxTokens:      4096,
+		TimeoutSeconds: 60,
+	}
+	if err := store.SaveAIConfig(ctx, &config); err != nil {
+		t.Fatalf("save ai config: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("read sqlite handle: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close sqlite database: %v", err)
+	}
+
+	reopenedDB, err := Open(ctx, Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("reopen sqlite database: %v", err)
+	}
+	t.Cleanup(func() {
+		sqlDB, err := reopenedDB.DB()
+		if err == nil {
+			sqlDB.Close()
+		}
+	})
+	if err := Migrate(ctx, reopenedDB); err != nil {
+		t.Fatalf("migrate reopened sqlite database: %v", err)
+	}
+	reopenedStore, err := NewStore(reopenedDB)
+	if err != nil {
+		t.Fatalf("new reopened store: %v", err)
+	}
+	configs, err := reopenedStore.ListAIConfigs(ctx)
+	if err != nil {
+		t.Fatalf("list ai configs after reopen: %v", err)
+	}
+	if len(configs) != 1 ||
+		configs[0].Name != "DeepSeek" ||
+		configs[0].Provider != "deepseek" ||
+		configs[0].ModelName != "deepseek-v4-flash" ||
+		!configs[0].HasAPIKey {
+		t.Fatalf("unexpected ai config after reopen: %+v", configs)
 	}
 }
 

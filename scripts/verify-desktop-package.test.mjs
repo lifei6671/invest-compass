@@ -111,8 +111,8 @@ test("verifyDesktopPackage accepts macOS app with packaged sidecar", async () =>
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), "desktop");
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await writeFile(join(macosDir, "invest-compas-core"), "sidecar");
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await writeFile(join(macosDir, "invest-compass-core"), "sidecar");
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     const result = await verifyDesktopPackage({
       platform: "darwin",
@@ -122,7 +122,7 @@ test("verifyDesktopPackage accepts macOS app with packaged sidecar", async () =>
     assert.deepEqual(result, {
       platform: "darwin",
       desktopBinary: join(macosDir, "invest-compass-desktop"),
-      sidecarBinary: join(macosDir, "invest-compas-core"),
+      sidecarBinary: join(macosDir, "invest-compass-core"),
     });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -141,8 +141,8 @@ test("verifyDesktopPackage rejects macOS app bundle name mismatching product nam
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), "desktop");
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await writeFile(join(macosDir, "invest-compas-core"), "sidecar");
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await writeFile(join(macosDir, "invest-compass-core"), "sidecar");
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -177,8 +177,8 @@ test("verifyDesktopPackage rejects macOS app display name mismatching product na
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), "desktop");
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await writeFile(join(macosDir, "invest-compas-core"), "sidecar");
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await writeFile(join(macosDir, "invest-compass-core"), "sidecar");
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -213,8 +213,8 @@ test("verifyDesktopPackage rejects macOS app bundle name metadata mismatching pr
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), "desktop");
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await writeFile(join(macosDir, "invest-compas-core"), "sidecar");
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await writeFile(join(macosDir, "invest-compass-core"), "sidecar");
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -240,8 +240,8 @@ test("verifyDesktopPackage validates macOS target architecture when requested", 
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.doesNotReject(() =>
       verifyDesktopPackage({
@@ -269,7 +269,7 @@ test("verifyDesktopPackage accepts Windows package directory with sidecar exe", 
   const root = await mkdtemp(join(tmpdir(), "invest-compass-windows-package-"));
   try {
     await writeFile(join(root, "invest-compass-desktop.exe"), "desktop");
-    await writeFile(join(root, "invest-compas-core.exe"), "sidecar");
+    await writeFile(join(root, "invest-compass-core.exe"), "sidecar");
 
     const result = await verifyDesktopPackage({
       platform: "win32",
@@ -279,7 +279,7 @@ test("verifyDesktopPackage accepts Windows package directory with sidecar exe", 
     assert.deepEqual(result, {
       platform: "win32",
       desktopBinary: join(root, "invest-compass-desktop.exe"),
-      sidecarBinary: join(root, "invest-compas-core.exe"),
+      sidecarBinary: join(root, "invest-compass-core.exe"),
     });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -309,7 +309,7 @@ test("verifyDesktopPackage validates Windows target architecture when requested"
   const root = await mkdtemp(join(tmpdir(), "invest-compass-windows-target-package-"));
   try {
     await writeFile(join(root, "invest-compass-desktop.exe"), peMachine(0x8664));
-    await writeFile(join(root, "invest-compas-core.exe"), peMachine(0x8664));
+    await writeFile(join(root, "invest-compass-core.exe"), peMachine(0x8664));
 
     await assert.doesNotReject(() =>
       verifyDesktopPackage({
@@ -337,7 +337,7 @@ test("verifyDesktopPackage rejects Windows console subsystem when target is requ
   const root = await mkdtemp(join(tmpdir(), "invest-compass-windows-console-package-"));
   try {
     await writeFile(join(root, "invest-compass-desktop.exe"), peMachine(0x8664));
-    await writeFile(join(root, "invest-compas-core.exe"), peMachine(0x8664, 3));
+    await writeFile(join(root, "invest-compass-core.exe"), peMachine(0x8664, 3));
 
     await assert.rejects(
       () =>
@@ -385,8 +385,8 @@ test("verifyDesktopPackage rejects macOS app without Info.plist executable metad
     await mkdir(macosDir, { recursive: true });
     await writeFile(join(macosDir, "invest-compass-desktop"), "desktop");
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await writeFile(join(macosDir, "invest-compas-core"), "sidecar");
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await writeFile(join(macosDir, "invest-compass-core"), "sidecar");
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -411,9 +411,9 @@ test("verifyDesktopPackage rejects macOS app with non-application package type",
       infoPlistExecutableWithPackageType("invest-compass-desktop", "FMWK"),
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -447,9 +447,9 @@ test("verifyDesktopPackage rejects macOS app without bundle identifier", async (
       }),
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -483,9 +483,9 @@ test("verifyDesktopPackage rejects macOS app with mismatched bundle identifier",
       }),
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -519,9 +519,9 @@ test("verifyDesktopPackage rejects macOS app with mismatched version metadata", 
       }),
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -552,9 +552,9 @@ test("verifyDesktopPackage rejects symlinked macOS Info.plist", async () => {
     );
     await symlink(join(externalDir, "Info.plist"), join(contentsDir, "Info.plist"));
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -581,9 +581,9 @@ test("verifyDesktopPackage rejects macOS app with missing declared icon resource
       infoPlistExecutableWithIcon("invest-compass-desktop", "icon.icns"),
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -615,9 +615,9 @@ test("verifyDesktopPackage rejects symlinked macOS Resources directory", async (
     await writeFile(join(externalResourcesDir, "icon.icns"), "icon");
     await symlink(externalResourcesDir, join(contentsDir, "Resources"));
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -644,12 +644,12 @@ test("verifyDesktopPackage rejects macOS icon resource paths escaping Resources"
     await mkdir(resourcesDir, { recursive: true });
     await writeFile(
       join(contentsDir, "Info.plist"),
-      infoPlistExecutableWithIcon("invest-compass-desktop", "../MacOS/invest-compas-core"),
+      infoPlistExecutableWithIcon("invest-compass-desktop", "../MacOS/invest-compass-core"),
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     await assert.rejects(
       () =>
@@ -669,7 +669,7 @@ test("verifyDesktopPackage rejects empty packaged sidecar binary", async () => {
   const root = await mkdtemp(join(tmpdir(), "invest-compass-empty-sidecar-"));
   try {
     await writeFile(join(root, "invest-compass-desktop.exe"), "desktop");
-    await writeFile(join(root, "invest-compas-core.exe"), "");
+    await writeFile(join(root, "invest-compass-core.exe"), "");
 
     await assert.rejects(
       () =>
@@ -688,7 +688,7 @@ test("verifyDesktopPackage rejects empty desktop binary", async () => {
   const root = await mkdtemp(join(tmpdir(), "invest-compass-empty-desktop-"));
   try {
     await writeFile(join(root, "invest-compass-desktop.exe"), "");
-    await writeFile(join(root, "invest-compas-core.exe"), "sidecar");
+    await writeFile(join(root, "invest-compass-core.exe"), "sidecar");
 
     await assert.rejects(
       () =>
@@ -709,7 +709,7 @@ test("verifyDesktopPackage rejects macOS package paths without app suffix", asyn
     const macosDir = join(root, "Contents", "MacOS");
     await mkdir(macosDir, { recursive: true });
     await writeFile(join(macosDir, "invest-compass-desktop"), "desktop");
-    await writeFile(join(macosDir, "invest-compas-core"), "sidecar");
+    await writeFile(join(macosDir, "invest-compass-core"), "sidecar");
 
     await assert.rejects(
       () =>
@@ -734,7 +734,7 @@ test("verifyDesktopPackage rejects macOS binaries without executable permission"
       infoPlistExecutable("invest-compass-desktop"),
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), "desktop");
-    await writeFile(join(macosDir, "invest-compas-core"), "sidecar");
+    await writeFile(join(macosDir, "invest-compass-core"), "sidecar");
 
     await assert.rejects(
       () =>
@@ -760,7 +760,7 @@ test("verifyDesktopPackage rejects macOS sidecar without executable permission",
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), "desktop");
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await writeFile(join(macosDir, "invest-compas-core"), "sidecar");
+    await writeFile(join(macosDir, "invest-compass-core"), "sidecar");
 
     await assert.rejects(
       () =>
@@ -787,16 +787,16 @@ test("verifyDesktopPackage rejects symlinked packaged binaries", async () => {
       infoPlistExecutable("invest-compass-desktop"),
     );
     await writeFile(join(externalDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(externalDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(externalDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(externalDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(externalDir, "invest-compas-core"), 0o755);
+    await chmod(join(externalDir, "invest-compass-core"), 0o755);
     await symlink(
       join(externalDir, "invest-compass-desktop"),
       join(macosDir, "invest-compass-desktop"),
     );
     await symlink(
-      join(externalDir, "invest-compas-core"),
-      join(macosDir, "invest-compas-core"),
+      join(externalDir, "invest-compass-core"),
+      join(macosDir, "invest-compass-core"),
     );
 
     await assert.rejects(
@@ -829,9 +829,9 @@ test("verifyDesktopPackage rejects symlinked macOS executable directory", async 
       join(externalMacosDir, "invest-compass-desktop"),
       machO64CpuType(0x0100000c),
     );
-    await writeFile(join(externalMacosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(externalMacosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(externalMacosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(externalMacosDir, "invest-compas-core"), 0o755);
+    await chmod(join(externalMacosDir, "invest-compass-core"), 0o755);
     await symlink(externalMacosDir, join(contentsDir, "MacOS"));
 
     await assert.rejects(
@@ -860,9 +860,9 @@ test("verifyDesktopPackage rejects symlinked package roots", async () => {
       infoPlistExecutable("invest-compass-desktop"),
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
     await symlink(realAppPath, linkedAppPath);
 
     await assert.rejects(
@@ -889,9 +889,9 @@ test("verifyDesktopPackage CLI accepts pnpm forwarded argument separator", async
       infoPlistExecutable("invest-compass-desktop"),
     );
     await writeFile(join(macosDir, "invest-compass-desktop"), machO64CpuType(0x0100000c));
-    await writeFile(join(macosDir, "invest-compas-core"), machO64CpuType(0x0100000c));
+    await writeFile(join(macosDir, "invest-compass-core"), machO64CpuType(0x0100000c));
     await chmod(join(macosDir, "invest-compass-desktop"), 0o755);
-    await chmod(join(macosDir, "invest-compas-core"), 0o755);
+    await chmod(join(macosDir, "invest-compass-core"), 0o755);
 
     const { stdout } = await execFileAsync(process.execPath, [
       new URL("./verify-desktop-package.mjs", import.meta.url).pathname,

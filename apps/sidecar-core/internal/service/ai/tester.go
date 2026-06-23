@@ -29,7 +29,7 @@ func (tester OpenAIConfigTester) TestAIConfig(ctx context.Context, config Config
 	if strings.TrimSpace(resolvedAPIKey) == "" || strings.TrimSpace(config.ModelName) == "" {
 		return TestResult{}, &xerr.Error{Code: xerr.AIInvalidRequest}
 	}
-	if config.Provider != ProviderOpenAICompatible {
+	if !usesOpenAICompatibleTestProtocol(config.Provider) {
 		return TestResult{}, &xerr.Error{Code: xerr.AIInvalidRequest, Message: "unsupported provider"}
 	}
 
@@ -57,4 +57,14 @@ func (tester OpenAIConfigTester) TestAIConfig(ctx context.Context, config Config
 		Model:    config.ModelName,
 		Message:  strings.TrimSpace(response.Content),
 	}, nil
+}
+
+// usesOpenAICompatibleTestProtocol 判断 Provider 是否复用 OpenAI-compatible 连通性测试协议。
+func usesOpenAICompatibleTestProtocol(provider string) bool {
+	switch provider {
+	case ProviderOpenAICompatible, ProviderDeepSeek:
+		return true
+	default:
+		return false
+	}
 }

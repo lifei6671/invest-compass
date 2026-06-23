@@ -7,7 +7,7 @@
 中文名：投研罗盘
 英文名：Invest Compass
 仓库名：`invest-compass`
-核心服务名：`invest-compas-core`
+核心服务名：`invest-compass-core`
 桌面端名：`invest-compass-desktop`
 应用标识：`com.lifei6671.investcompass`
 
@@ -390,7 +390,7 @@ Tauri v2 capability 原则：
 2. 读取应用数据目录。
 3. 随机生成 core token。
 4. 分配本地随机端口。
-5. 启动 invest-compas-core sidecar。
+5. 启动 invest-compass-core sidecar。
 6. 传入参数：
    --host=127.0.0.1
    --port=0 或指定随机端口
@@ -2043,7 +2043,7 @@ macOS Universal，可选
 4. `scripts/build-sidecar.mjs` 默认构建当前平台 sidecar，也必须支持 `--target=<triple>` 和 `--all-targets` 选择首版三类目标。
 5. desktop 与 core 必须带 protocolVersion，启动时校验兼容性。
 6. Windows sidecar 必须使用 GUI subsystem 构建，避免桌面应用启动 sidecar 时弹出控制台窗口。
-7. 发布包运行时优先解析主程序同目录的 `invest-compas-core` / `invest-compas-core.exe`；环境变量覆盖仅用于本地调试，源码目录 `src-tauri/binaries` 只作为开发 fallback。
+7. 发布包运行时优先解析主程序同目录的 `invest-compass-core` / `invest-compass-core.exe`；环境变量覆盖仅用于本地调试，源码目录 `src-tauri/binaries` 只作为开发 fallback。
 8. 应用级退出事件必须显式停止 Go sidecar，不能依赖进程退出后的 Drop 清理。
 9. 打包前必须实际生成 Apple Silicon、macOS Intel 和 Windows x64 三类 sidecar 产物；安装包启动验收仍必须在目标平台完成。
 10. macOS 发布需要 Developer ID 签名和 notarization。
@@ -2054,9 +2054,9 @@ macOS Universal，可选
 sidecar 命名：
 
 ```text
-invest-compas-core-aarch64-apple-darwin
-invest-compas-core-x86_64-apple-darwin
-invest-compas-core-x86_64-pc-windows-msvc.exe
+invest-compass-core-aarch64-apple-darwin
+invest-compass-core-x86_64-apple-darwin
+invest-compass-core-x86_64-pc-windows-msvc.exe
 ```
 
 ---

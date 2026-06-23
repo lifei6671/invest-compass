@@ -12,6 +12,8 @@ import (
 const (
 	// ProviderOpenAICompatible 表示 OpenAI-compatible AI Provider。
 	ProviderOpenAICompatible = "openai-compatible"
+	// ProviderDeepSeek 表示 DeepSeek OpenAI-compatible AI Provider。
+	ProviderDeepSeek = "deepseek"
 	// LocalAIConfigVaultRefPrefix 是 Rust 本地 vault 中 AI Key 引用的唯一合法前缀。
 	LocalAIConfigVaultRefPrefix = "local-vault://ai-config/"
 )

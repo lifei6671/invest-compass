@@ -9,8 +9,8 @@ export const supportedTargets = new Map([
     {
       goos: "darwin",
       goarch: "arm64",
-      fileName: "invest-compas-core-aarch64-apple-darwin",
-      compatName: "invest-compas-core",
+      fileName: "invest-compass-core-aarch64-apple-darwin",
+      compatName: "invest-compass-core",
     },
   ],
   [
@@ -18,8 +18,8 @@ export const supportedTargets = new Map([
     {
       goos: "darwin",
       goarch: "amd64",
-      fileName: "invest-compas-core-x86_64-apple-darwin",
-      compatName: "invest-compas-core",
+      fileName: "invest-compass-core-x86_64-apple-darwin",
+      compatName: "invest-compass-core",
     },
   ],
   [
@@ -27,8 +27,8 @@ export const supportedTargets = new Map([
     {
       goos: "windows",
       goarch: "amd64",
-      fileName: "invest-compas-core-x86_64-pc-windows-msvc.exe",
-      compatName: "invest-compas-core.exe",
+      fileName: "invest-compass-core-x86_64-pc-windows-msvc.exe",
+      compatName: "invest-compass-core.exe",
     },
   ],
 ]);

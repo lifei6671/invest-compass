@@ -2,12 +2,19 @@ package main
 
 import (
 	"context"
+	"io"
+	"log"
+	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/httpx"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/dao"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/server"
@@ -15,6 +22,7 @@ import (
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
 	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
 	tasklogservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/tasklog"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
 )
 
 // TestValidateListenHostOnlyAllowsLoopback 验证 sidecar 只能监听本机回环地址。
@@ -68,6 +76,133 @@ func TestPrepareDatabaseFileBacksUpExistingDatabase(t *testing.T) {
 	}
 	if string(content) != "existing-user-data" {
 		t.Fatalf("unexpected migration backup content: %q", string(content))
+	}
+}
+
+// TestWatchParentStdinEOFRequestsShutdown 验证 Rust 父进程断开 stdin 后 Go core 会主动进入退出流程。
+func TestWatchParentStdinEOFRequestsShutdown(t *testing.T) {
+	shutdownRequested := make(chan struct{}, 1)
+	watchParentStdinEOF(strings.NewReader(""), func() {
+		shutdownRequested <- struct{}{}
+	})
+
+	select {
+	case <-shutdownRequested:
+	case <-time.After(time.Second):
+		t.Fatal("expected stdin EOF to request shutdown")
+	}
+}
+
+// TestRuntimeLogSourceDoesNotDeadlockStandardLogBridge 验证第三方库使用标准 log 输出时不会卡死启动链路。
+func TestRuntimeLogSourceDoesNotDeadlockStandardLogBridge(t *testing.T) {
+	previousSlog := slog.Default()
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	previousPrefix := log.Prefix()
+	t.Cleanup(func() {
+		slog.SetDefault(previousSlog)
+		log.SetOutput(previousOutput)
+		log.SetFlags(previousFlags)
+		log.SetPrefix(previousPrefix)
+	})
+
+	source := newRuntimeLogSource(io.Discard, 10)
+	slog.SetDefault(slog.New(logger.NewTaskLogHandler(source, nil)))
+
+	done := make(chan struct{})
+	go func() {
+		log.Println("gse startup dictionary loaded")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("standard log bridge should not deadlock runtime log source")
+	}
+
+	request, err := source.ExportLogRequest(context.Background())
+	if err != nil {
+		t.Fatalf("export runtime log request: %v", err)
+	}
+	if len(request.Lines) == 0 || !strings.Contains(request.Lines[0], "gse startup dictionary loaded") {
+		t.Fatalf("expected standard log output in runtime log source, got %+v", request.Lines)
+	}
+}
+
+// TestServeCoreHTTPAcceptsRequestsBeforeReady 验证 ready 通知前 HTTP server 已经开始接受请求。
+func TestServeCoreHTTPAcceptsRequestsBeforeReady(t *testing.T) {
+	listener, err := server.Listen("127.0.0.1", "0")
+	if err != nil {
+		t.Fatalf("listen local server: %v", err)
+	}
+	shutdown := make(chan struct{}, 1)
+	serveResult := serveCoreHTTP(listener, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		_, _ = response.Write([]byte("ok"))
+	}), shutdown)
+
+	response, err := http.Get("http://" + listener.Addr().String())
+	if err != nil {
+		shutdown <- struct{}{}
+		t.Fatalf("server should accept request before ready notification: %v", err)
+	}
+	body, err := io.ReadAll(response.Body)
+	if closeErr := response.Body.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		shutdown <- struct{}{}
+		t.Fatalf("read response body: %v", err)
+	}
+	if string(body) != "ok" {
+		shutdown <- struct{}{}
+		t.Fatalf("unexpected response body: %q", string(body))
+	}
+
+	shutdown <- struct{}{}
+	if err := <-serveResult; err != nil {
+		t.Fatalf("serve should stop cleanly: %v", err)
+	}
+}
+
+// TestWaitForCoreHTTPReadyRequiresAuthenticatedHealthOK 验证 ready 通知前必须完成真实本机健康预检。
+func TestWaitForCoreHTTPReadyRequiresAuthenticatedHealthOK(t *testing.T) {
+	listener, err := server.Listen("127.0.0.1", "0")
+	if err != nil {
+		t.Fatalf("listen local server: %v", err)
+	}
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split listener address: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse listener port: %v", err)
+	}
+
+	shutdown := make(chan struct{}, 1)
+	serveResult := serveCoreHTTP(listener, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/internal/health" {
+			http.NotFound(response, request)
+			return
+		}
+		if request.Header.Get(httpx.TokenHeader) != "test-token" {
+			http.Error(response, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_, _ = response.Write([]byte(`{"code":0}`))
+	}), shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := waitForCoreHTTPReady(ctx, port, "test-token"); err != nil {
+		shutdown <- struct{}{}
+		t.Fatalf("wait for ready health: %v", err)
+	}
+
+	shutdown <- struct{}{}
+	if err := <-serveResult; err != nil {
+		t.Fatalf("serve should stop cleanly: %v", err)
 	}
 }
 

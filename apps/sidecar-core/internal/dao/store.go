@@ -229,7 +229,18 @@ func (store *Store) SoftDeleteWatchlist(ctx context.Context, id int64) error {
 
 // SaveAIConfig 创建或更新 AI 配置，不保存真实 API Key。
 func (store *Store) SaveAIConfig(ctx context.Context, config *model.AIConfig) error {
-	return store.db.WithContext(ctx).Save(config).Error
+	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if config.IsDefault {
+			query := tx.Model(&model.AIConfig{}).Where("deleted_at IS NULL")
+			if config.ID > 0 {
+				query = query.Where("id <> ?", config.ID)
+			}
+			if err := query.Update("is_default", false).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Save(config).Error
+	})
 }
 
 // ListAIConfigs 返回未软删除 AI 配置，并把默认配置排在前面。

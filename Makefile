@@ -3,7 +3,7 @@ SHELL := /bin/bash
 APPS_DIR := apps
 SIDECAR_DIR := $(APPS_DIR)/sidecar-core
 DESKTOP_MANIFEST := $(APPS_DIR)/desktop/src-tauri/Cargo.toml
-SIDECAR_BIN := $(APPS_DIR)/desktop/src-tauri/binaries/invest-compas-core
+SIDECAR_BIN := $(APPS_DIR)/desktop/src-tauri/binaries/invest-compass-core
 
 .PHONY: help
 help:

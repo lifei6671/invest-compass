@@ -118,6 +118,7 @@ type SearchRebuildAccepted struct {
 type SearchRebuildManager struct {
 	store     SearchRebuildStore
 	tokenizer Tokenizer
+	metadata  TokenizerMetadata
 	now       func() time.Time
 	newID     func(prefix string) string
 }
@@ -137,6 +138,7 @@ func NewSearchRebuildManager(config SearchRebuildConfig) *SearchRebuildManager {
 	if tokenizer == nil {
 		tokenizer = SimpleTokenizer{}
 	}
+	metadata := tokenizerMetadata(tokenizer)
 	now := config.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
@@ -148,6 +150,7 @@ func NewSearchRebuildManager(config SearchRebuildConfig) *SearchRebuildManager {
 	return &SearchRebuildManager{
 		store:     config.Store,
 		tokenizer: tokenizer,
+		metadata:  metadata,
 		now:       now,
 		newID:     newID,
 	}
@@ -253,7 +256,7 @@ func (service *ScopedDocumentSearchService) Rebuild(ctx context.Context, request
 	if !ok {
 		return SearchRebuildAccepted{}, fmt.Errorf("search rebuild store is required")
 	}
-	manager := NewSearchRebuildManager(SearchRebuildConfig{Store: rebuildStore})
+	manager := NewSearchRebuildManager(SearchRebuildConfig{Store: rebuildStore, Tokenizer: service.tokenizer})
 	result, err := manager.Rebuild(ctx, request.Scope)
 	if err != nil {
 		return SearchRebuildAccepted{}, err
@@ -434,13 +437,24 @@ func (manager *SearchRebuildManager) newBatch(batchID string, scope string, stat
 		Scope:               scope,
 		Status:              status,
 		SourceSchemaVersion: 1,
-		TokenizerName:       "simple",
-		TokenizerVersion:    "1",
-		DictionaryHash:      "builtin",
+		TokenizerName:       manager.metadata.Name,
+		TokenizerVersion:    manager.metadata.Version,
+		DictionaryHash:      manager.metadata.DictionaryHash,
 		StartedAt:           now,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
+}
+
+// tokenizerMetadata 返回索引 batch 可追溯的分词器元数据。
+func tokenizerMetadata(tokenizer Tokenizer) TokenizerMetadata {
+	if tokenizerWithMetadata, ok := tokenizer.(MetadataTokenizer); ok {
+		metadata := tokenizerWithMetadata.Metadata()
+		if metadata.Name != "" && metadata.Version != "" && metadata.DictionaryHash != "" {
+			return metadata
+		}
+	}
+	return SimpleTokenizer{}.Metadata()
 }
 
 // rebuildStockIndex 重建股票 FTS batch。

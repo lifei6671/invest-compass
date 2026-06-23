@@ -16,6 +16,7 @@ var ErrInvalidHandshake = errors.New("invalid sidecar handshake")
 type Handshake struct {
 	Token           string `json:"token"`
 	ProtocolVersion string `json:"protocolVersion"`
+	KeepaliveStdin  bool   `json:"keepaliveStdin"`
 }
 
 type ReadyMessage struct {

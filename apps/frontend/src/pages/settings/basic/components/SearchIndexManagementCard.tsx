@@ -1,4 +1,4 @@
-import { Button, Space, Tag } from "antd";
+import { Button, Space, Tag, Tooltip } from "antd";
 import { ReloadOutlined, SearchOutlined, SyncOutlined } from "@ant-design/icons";
 import type { ReactNode } from "react";
 import type { SearchIndexStatus, SearchRebuildPayload } from "../../../../services/coreClient";
@@ -21,6 +21,7 @@ const rebuildButtons: Array<{ scope: SearchRebuildPayload["scope"]; label: strin
 
 export function SearchIndexManagementCard(props: SearchIndexManagementCardProps) {
   const rebuilding = props.rebuildingScope != null;
+  const initialBuildRequired = isInitialBuildRequired(props.value);
 
   return (
     <section className="settings-basic-card settings-basic-mini-card">
@@ -44,18 +45,26 @@ export function SearchIndexManagementCard(props: SearchIndexManagementCardProps)
         <Button className="settings-basic-outline-button" icon={<ReloadOutlined />} loading={props.loading} onClick={props.onRefresh}>
           刷新状态
         </Button>
-        {rebuildButtons.map((item) => (
-          <Button
-            key={item.scope}
-            className="settings-basic-outline-button"
-            icon={<SyncOutlined />}
-            loading={props.rebuildingScope === item.scope}
-            disabled={rebuilding && props.rebuildingScope !== item.scope}
-            onClick={() => props.onRebuild(item.scope)}
-          >
-            {item.label}
-          </Button>
-        ))}
+        {rebuildButtons.map((item) => {
+          const disabledByInitialBuild = initialBuildRequired && item.scope !== "all";
+          const disabled = (rebuilding && props.rebuildingScope !== item.scope) || disabledByInitialBuild;
+          const button = (
+            <Button
+              className="settings-basic-outline-button"
+              icon={<SyncOutlined />}
+              loading={props.rebuildingScope === item.scope}
+              disabled={disabled}
+              onClick={() => props.onRebuild(item.scope)}
+            >
+              {item.label}
+            </Button>
+          );
+          return (
+            <Tooltip key={item.scope} title={disabledByInitialBuild ? "首次构建请先重建全部索引" : ""}>
+              <span>{button}</span>
+            </Tooltip>
+          );
+        })}
       </Space>
     </section>
   );
@@ -104,4 +113,15 @@ function formatTokenizer(value: SearchIndexStatus | null) {
     return "—";
   }
   return value.tokenizer_version ? `${value.tokenizer_name}@${value.tokenizer_version}` : value.tokenizer_name;
+}
+
+function isInitialBuildRequired(value: SearchIndexStatus | null) {
+  if (!value) {
+    return false;
+  }
+  return (
+    value.search_status?.trim().toUpperCase() === "NEED_REBUILD" ||
+    !value.active_stock_batch_id ||
+    !value.active_document_batch_id
+  );
 }

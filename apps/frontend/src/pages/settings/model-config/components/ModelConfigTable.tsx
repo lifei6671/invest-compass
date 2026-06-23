@@ -10,6 +10,7 @@ type ModelConfigTableProps = {
   providerName: string;
   configs: ModelConfig[];
   selectedConfigId: string | null;
+  testingConfigId?: string | null;
   onCreate: () => void;
   onSelect: (config: ModelConfig) => void;
   onEdit: (config: ModelConfig) => void;
@@ -17,6 +18,7 @@ type ModelConfigTableProps = {
   onSetDefault: (id: string) => void;
   onTest: (id: string) => void;
   onDelete: (id: string) => void;
+  actionsPending?: boolean;
 };
 
 export function ModelConfigTable(props: ModelConfigTableProps) {
@@ -67,7 +69,14 @@ export function ModelConfigTable(props: ModelConfigTableProps) {
       dataIndex: "streamEnabled",
       width: 72,
       align: "center",
-      render: (value: boolean, record) => <Switch size="small" checked={value} onChange={(checked) => props.onToggleStream(record.id, checked)} />,
+      render: (value: boolean, record) => (
+        <Switch
+          size="small"
+          checked={value}
+          disabled={props.actionsPending}
+          onChange={(checked) => props.onToggleStream(record.id, checked)}
+        />
+      ),
     },
     {
       title: "默认模型",
@@ -76,16 +85,14 @@ export function ModelConfigTable(props: ModelConfigTableProps) {
       align: "center",
       render: (value: boolean, record) => (
         <Button
-          aria-label={value ? `${record.name} 当前默认模型` : `设为默认模型 ${record.name}`}
+          aria-label={value ? `取消默认模型 ${record.name}` : `设为默认模型 ${record.name}`}
           type="text"
           size="small"
           className="h-6 w-6 p-0"
           icon={value ? <StarFilled className="text-[#1677ff]" /> : <StarOutlined className="text-[#64748b]" />}
           onClick={(event) => {
             event.stopPropagation();
-            if (!value) {
-              props.onSetDefault(record.id);
-            }
+            props.onSetDefault(record.id);
           }}
         />
       ),
@@ -137,6 +144,8 @@ export function ModelConfigTable(props: ModelConfigTableProps) {
               size="small"
               className="h-6 w-6 p-0 text-[#64748b]"
               icon={<ExperimentOutlined />}
+              disabled={Boolean(props.testingConfigId)}
+              loading={props.testingConfigId === record.id}
               onClick={(event) => {
                 event.stopPropagation();
                 props.onTest(record.id);
@@ -152,6 +161,10 @@ export function ModelConfigTable(props: ModelConfigTableProps) {
               icon={<DeleteOutlined />}
               onClick={(event) => {
                 event.stopPropagation();
+                if (props.actionsPending) {
+                  props.onDelete(record.id);
+                  return;
+                }
                 modal.confirm({
                   title: "确认删除配置？",
                   content: `删除后将从本地配置列表移除「${record.name}」。`,

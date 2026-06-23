@@ -1,6 +1,9 @@
-use crate::sidecar::CoreState;
+use crate::{
+    desktop_runtime,
+    sidecar::{runtime_core_binary_path, CoreState},
+};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 const SEARCH_MAX_LIMIT: i32 = 100;
 const SEARCH_MAX_SYMBOLS: usize = 20;
@@ -20,67 +23,87 @@ struct SearchStatusRequest {}
 #[derive(Deserialize, Serialize)]
 pub struct SearchRebuildPayload {
     scope: String,
-    force: bool,
 }
 
 /// 搜索报告历史范围，固定转发到 Go core `/api/search/reports`。
 #[tauri::command]
 pub fn search_reports(
+    app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: SearchDocumentsPayload,
 ) -> Result<serde_json::Value, String> {
     validate_search_payload(&payload)?;
-    let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/search/reports", &payload)
-        .map_err(|error| error.to_string())
+    post_search_api(&app_handle, &state, "/api/search/reports", &payload)
 }
 
 /// 搜索资讯范围，固定转发到 Go core `/api/search/news`。
 #[tauri::command]
 pub fn search_news(
+    app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: SearchDocumentsPayload,
 ) -> Result<serde_json::Value, String> {
     validate_search_payload(&payload)?;
-    let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/search/news", &payload)
-        .map_err(|error| error.to_string())
+    post_search_api(&app_handle, &state, "/api/search/news", &payload)
 }
 
 /// 搜索自选备注范围，固定转发到 Go core `/api/search/watchlist-notes`。
 #[tauri::command]
 pub fn search_watchlist_notes(
+    app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: SearchDocumentsPayload,
 ) -> Result<serde_json::Value, String> {
     validate_search_payload(&payload)?;
-    let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/search/watchlist-notes", &payload)
-        .map_err(|error| error.to_string())
+    post_search_api(&app_handle, &state, "/api/search/watchlist-notes", &payload)
 }
 
 /// 读取搜索索引状态，固定转发到 Go core `/api/search/status`。
 #[tauri::command]
-pub fn search_status(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
-    let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/search/status", &SearchStatusRequest {})
-        .map_err(|error| error.to_string())
+pub fn search_status(
+    app_handle: AppHandle,
+    state: State<'_, CoreState>,
+) -> Result<serde_json::Value, String> {
+    post_search_api(
+        &app_handle,
+        &state,
+        "/api/search/status",
+        &SearchStatusRequest {},
+    )
 }
 
 /// 触发搜索索引重建，固定转发到 Go core `/api/search/rebuild`。
 #[tauri::command]
 pub fn search_rebuild(
+    app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: SearchRebuildPayload,
 ) -> Result<serde_json::Value, String> {
     validate_search_rebuild_payload(&payload)?;
-    let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/search/rebuild", &payload)
+    post_search_api(&app_handle, &state, "/api/search/rebuild", &payload)
+}
+
+/// 搜索命令统一通过状态恢复 API 调用 Go core，处理启动瞬间旧端口失效的连接竞态。
+fn post_search_api<TRequest>(
+    app_handle: &AppHandle,
+    state: &CoreState,
+    path: &str,
+    payload: &TRequest,
+) -> Result<serde_json::Value, String>
+where
+    TRequest: Serialize,
+{
+    let binary_path = runtime_core_binary_path();
+    let workspace_path =
+        desktop_runtime::default_workspace_path(app_handle).map_err(|error| error.to_string())?;
+    state
+        .post_api_with_recovery(
+            &binary_path,
+            &workspace_path,
+            std::time::Duration::from_secs(5),
+            path,
+            payload,
+        )
         .map_err(|error| error.to_string())
 }
 
@@ -200,14 +223,12 @@ mod tests {
         for scope in ["all", "stock", "reports", "news", "watchlist_notes"] {
             assert!(validate_search_rebuild_payload(&SearchRebuildPayload {
                 scope: scope.to_string(),
-                force: false,
             })
             .is_ok());
         }
         assert_eq!(
             validate_search_rebuild_payload(&SearchRebuildPayload {
                 scope: "global".to_string(),
-                force: false,
             })
             .expect_err("unknown scope should fail"),
             "invalid search rebuild scope"

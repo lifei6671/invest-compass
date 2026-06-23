@@ -36,6 +36,7 @@ export type ProviderItem = {
 
 export type ModelConfig = {
   id: string;
+  apiKeyRef: string;
   name: string;
   provider: AIProviderType;
   providerName: string;

@@ -41,8 +41,8 @@
 发布前必须确认：
 
 - 构建输入目录包含当前 target triple 对应的 Go sidecar 文件。
-- macOS 发布包运行时包含 `invest-compas-core`。
-- Windows x64 发布包运行时包含 `invest-compas-core.exe`。
+- macOS 发布包运行时包含 `invest-compass-core`。
+- Windows x64 发布包运行时包含 `invest-compass-core.exe`。
 - Tauri 配置只声明首版需要的权限。
 - Go sidecar 只监听 `127.0.0.1`。
 - runtime token 不出现在 argv、env、日志、配置文件或数据库中。
@@ -229,7 +229,7 @@ Apple Silicon `.app` 生成后，也可以单独验证包内 Go core runtime：
 pnpm --dir apps sidecar:smoke
 ```
 
-该命令会启动包内 `invest-compas-core`，完成 stdin token 握手、健康检查和内部 shutdown；它不打开桌面 UI，也不替代完整桌面验收。
+该命令会启动包内 `invest-compass-core`，完成 stdin token 握手、健康检查和内部 shutdown；它不打开桌面 UI，也不替代完整桌面验收。
 
 跨平台发布还需要人工确认：
 

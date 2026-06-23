@@ -22,7 +22,7 @@ pub fn run() {
                 ))
                 .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
             let binary_path = sidecar::runtime_core_binary_path();
-            let workspace_path = app.path().app_data_dir()?;
+            let workspace_path = desktop_runtime::default_workspace_path(app)?;
             if binary_path.exists() {
                 let running = sidecar::start_core_sidecar(
                     &binary_path,
@@ -46,6 +46,9 @@ pub fn run() {
             commands::settings::settings_set,
             commands::settings::workspace_get,
             commands::settings::workspace_set,
+            commands::settings::workspace_open,
+            commands::settings::workspace_migration_plan,
+            commands::settings::workspace_migrate,
             commands::settings::cache_stats,
             commands::settings::cache_clean,
             commands::market::stock_search,

@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -52,6 +53,46 @@ type CacheStats struct {
 type LicenseStatus string
 
 const (
+	// SettingKeyAppTheme 表示应用主题偏好。
+	SettingKeyAppTheme = "app.theme"
+	// SettingKeyAppLanguage 表示应用界面语言偏好。
+	SettingKeyAppLanguage = "app.language"
+	// SettingKeyMarketDefault 表示默认市场。
+	SettingKeyMarketDefault = "market.default"
+	// SettingKeyQuoteRefreshInterval 表示行情刷新间隔。
+	SettingKeyQuoteRefreshInterval = "quote.refresh_interval"
+	// SettingKeyKlineDefaultPeriod 表示默认 K 线周期。
+	SettingKeyKlineDefaultPeriod = "kline.default_period"
+	// SettingKeyKlineDefaultAdjust 表示默认复权方式。
+	SettingKeyKlineDefaultAdjust = "kline.default_adjust"
+	// SettingKeyNotificationsInAppEnabled 表示应用内通知总开关。
+	SettingKeyNotificationsInAppEnabled = "notifications.in_app_enabled"
+	// SettingKeyNotificationsSystemEnabled 表示系统级通知总开关。
+	SettingKeyNotificationsSystemEnabled = "notifications.system_enabled"
+	// SettingKeyNotificationsTaskSuccess 表示任务成功通知开关。
+	SettingKeyNotificationsTaskSuccess = "notifications.task_success"
+	// SettingKeyNotificationsTaskFailed 表示任务失败通知开关。
+	SettingKeyNotificationsTaskFailed = "notifications.task_failed"
+	// SettingKeyNotificationsProviderError 表示 Provider 异常通知开关。
+	SettingKeyNotificationsProviderError = "notifications.provider_error"
+	// SettingKeyWindowCloseToTray 表示关闭窗口时是否最小化到托盘。
+	SettingKeyWindowCloseToTray = "window.close_to_tray"
+	// SettingKeyUpdateCheckOnStartup 表示启动时检查更新开关。
+	SettingKeyUpdateCheckOnStartup = "update.check_on_startup"
+
+	// DefaultAppTheme 是首版默认浅色主题。
+	DefaultAppTheme = "light"
+	// DefaultAppLanguage 是首版默认简体中文。
+	DefaultAppLanguage = "zh-CN"
+	// DefaultMarket 是首版默认 A 股市场。
+	DefaultMarket = "CN"
+	// DefaultQuoteRefreshInterval 是首版默认行情刷新间隔。
+	DefaultQuoteRefreshInterval = "60s"
+	// DefaultKlinePeriod 是首版默认日 K。
+	DefaultKlinePeriod = "day"
+	// DefaultKlineAdjust 是首版默认前复权。
+	DefaultKlineAdjust = "qfq"
+
 	// LicenseStatusFree 表示首版仅展示 FREE 占位。
 	LicenseStatusFree LicenseStatus = "FREE"
 	// LocalAIConfigVaultRefPrefix 是 AI Key 本地 vault 引用的唯一合法前缀。
@@ -102,7 +143,7 @@ func ValidateSetting(setting Setting) error {
 		key == "resolved_api_key" {
 		return &xerr.Error{Code: xerr.SettingsSensitiveSetting}
 	}
-	return nil
+	return validateKnownSettingValue(key, setting.Value)
 }
 
 // ValidateWorkspacePath 校验工作区路径必须来自系统目录或用户选择后的绝对路径。
@@ -182,6 +223,45 @@ func validateMaskedAPIKey(maskedAPIKey string) error {
 		return nil
 	}
 	return &xerr.Error{Code: xerr.SettingsSensitiveSetting}
+}
+
+// validateKnownSettingValue 校验设置中心已定义 key 的值域，未知 key 只走敏感词边界。
+func validateKnownSettingValue(key string, value string) error {
+	trimmed := strings.TrimSpace(value)
+	switch key {
+	case SettingKeyAppTheme:
+		return validateStringEnum(key, trimmed, DefaultAppTheme, "dark", "system")
+	case SettingKeyAppLanguage:
+		return validateStringEnum(key, trimmed, DefaultAppLanguage, "en-US")
+	case SettingKeyMarketDefault:
+		return validateStringEnum(key, trimmed, DefaultMarket, "HK", "US")
+	case SettingKeyQuoteRefreshInterval:
+		return validateStringEnum(key, trimmed, "15s", "30s", DefaultQuoteRefreshInterval, "120s", "manual")
+	case SettingKeyKlineDefaultPeriod:
+		return validateStringEnum(key, trimmed, "minute", DefaultKlinePeriod, "week", "month")
+	case SettingKeyKlineDefaultAdjust:
+		return validateStringEnum(key, trimmed, "none", DefaultKlineAdjust, "hfq")
+	case SettingKeyNotificationsInAppEnabled,
+		SettingKeyNotificationsSystemEnabled,
+		SettingKeyNotificationsTaskSuccess,
+		SettingKeyNotificationsTaskFailed,
+		SettingKeyNotificationsProviderError,
+		SettingKeyWindowCloseToTray,
+		SettingKeyUpdateCheckOnStartup:
+		return validateStringEnum(key, strings.ToLower(trimmed), "true", "false")
+	default:
+		return nil
+	}
+}
+
+// validateStringEnum 校验字符串枚举值，保持 settings 表只保存可解释的配置。
+func validateStringEnum(key string, value string, allowedValues ...string) error {
+	for _, allowedValue := range allowedValues {
+		if value == allowedValue {
+			return nil
+		}
+	}
+	return fmt.Errorf("settings key %s has invalid value", key)
 }
 
 // isTemporaryCacheTarget 判断缓存目标是否属于允许统计和清理的临时缓存。

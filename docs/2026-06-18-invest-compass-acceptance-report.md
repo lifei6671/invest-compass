@@ -58,7 +58,7 @@ git diff --check
 | 序号 | 验收标准 | 当前状态 | 当前证据 / 缺口 |
 | --- | --- | --- | --- |
 | 1 | 应用可在 Windows 和 macOS 启动。 | 部分通过 | 本机 Apple Silicon 已真实启动 `投研罗盘.app`；macOS Intel 和 Windows 真实桌面启动验收仍未完成。 |
-| 2 | Go sidecar 可自动启动和退出。 | 部分通过 | 已有 Rust sidecar 启动、stdin token、携带 `protocolVersion` 的 ready JSON、protocolVersion 兼容性校验、health/shutdown 基线和单测；Tauri `externalBin` 已声明 Go sidecar 基名，`sidecar:check-targets` 可重复构建并校验 Apple Silicon、macOS Intel 和 Windows x64 三类 target sidecar，其中 Windows x64 为 GUI subsystem；脚本测试已覆盖三类 target sidecar 文件名必须匹配 Tauri `externalBin` 基名，避免构建脚本和打包配置漂移；`verify-desktop-package.mjs` 可在生成桌面包后检查 macOS `.app` 或 Windows 解包目录中主程序和 Go sidecar 是否同时存在、非空，并可通过 `--target` 复核包内二进制架构；本机 `投研罗盘.app` 已包含 `Contents/MacOS/invest-compas-core`，包内 sidecar 通过 stdin 握手、`protocolVersion=1` ready 和 shutdown 回环验证；真实启动后进程参数确认 sidecar 来自 `.app/Contents/MacOS/invest-compas-core`，应用退出后 desktop/core 均无残留进程；macOS Intel 和 Windows 安装包仍需目标平台验收。 |
+| 2 | Go sidecar 可自动启动和退出。 | 部分通过 | 已有 Rust sidecar 启动、stdin token、携带 `protocolVersion` 的 ready JSON、protocolVersion 兼容性校验、health/shutdown 基线和单测；Tauri `externalBin` 已声明 Go sidecar 基名，`sidecar:check-targets` 可重复构建并校验 Apple Silicon、macOS Intel 和 Windows x64 三类 target sidecar，其中 Windows x64 为 GUI subsystem；脚本测试已覆盖三类 target sidecar 文件名必须匹配 Tauri `externalBin` 基名，避免构建脚本和打包配置漂移；`verify-desktop-package.mjs` 可在生成桌面包后检查 macOS `.app` 或 Windows 解包目录中主程序和 Go sidecar 是否同时存在、非空，并可通过 `--target` 复核包内二进制架构；本机 `投研罗盘.app` 已包含 `Contents/MacOS/invest-compass-core`，包内 sidecar 通过 stdin 握手、`protocolVersion=1` ready 和 shutdown 回环验证；真实启动后进程参数确认 sidecar 来自 `.app/Contents/MacOS/invest-compass-core`，应用退出后 desktop/core 均无残留进程；macOS Intel 和 Windows 安装包仍需目标平台验收。 |
 | 3 | 用户可以搜索并添加自选股。 | 部分通过 | Go 搜索 API、自选股 CRUD API、stocks/watchlists 持久化和 Rust `stock_search`/`watchlist_*` command 已接入；前端 `/watchlist` 已通过 typed invoke service 接入搜索、添加、更新、删除、刷新、行内单股 quote 刷新和真实 `market_quote` 行情读取，并覆盖重复添加错误展示；真实合规 Provider 授权和外网样例仍待验收。 |
 | 4 | 用户可以查看个股行情和 K 线。 | 部分通过 | Go `POST /api/market/quote`、`POST /api/market/kline`、`POST /api/market/indicators`、quotes/klines 持久化缓存和 Rust `market_quote`/`market_kline`/`market_indicators` command 已接入；前端 `/stocks/:symbol` 已通过 typed invoke service 展示行情摘要、Lightweight Charts K 线、K 线表格摘要和技术指标，period/adjust 切换和数据不足空态已有测试覆盖；新闻外链已通过 Rust `open_external_url` 白名单 command 打开系统浏览器；真实合规 Provider 授权和跨平台桌面验收仍未闭环。 |
 | 5 | 用户可以配置至少一个 AI 模型。 | 部分通过 | AI 配置安全规则、Rust 本地 vault 写入/读取、数据库持久化、生产 `OpenAIConfigTester` 注入、`POST /api/ai/configs/test` 和 Rust `ai_config_*` command 已有基线；前端 `/ai-settings` 已通过 typed invoke service 接入列表、保存、删除和连通性测试，保存后只展示脱敏字段，测试失败会二次脱敏；真实外部 Provider 和跨平台桌面凭据验收仍未闭环。 |
@@ -118,12 +118,12 @@ git diff --check
 已完成的本机证据：
 
 - `tauri build --bundles app` 已生成 `投研罗盘.app`。
-- `投研罗盘.app/Contents/MacOS/` 同时包含 `invest-compass-desktop` 和 `invest-compas-core`。
+- `投研罗盘.app/Contents/MacOS/` 同时包含 `invest-compass-desktop` 和 `invest-compass-core`。
 - `scripts/verify-desktop-package.mjs --platform=darwin --target=aarch64-apple-darwin <app>` 可复核 `.app` 包名、`CFBundleDisplayName`、`CFBundleName` 与 Tauri `productName` 一致、包结构中主程序和 sidecar 是否同时存在、非空、具备执行位、`Info.plist` 指向主程序、bundle 类型为 `APPL`、bundle identifier 和版本号与 Tauri 配置一致、声明的图标资源作为 `Contents/Resources` 直接子文件随包存在且架构匹配 Apple Silicon。
-- `pnpm --dir apps sidecar:smoke` 已验证 `.app` 包内 `invest-compas-core` 可通过 stdin token 握手输出 `protocolVersion=1` ready JSON，并可响应 `/internal/health` 和 `/internal/shutdown`。
-- 包内 `invest-compas-core` 已通过 stdin 握手、`protocolVersion=1` ready JSON 和 `/internal/shutdown` 关闭验证。
-- 真实启动 `投研罗盘.app` 后，`ps` 进程参数确认 Go core 路径为 `.app/Contents/MacOS/invest-compas-core`。
-- 通过 macOS 应用退出路径关闭后，`pgrep -af "(invest-compass-desktop|invest-compas-core)"` 无残留进程。
+- `pnpm --dir apps sidecar:smoke` 已验证 `.app` 包内 `invest-compass-core` 可通过 stdin token 握手输出 `protocolVersion=1` ready JSON，并可响应 `/internal/health` 和 `/internal/shutdown`。
+- 包内 `invest-compass-core` 已通过 stdin 握手、`protocolVersion=1` ready JSON 和 `/internal/shutdown` 关闭验证。
+- 真实启动 `投研罗盘.app` 后，`ps` 进程参数确认 Go core 路径为 `.app/Contents/MacOS/invest-compass-core`。
+- 通过 macOS 应用退出路径关闭后，`pgrep -af "(invest-compass-desktop|invest-compass-core)"` 无残留进程。
 
 待验收项：
 
@@ -140,7 +140,7 @@ git diff --check
 
 - Windows x64 启动和退出。
 - Go sidecar 随应用启动、退出后无残留进程。
-- `scripts/verify-desktop-package.mjs --platform=win32 --target=x86_64-pc-windows-msvc <unpacked-dir>` 可先复核解包目录中 `invest-compass-desktop.exe` 和 `invest-compas-core.exe` 是否同时存在、非空、架构匹配 Windows x64 且为 GUI subsystem。
+- `scripts/verify-desktop-package.mjs --platform=win32 --target=x86_64-pc-windows-msvc <unpacked-dir>` 可先复核解包目录中 `invest-compass-desktop.exe` 和 `invest-compass-core.exe` 是否同时存在、非空、架构匹配 Windows x64 且为 GUI subsystem。
 - 本地 vault 保存、读取、删除 API Key 和代理密码。
 - 通知、托盘、开机自启。
 - NSIS / MSI 安装包包含正确 sidecar 文件名。

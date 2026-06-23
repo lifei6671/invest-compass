@@ -1,3 +1,5 @@
+import { defaultSettingsValues } from "./settingsKeys";
+
 export type SettingsTabKey =
   | "basic"
   | "model-config"
@@ -69,27 +71,27 @@ export const settingsTabs: Array<{ key: SettingsTabKey; label: string }> = [
 ];
 
 export const initialBasicSettings: BasicSettingsState = {
-  theme: "light",
-  language: "zh-CN",
-  defaultMarket: "CN",
-  defaultAIModel: "DeepSeek-V3",
-  quoteRefreshInterval: "60s",
-  defaultKlinePeriod: "day",
-  defaultAdjustType: "qfq",
+  theme: defaultSettingsValues.theme,
+  language: defaultSettingsValues.language,
+  defaultMarket: defaultSettingsValues.defaultMarket,
+  defaultAIModel: "",
+  quoteRefreshInterval: defaultSettingsValues.quoteRefreshInterval,
+  defaultKlinePeriod: defaultSettingsValues.defaultKlinePeriod,
+  defaultAdjustType: defaultSettingsValues.defaultAdjustType,
 };
 
 export const initialWorkspace: WorkspaceSettingsState = {
-  workspacePath: "C:\\Users\\InvestCompass\\Documents\\InvestCompass",
+  workspacePath: "",
 };
 
 export const initialNotificationSettings: NotificationSettingsState = {
-  taskSuccessNotification: true,
-  taskFailedNotification: true,
+  taskSuccessNotification: defaultSettingsValues.taskSuccessNotification,
+  taskFailedNotification: defaultSettingsValues.taskFailedNotification,
 };
 
 export const initialDesktopSettings: DesktopSettingsState = {
   autostart: false,
-  closeToTray: true,
+  closeToTray: defaultSettingsValues.closeToTray,
 };
 
 export const initialCacheSummary: CacheSummary = {
@@ -105,6 +107,6 @@ export const initialProxySummary: ProxySummary = {
 };
 
 export const initialOtherSettings: OtherSettingsState = {
-  checkUpdateOnStartup: true,
+  checkUpdateOnStartup: defaultSettingsValues.checkUpdateOnStartup,
   anonymousUsageStats: true,
 };

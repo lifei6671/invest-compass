@@ -305,8 +305,8 @@ func TestBackupBeforeMigrationSkipsMissingOrMemoryDatabase(t *testing.T) {
 	}
 }
 
-// TestBackupBeforeMigrationRefusesOverwrite 验证备份文件重名时直接失败，避免覆盖已有用户备份。
-func TestBackupBeforeMigrationRefusesOverwrite(t *testing.T) {
+// TestBackupBeforeMigrationSkipsExistingDailyBackup 验证同一数据库当天已有自动备份时不再重复生成。
+func TestBackupBeforeMigrationSkipsExistingDailyBackup(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "invest-compass.sqlite3")
 	backupDir := filepath.Join(tempDir, "backups")
@@ -321,13 +321,16 @@ func TestBackupBeforeMigrationRefusesOverwrite(t *testing.T) {
 		t.Fatalf("write existing backup: %v", err)
 	}
 
-	_, err := BackupBeforeMigration(context.Background(), BackupConfig{
+	result, err := BackupBeforeMigration(context.Background(), BackupConfig{
 		Path:      dbPath,
 		BackupDir: backupDir,
 		Now:       time.Date(2026, 6, 18, 8, 9, 10, 0, time.UTC),
 	})
-	if err == nil {
-		t.Fatal("expected backup overwrite to fail")
+	if err != nil {
+		t.Fatalf("backup should skip existing daily backup without error: %v", err)
+	}
+	if result.Created || len(result.Files) != 0 {
+		t.Fatalf("expected existing daily backup to skip new files, got %+v", result)
 	}
 	content, readErr := os.ReadFile(existing)
 	if readErr != nil {
