@@ -30,6 +30,7 @@ import (
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
 	notificationservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/notification"
 	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
+	searchservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/search"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/sidecar"
 	taskservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/task"
 	tasklogservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/tasklog"
@@ -127,6 +128,11 @@ func main() {
 	}
 	defer shutdownTaskLogWriter(taskLogWriter)
 	applyTaskLogRetention(dbCtx, store, ndjsonWriter)
+	searchTokenizer, err := requiredSearchTokenizer()
+	if err != nil {
+		slog.Error("初始化 GSE 分词器失败", "error", logger.RedactError(err))
+		os.Exit(1)
+	}
 
 	logSource := newRuntimeLogSource(os.Stderr, 500)
 	slog.SetDefault(slog.New(logger.NewTaskLogHandler(logSource, taskLogWriter)))
@@ -157,7 +163,7 @@ func main() {
 			lifecycle.requestShutdown()
 		})
 	}
-	handler := actions.NewHandler(buildActionsConfig(handshake.Token, *workspace, store, schedulerQueue, schedulerService, taskLogService, taskLogWriter, logSource, func() {
+	handler := actions.NewHandler(buildActionsConfig(handshake.Token, *workspace, store, schedulerQueue, schedulerService, taskLogService, taskLogWriter, logSource, searchTokenizer, func() {
 		lifecycleDiagnostic("shutdown_requested", "source", "internal_api")
 		lifecycle.requestShutdown()
 	}))
@@ -280,6 +286,15 @@ func newRuntimeLogSource(output io.Writer, capacity int) *logexportservice.Memor
 	return logexportservice.NewMemorySource(slog.NewTextHandler(output, nil), capacity)
 }
 
+// requiredSearchTokenizer 初始化生产必需的 GSE 分词器；失败时启动应阻断，不能降级为 simple。
+func requiredSearchTokenizer() (searchservice.Tokenizer, error) {
+	tokenizer, err := searchservice.NewGSETokenizer(searchservice.DefaultDomainWords())
+	if err != nil {
+		return nil, fmt.Errorf("required gse tokenizer unavailable: %w", err)
+	}
+	return tokenizer, nil
+}
+
 // newProductionScheduler 组装生产调度队列和 SchedulerService，确保启动恢复、手动触发和桌面管理使用同一执行队列。
 func newProductionScheduler(store *dao.Store, workspace string, now func() time.Time) (*schedulerservice.ExecutionQueue, *schedulerservice.Service, error) {
 	schedulerQueue := schedulerservice.NewExecutionQueue()
@@ -386,32 +401,34 @@ func applyTaskLogRetention(ctx context.Context, store *dao.Store, ndjsonWriter *
 }
 
 // buildActionsConfig 组装生产 actions 依赖，避免 main 漏注入后端能力。
-func buildActionsConfig(token string, workspace string, store *dao.Store, schedulerQueue *schedulerservice.ExecutionQueue, schedulerService *schedulerservice.Service, taskLogService tasklogservice.Service, taskLogWriter tasklogservice.StageWriter, logSource *logexportservice.MemorySource, onShutdown func()) actions.Config {
+func buildActionsConfig(token string, workspace string, store *dao.Store, schedulerQueue *schedulerservice.ExecutionQueue, schedulerService *schedulerservice.Service, taskLogService tasklogservice.Service, taskLogWriter tasklogservice.StageWriter, logSource *logexportservice.MemorySource, searchTokenizer searchservice.Tokenizer, onShutdown func()) actions.Config {
 	dataSourceCredentialKeyPath := filepath.Join(workspace, "credentials", "data-source.key")
 	notificationService := notificationservice.NewService(store)
 	dataSourceCredentials := datasourcecredentialservice.NewService(store, datasourcecredentialservice.FileKeyProvider{Path: dataSourceCredentialKeyPath})
 	marketProvider := buildMarketProvider(store)
 	newsProvider := buildNewsProvider(dataSourceCredentialCookieResolver{Service: dataSourceCredentials})
+	documentSearchService := searchservice.NewScopedDocumentSearchService(searchservice.DocumentSearchConfig{Store: store, Tokenizer: searchTokenizer})
 	return actions.Config{
-		Version:             version,
-		Token:               token,
-		DBStatus:            "ok",
-		Ready:               true,
-		MarketProvider:      marketProvider,
-		NewsProvider:        newsProvider,
-		CacheStatsProvider:  store,
-		CacheCleaner:        store,
-		StockStore:          store,
-		DocumentSearchStore: store,
-		MarketStore:         store,
-		NewsStore:           store,
-		WatchlistStore:      store,
-		PromptTemplateStore: store,
-		AIConfigStore:       store,
-		AIConfigTester:      aiservice.OpenAIConfigTester{},
-		ProviderNotifier:    notificationService,
-		AnalysisStore:       store,
-		AnalysisExecutor:    analysisservice.Executor{Store: store, TaskLogWriter: taskLogWriter, TaskNotifier: notificationService},
+		Version:               version,
+		Token:                 token,
+		DBStatus:              "ok",
+		Ready:                 true,
+		MarketProvider:        marketProvider,
+		NewsProvider:          newsProvider,
+		CacheStatsProvider:    store,
+		CacheCleaner:          store,
+		StockStore:            store,
+		DocumentSearchStore:   store,
+		DocumentSearchService: documentSearchService,
+		MarketStore:           store,
+		NewsStore:             store,
+		WatchlistStore:        store,
+		PromptTemplateStore:   store,
+		AIConfigStore:         store,
+		AIConfigTester:        aiservice.OpenAIConfigTester{},
+		ProviderNotifier:      notificationService,
+		AnalysisStore:         store,
+		AnalysisExecutor:      analysisservice.Executor{Store: store, TaskLogWriter: taskLogWriter, TaskNotifier: notificationService},
 		AnalysisTransact: func(ctx context.Context, run func(analysisaction.Store) error) error {
 			return store.WithTransaction(ctx, func(tx *dao.Store) error {
 				return run(tx)

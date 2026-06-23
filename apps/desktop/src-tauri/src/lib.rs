@@ -100,6 +100,7 @@ pub fn run() {
             commands::scheduler::scheduler_runs_trigger,
             commands::scheduler::scheduler_refresh_symbol,
             commands::scheduler::scheduler_status,
+            commands::logs::logs_open_directory,
             commands::logs::export_logs,
             commands::update::check_update,
             commands::watchlist::watchlist_list,

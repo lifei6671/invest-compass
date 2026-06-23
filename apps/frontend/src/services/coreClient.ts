@@ -866,6 +866,10 @@ export type ExportLogsResult = {
   file_name: string;
 };
 
+export type LogsOpenDirectoryResult = {
+  opened: boolean;
+};
+
 async function invoke<T>(command: string, payload?: InvokeArgs): Promise<T> {
   try {
     return await tauriInvoke<T>(command, payload);
@@ -1491,6 +1495,11 @@ export async function checkUpdate(): Promise<UpdateCheckResult> {
 /// 通过固定 Rust command 导出已脱敏日志到用户授权目录。
 export async function exportLogs(targetDir: string): Promise<ExportLogsResult> {
   return invoke<ExportLogsResult>("export_logs", { targetDir });
+}
+
+/// 通过固定 Rust command 打开默认工作区日志目录，初始化失败时不依赖 Go core。
+export async function logsOpenDirectory(): Promise<LogsOpenDirectoryResult> {
+  return invoke<LogsOpenDirectoryResult>("logs_open_directory");
 }
 
 /// 打开系统目录选择器，返回用户授权的本地目录；取消选择时返回 null。

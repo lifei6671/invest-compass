@@ -220,8 +220,9 @@ type AppProps = {
   minimumInitializationVisibleMs?: number;
 };
 
-const defaultBootStatusPollIntervalMs = 800;
-const defaultMinimumInitializationVisibleMs = 900;
+const defaultBootStatusPollIntervalMs = 300;
+const defaultMinimumInitializationVisibleMs = 3000;
+const minimumReadyVisibleMs = 800;
 
 export function App(props: AppProps = {}) {
   const [bootState, setBootState] = useState<AppBootState>(props.initialBootState ?? defaultBootState());
@@ -244,7 +245,7 @@ export function App(props: AppProps = {}) {
         }
         setBootStatus(nextStatus);
         if (nextStatus.ready) {
-          const remainingVisibleMs = Math.max(0, minimumInitializationVisibleMs - (Date.now() - startedAt));
+          const remainingVisibleMs = Math.max(minimumReadyVisibleMs, minimumInitializationVisibleMs - (Date.now() - startedAt));
           timer = window.setTimeout(() => {
             if (active) {
               setBootState("ready");
@@ -290,10 +291,10 @@ export function App(props: AppProps = {}) {
       <AntApp>
         <AppErrorBoundary>
           <HashRouter>
-            <AppShell routes={APP_ROUTES} navItems={APP_NAV_ITEMS} locked={bootState === "initializing"}>
-              {bootState === "initializing" ? (
-                <AppInitializationPage state={bootStatus ?? undefined} />
-              ) : (
+            {bootState === "initializing" ? (
+              <AppInitializationPage state={bootStatus ?? undefined} />
+            ) : (
+              <AppShell routes={APP_ROUTES} navItems={APP_NAV_ITEMS}>
                 <Suspense
                   fallback={
                     <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
@@ -317,8 +318,8 @@ export function App(props: AppProps = {}) {
                     <Route path="*" element={<Alert title="页面不存在" type="warning" showIcon />} />
                   </Routes>
                 </Suspense>
-              )}
-            </AppShell>
+              </AppShell>
+            )}
           </HashRouter>
         </AppErrorBoundary>
       </AntApp>

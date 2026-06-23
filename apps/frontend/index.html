@@ -30,49 +30,88 @@
       .boot-splash {
         position: fixed;
         inset: 0;
-        display: flex;
         min-height: 100vh;
         width: 100vw;
-        align-items: center;
-        justify-content: center;
-        background: #f6f8fb;
-        overflow: hidden;
+        overflow: auto;
+        background: #ffffff;
+        padding: 8px 24px 20px;
       }
 
-      .boot-splash-card {
-        width: min(520px, calc(100vw - 48px));
-        border: 1px solid #e5eaf3;
-        border-radius: 16px;
-        background: #ffffff;
-        padding: 36px 40px;
-        text-align: center;
-        box-shadow: 0 12px 36px rgba(15, 23, 42, 0.08);
+      .boot-splash-inner {
+        width: min(1180px, 100%);
+        margin: 0 auto;
+      }
+
+      .boot-splash-brand {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
       }
 
       .boot-splash-logo {
-        margin: 0 auto 18px;
-        height: 48px;
-        width: 48px;
-        border-radius: 14px;
+        height: 36px;
+        width: 36px;
+        border-radius: 9px;
         object-fit: cover;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+      }
+
+      .boot-splash-name {
+        text-align: left;
+      }
+
+      .boot-splash-name strong {
+        display: block;
+        color: #111827;
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 20px;
+      }
+
+      .boot-splash-name span {
+        display: block;
+        color: #111827;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 16px;
       }
 
       .boot-splash-title {
-        margin: 0;
+        margin: 12px 0 0;
+        text-align: center;
+        color: #111827;
         font-size: 22px;
         font-weight: 700;
-        line-height: 30px;
+        line-height: 28px;
       }
 
       .boot-splash-subtitle {
-        margin: 10px 0 0;
+        margin: 4px 0 0;
+        text-align: center;
         color: #64748b;
+        font-size: 13px;
+        line-height: 20px;
+      }
+
+      .boot-splash-progress-heading {
+        margin-top: 16px;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: #374151;
         font-size: 14px;
-        line-height: 22px;
+        font-weight: 600;
+      }
+
+      .boot-splash-progress-heading strong {
+        color: #1677ff;
+        font-size: 15px;
+        font-weight: 700;
       }
 
       .boot-splash-progress {
-        margin-top: 24px;
         height: 8px;
         overflow: hidden;
         border-radius: 999px;
@@ -82,18 +121,197 @@
       .boot-splash-progress span {
         display: block;
         height: 100%;
-        width: 42%;
+        width: 10%;
         border-radius: inherit;
         background: #1677ff;
-        animation: boot-splash-progress 1.2s ease-in-out infinite alternate;
       }
 
-      @keyframes boot-splash-progress {
-        from {
-          transform: translateX(-30%);
+      .boot-splash-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 10px;
+      }
+
+      .boot-splash-panel {
+        border: 1px solid #e5eaf3;
+        border-radius: 10px;
+        background: #ffffff;
+        overflow: hidden;
+      }
+
+      .boot-splash-step {
+        position: relative;
+        display: grid;
+        min-height: 39px;
+        grid-template-columns: 30px 1fr auto;
+        align-items: center;
+        gap: 8px;
+        border-bottom: 1px solid #edf1f7;
+        padding: 0 14px;
+      }
+
+      .boot-splash-step:last-child {
+        border-bottom: 0;
+      }
+
+      .boot-splash-marker {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        height: 20px;
+        width: 20px;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid #cbd5e1;
+        border-radius: 999px;
+        background: #ffffff;
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .boot-splash-marker.done {
+        border-color: #16a34a;
+        background: #16a34a;
+        color: #ffffff;
+      }
+
+      .boot-splash-marker.running {
+        border-color: #1677ff;
+        color: #1677ff;
+      }
+
+      .boot-splash-step-title {
+        color: #374151;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .boot-splash-badge {
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #64748b;
+        padding: 4px 12px;
+        font-size: 12px;
+        line-height: 16px;
+      }
+
+      .boot-splash-badge.done {
+        border-color: #bbf7d0;
+        background: #ecfdf3;
+        color: #16a34a;
+      }
+
+      .boot-splash-badge.running {
+        border-color: #bfdbfe;
+        background: #eff6ff;
+        color: #1677ff;
+      }
+
+      .boot-splash-task-title {
+        margin: 0;
+        border-bottom: 1px solid #edf1f7;
+        padding: 8px 14px;
+        color: #111827;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .boot-splash-task-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        border-bottom: 1px solid #edf1f7;
+      }
+
+      .boot-splash-task-cell {
+        min-height: 36px;
+        display: grid;
+        grid-template-columns: 64px 1fr;
+        align-items: center;
+        gap: 8px;
+        border-right: 1px solid #edf1f7;
+        border-bottom: 1px solid #edf1f7;
+        padding: 6px 14px;
+        color: #111827;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .boot-splash-task-cell:nth-child(2n) {
+        border-right: 0;
+      }
+
+      .boot-splash-task-cell:nth-last-child(-n + 2) {
+        border-bottom: 0;
+      }
+
+      .boot-splash-task-cell span:first-child {
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .boot-splash-logs {
+        max-height: 118px;
+        overflow: hidden;
+        padding: 8px 14px;
+      }
+
+      .boot-splash-log {
+        display: grid;
+        min-height: 28px;
+        grid-template-columns: 78px 9px 1fr;
+        align-items: center;
+        gap: 8px;
+        color: #374151;
+        font-size: 13px;
+        line-height: 28px;
+      }
+
+      .boot-splash-dot {
+        height: 8px;
+        width: 8px;
+        border-radius: 999px;
+        background: #16a34a;
+      }
+
+      .boot-splash-dot.running {
+        background: #1677ff;
+      }
+
+      .boot-splash-info {
+        margin-top: 8px;
+        min-height: 28px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid #b7d3ff;
+        border-radius: 8px;
+        background: #eff6ff;
+        color: #475569;
+        padding: 0 12px;
+        font-size: 12px;
+        line-height: 20px;
+      }
+
+      @media (max-width: 1023px) {
+        .boot-splash {
+          padding: 12px;
         }
-        to {
-          transform: translateX(160%);
+
+        .boot-splash-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .boot-splash-title {
+          margin-top: 14px;
+          font-size: 22px;
+        }
+
+        .boot-splash-subtitle {
+          font-size: 13px;
         }
       }
     </style>
@@ -101,12 +319,83 @@
   <body>
     <div id="root">
       <div class="boot-splash" aria-label="应用初始化中">
-        <section class="boot-splash-card">
-          <img class="boot-splash-logo" src="/src/assets/invest-compass-icon.png" alt="投研罗盘" />
-          <h1 class="boot-splash-title">正在初始化本地数据环境</h1>
-          <p class="boot-splash-subtitle">正在加载前端工作台并准备连接本地核心服务，请稍候</p>
-          <div class="boot-splash-progress" aria-hidden="true"><span></span></div>
-        </section>
+        <main class="boot-splash-inner">
+          <header>
+            <div class="boot-splash-brand">
+              <img class="boot-splash-logo" src="/src/assets/invest-compass-icon.png" alt="投研罗盘" />
+              <div class="boot-splash-name">
+                <strong>投研罗盘</strong>
+                <span>Invest Compass</span>
+              </div>
+            </div>
+            <h1 class="boot-splash-title">正在初始化本地数据环境</h1>
+            <p class="boot-splash-subtitle">正在启动 Sidecar、准备数据库、加载分词器并同步基础数据，请稍候</p>
+          </header>
+
+          <section>
+            <div class="boot-splash-progress-heading">
+              <span>初始化进度</span>
+              <strong>10%</strong>
+            </div>
+            <div class="boot-splash-progress" aria-label="前端启动界面加载中"><span></span></div>
+          </section>
+
+          <section class="boot-splash-grid">
+            <div class="boot-splash-panel" aria-label="初始化步骤">
+              <div class="boot-splash-step">
+                <span class="boot-splash-marker">1</span>
+                <span class="boot-splash-step-title">1. 启动 Go Core Sidecar</span>
+                <span class="boot-splash-badge">等待连接</span>
+              </div>
+              <div class="boot-splash-step">
+                <span class="boot-splash-marker">2</span>
+                <span class="boot-splash-step-title">2. 检查本地工作区与目录权限</span>
+                <span class="boot-splash-badge">等待连接</span>
+              </div>
+              <div class="boot-splash-step">
+                <span class="boot-splash-marker">3</span>
+                <span class="boot-splash-step-title">3. SQLite 数据库迁移 / 重建索引</span>
+                <span class="boot-splash-badge">等待连接</span>
+              </div>
+              <div class="boot-splash-step">
+                <span class="boot-splash-marker">4</span>
+                <span class="boot-splash-step-title">4. 加载分词器（GSE / 全文检索词典）</span>
+                <span class="boot-splash-badge">等待连接</span>
+              </div>
+              <div class="boot-splash-step">
+                <span class="boot-splash-marker">5</span>
+                <span class="boot-splash-step-title">5. 初始化数据源配置</span>
+                <span class="boot-splash-badge">等待连接</span>
+              </div>
+              <div class="boot-splash-step">
+                <span class="boot-splash-marker">6</span>
+                <span class="boot-splash-step-title">6. 同步基础行情快照与资讯缓存</span>
+                <span class="boot-splash-badge">等待连接</span>
+              </div>
+              <div class="boot-splash-step">
+                <span class="boot-splash-marker">7</span>
+                <span class="boot-splash-step-title">7. 完成基础检查并进入工作台</span>
+                <span class="boot-splash-badge">等待连接</span>
+              </div>
+            </div>
+
+            <div class="boot-splash-panel" aria-label="当前任务详情">
+              <h2 class="boot-splash-task-title">当前任务详情</h2>
+              <div class="boot-splash-task-grid">
+                <div class="boot-splash-task-cell"><span>Task ID</span><span>等待连接</span></div>
+                <div class="boot-splash-task-cell"><span>已耗时</span><span>等待连接</span></div>
+                <div class="boot-splash-task-cell"><span>当前阶段</span><span>前端启动</span></div>
+                <div class="boot-splash-task-cell"><span>预计剩余</span><span>等待连接</span></div>
+              </div>
+              <div class="boot-splash-logs">
+                <div class="boot-splash-log"><span>[--:--:--]</span><span class="boot-splash-dot running"></span><span>loading frontend workspace</span></div>
+                <div class="boot-splash-log"><span>[--:--:--]</span><span class="boot-splash-dot running"></span><span>waiting app boot status</span></div>
+              </div>
+            </div>
+          </section>
+
+          <div class="boot-splash-info">ⓘ 首次启动或版本升级后，可能需要较长时间完成数据库准备与本地缓存初始化。</div>
+        </main>
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>

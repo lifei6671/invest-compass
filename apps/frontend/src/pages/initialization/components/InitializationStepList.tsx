@@ -7,23 +7,23 @@ type InitializationStepListProps = {
 
 export function InitializationStepList(props: InitializationStepListProps) {
   return (
-    <section className="overflow-hidden rounded-[10px] border border-[#e5eaf3] bg-white">
+    <section className="overflow-hidden rounded-[10px] border border-[#d9e2f1] bg-white">
       {props.steps.map((step, index) => (
-        <div key={step.id} className="relative grid min-h-12 grid-cols-[34px_1fr_auto] items-center gap-3 border-b border-[#edf1f7] px-4 last:border-b-0">
+        <div key={step.id} className="relative grid min-h-[39px] grid-cols-[30px_1fr_auto] items-center gap-2 border-b border-[#edf1f7] px-3.5 last:border-b-0">
           {index < props.steps.length - 1 ? (
             <span
               aria-hidden="true"
               className={[
-                "absolute left-[30px] top-8 h-8 w-px",
+                "absolute left-[25px] top-6 h-[36px] w-px",
                 step.status === "completed" ? "bg-[#16a34a]" : step.status === "running" ? "bg-[#1677ff]" : "bg-[#d1d5db]",
               ].join(" ")}
             />
           ) : null}
           <StepMarker step={step} />
-          <span className={["text-[14px] font-medium", step.status === "running" ? "text-[#111827]" : "text-[#374151]"].join(" ")}>
+          <span className={["text-[13px] font-semibold leading-5", step.status === "running" ? "text-[#111827]" : "text-[#374151]"].join(" ")}>
             {step.index}.&nbsp; {step.title}
           </span>
-          <span className={["rounded-md border px-3 py-1 text-[12px] leading-4", badgeClassName(step.status)].join(" ")}>{step.badgeText}</span>
+          <span className={["rounded-md border px-2.5 py-0.5 text-[12px] leading-4", badgeClassName(step.status)].join(" ")}>{step.badgeText}</span>
         </div>
       ))}
     </section>

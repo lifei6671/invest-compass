@@ -6,9 +6,9 @@ type InitializationLogListProps = {
 
 export function InitializationLogList(props: InitializationLogListProps) {
   return (
-    <div className="h-[210px] overflow-y-auto px-[18px] py-3">
+    <div className="h-[118px] overflow-y-auto px-3.5 py-1.5">
       {props.logs.map((item) => (
-        <div key={item.id} className="grid min-h-8 grid-cols-[86px_12px_1fr] items-center gap-3 text-[13px] leading-8 text-[#374151]">
+        <div key={item.id} className="grid min-h-6 grid-cols-[72px_8px_1fr] items-center gap-2 text-[12px] leading-6 text-[#374151]">
           <span>[{item.time}]</span>
           <span aria-hidden="true" className={["h-2 w-2 rounded-full", logStatusClassName(item.status)].join(" ")} />
           <span>{item.message}</span>

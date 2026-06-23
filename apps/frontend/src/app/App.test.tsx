@@ -324,6 +324,9 @@ test("启动初始化期间展示等待页并锁定业务入口", async () => {
         },
       };
     }
+    if (command === "logs_open_directory") {
+      return { opened: true };
+    }
     throw new Error(`initialization should not call ${command}`);
   });
 
@@ -331,18 +334,25 @@ test("启动初始化期间展示等待页并锁定业务入口", async () => {
 
   expect(screen.getByRole("heading", { name: "正在初始化本地数据环境" })).toBeInTheDocument();
   expect(screen.getByText("初始化进度")).toBeInTheDocument();
-  expect(screen.getByText("68%")).toBeInTheDocument();
+  expect(screen.getByLabelText("初始化进度 10%")).toBeInTheDocument();
+  expect(screen.getByText("waiting app boot status")).toBeInTheDocument();
+
+  expect(await screen.findByText("68%")).toBeInTheDocument();
   expect(screen.getByText("SQLite 数据库迁移 / 重建索引")).toBeInTheDocument();
-  expect(screen.getByText("5d3c7b7e-2f6a-4e2f-a8a6-3e9f1c6b7d92")).toBeInTheDocument();
+  expect(screen.getByText("boot-1")).toBeInTheDocument();
   expect(screen.getByText("sidecar ready")).toBeInTheDocument();
   expect(screen.getByText("仅供研究，不构成投资建议")).toBeInTheDocument();
-  expect(screen.getByPlaceholderText("搜索股票名称 / 代码 / 拼音")).toBeDisabled();
+  expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+  expect(screen.queryByPlaceholderText("搜索股票名称 / 代码 / 拼音")).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "总览" }));
+  fireEvent.click(screen.getByRole("button", { name: /查看初始化日志/ }));
+  await waitFor(() => {
+    expect(calls).toContain("logs_open_directory");
+  });
 
   expect(window.location.hash).toBe("");
   await waitFor(() => {
-    expect(calls).toEqual(["app_boot_status"]);
+    expect(calls).toEqual(["app_boot_status", "logs_open_directory"]);
   });
 });
 
@@ -414,7 +424,7 @@ test("初始化等待完成后进入总览页面", async () => {
     await Promise.resolve();
   });
   await act(async () => {
-    vi.advanceTimersByTime(0);
+    vi.advanceTimersByTime(800);
     await Promise.resolve();
   });
   vi.useRealTimers();
@@ -458,7 +468,7 @@ test("初始化首次即 ready 时仍保留启动页最短展示时间", async (
     }
   });
 
-  render(<App initialBootState="initializing" bootStatusPollIntervalMs={20} minimumInitializationVisibleMs={1000} />);
+  render(<App initialBootState="initializing" bootStatusPollIntervalMs={20} />);
 
   expect(screen.getByRole("heading", { name: "正在初始化本地数据环境" })).toBeInTheDocument();
   await act(async () => {
@@ -468,7 +478,7 @@ test("初始化首次即 ready 时仍保留启动页最短展示时间", async (
   expect(screen.queryByText("自选股涨跌分布")).not.toBeInTheDocument();
 
   await act(async () => {
-    vi.advanceTimersByTime(999);
+    vi.advanceTimersByTime(2999);
     await Promise.resolve();
   });
   expect(screen.queryByText("自选股涨跌分布")).not.toBeInTheDocument();

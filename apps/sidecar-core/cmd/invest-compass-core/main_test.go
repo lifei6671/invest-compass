@@ -272,7 +272,11 @@ func TestBuildActionsConfigInjectsProductionAIConfigTester(t *testing.T) {
 		t.Fatalf("new scheduler service: %v", err)
 	}
 	taskLogService := tasklogservice.Service{Store: store}
-	config := buildActionsConfig("test-token", t.TempDir(), store, queue, schedulerService, taskLogService, nil, logSource, func() {})
+	searchTokenizer, err := requiredSearchTokenizer()
+	if err != nil {
+		t.Fatalf("required search tokenizer: %v", err)
+	}
+	config := buildActionsConfig("test-token", t.TempDir(), store, queue, schedulerService, taskLogService, nil, logSource, searchTokenizer, func() {})
 
 	if config.AIConfigTester == nil {
 		t.Fatal("production actions config must inject AI config tester")
@@ -292,7 +296,11 @@ func TestBuildActionsConfigInjectsRealProviders(t *testing.T) {
 		t.Fatalf("new scheduler service: %v", err)
 	}
 	taskLogService := tasklogservice.Service{Store: store}
-	config := buildActionsConfig("test-token", t.TempDir(), store, queue, schedulerService, taskLogService, nil, logSource, func() {})
+	searchTokenizer, err := requiredSearchTokenizer()
+	if err != nil {
+		t.Fatalf("required search tokenizer: %v", err)
+	}
+	config := buildActionsConfig("test-token", t.TempDir(), store, queue, schedulerService, taskLogService, nil, logSource, searchTokenizer, func() {})
 
 	if config.MarketProvider == nil || config.NewsProvider == nil {
 		t.Fatalf("production config must inject explicit provider implementations: %+v", config)

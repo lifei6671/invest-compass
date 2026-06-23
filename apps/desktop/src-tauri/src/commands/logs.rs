@@ -1,11 +1,12 @@
-use crate::sidecar::CoreState;
+use crate::{desktop_runtime, sidecar::CoreState};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use tauri::State;
+use std::process::Command;
+use tauri::{AppHandle, State};
 
 #[derive(Serialize)]
 struct EmptyRequest {}
@@ -25,6 +26,20 @@ struct LogExportBundle {
 pub struct ExportLogsResult {
     file_path: String,
     file_name: String,
+}
+
+#[derive(Serialize)]
+pub struct LogsOpenDirectoryResult {
+    opened: bool,
+}
+
+/// 打开默认工作区下的运行日志目录；初始化失败时不能依赖 Go core 读取工作区设置。
+#[tauri::command]
+pub fn logs_open_directory(app_handle: AppHandle) -> Result<LogsOpenDirectoryResult, String> {
+    let logs_dir = default_logs_directory(&app_handle)?;
+    std::fs::create_dir_all(&logs_dir).map_err(|error| format!("创建日志目录失败: {error}"))?;
+    open_path_in_file_manager(&logs_dir)?;
+    Ok(LogsOpenDirectoryResult { opened: true })
 }
 
 /// 生成已脱敏日志导出包，并写入调用方明确指定的本地目录。
@@ -62,6 +77,30 @@ fn write_log_export_bundle(target_dir: &Path, bundle: &LogExportBundle) -> Resul
         .write_all(bundle.content.as_bytes())
         .map_err(|error| format!("write log export failed: {error}"))?;
     Ok(output_path)
+}
+
+/// 计算默认运行日志目录；只基于平台推荐工作区目录派生，不接受 renderer 输入路径。
+fn default_logs_directory(app_handle: &AppHandle) -> Result<PathBuf, String> {
+    desktop_runtime::default_workspace_path(app_handle)
+        .map(|path| path.join("logs"))
+        .map_err(|error| error.to_string())
+}
+
+/// 使用平台文件管理器打开固定日志目录。
+fn open_path_in_file_manager(path: &Path) -> Result<(), String> {
+    let status = if cfg!(target_os = "macos") {
+        Command::new("open").arg(path).status()
+    } else if cfg!(target_os = "windows") {
+        Command::new("explorer").arg(path).status()
+    } else {
+        Command::new("xdg-open").arg(path).status()
+    }
+    .map_err(|error| format!("open logs directory failed: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("open logs directory command failed".to_string())
+    }
 }
 
 /// 校验日志导出目标必须是调用方明确授权的已存在目录。
