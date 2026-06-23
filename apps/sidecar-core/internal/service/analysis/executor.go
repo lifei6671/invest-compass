@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -44,12 +45,18 @@ type ChatClient interface {
 // ChatClientFactory 根据 AI 配置和运行期密钥创建 AI 客户端。
 type ChatClientFactory func(config aiservice.Config, resolvedAPIKey string) ChatClient
 
+// TaskNotifier 是分析任务终态通知边界，执行器只负责触发，不直接依赖通知持久化细节。
+type TaskNotifier interface {
+	NotifyTaskTerminal(ctx context.Context, task model.Task) (bool, error)
+}
+
 // Executor 负责执行单个分析任务，不处理 HTTP 路由和桌面 command。
 type Executor struct {
 	Store         ExecutionStore
 	NewChatClient ChatClientFactory
 	Now           func() time.Time
 	TaskLogWriter tasklogservice.StageWriter
+	TaskNotifier  TaskNotifier
 }
 
 // Execute 拉取已缓存上下文、调用 AI、保存报告并推进任务事件。
@@ -126,6 +133,7 @@ func (executor Executor) Execute(ctx context.Context, taskID string, request Val
 		_ = executor.markFailed(ctx, runningTask, err)
 		return err
 	}
+	executor.notifyTaskTerminal(ctx, successTaskModel)
 	return nil
 }
 
@@ -313,13 +321,32 @@ func (executor Executor) markFailed(ctx context.Context, runningTask taskservice
 	runningTask.Error = logger.RedactText(cause.Error())
 	runningTask.FinishedAt = now
 	runningTask.UpdatedAt = now
-	return executor.saveTaskAndEvent(ctx, runningTask, taskservice.Event{
+	if err := executor.saveTaskAndEvent(ctx, runningTask, taskservice.Event{
 		TaskID:    runningTask.ID,
 		Type:      taskservice.EventFailed,
 		Payload:   taskservice.SanitizeEventPayload(mustJSON(map[string]any{"error": cause.Error()})),
 		CreatedAt: now,
 		UpdatedAt: now,
-	})
+	}); err != nil {
+		return err
+	}
+	executor.notifyTaskTerminal(ctx, taskToModel(runningTask))
+	return nil
+}
+
+// notifyTaskTerminal 写入应用内通知；通知失败只影响提醒，不反向改变分析任务终态。
+func (executor Executor) notifyTaskTerminal(ctx context.Context, task model.Task) {
+	if executor.TaskNotifier == nil {
+		return
+	}
+	if _, err := executor.TaskNotifier.NotifyTaskTerminal(ctx, task); err != nil {
+		slog.Warn(
+			"分析任务通知写入失败",
+			"task_id", task.ID,
+			"status", task.Status,
+			"error", logger.RedactText(err.Error()),
+		)
+	}
 }
 
 // saveTaskAndEvent 按任务状态和事件成对持久化。

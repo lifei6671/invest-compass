@@ -152,6 +152,7 @@ func (store *Store) SaveNewsItems(ctx context.Context, items []model.NewsItem) e
 			Columns: []clause.Column{{Name: "content_hash"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"source",
+				"market",
 				"title",
 				"url",
 				"summary",
@@ -186,12 +187,15 @@ func (store *Store) ListNewsBySymbol(ctx context.Context, symbol string, limit i
 	return items, nil
 }
 
-// ListMarketNews 返回市场新闻缓存，首版不单独维护市场字段，按全量新闻倒序读取。
-func (store *Store) ListMarketNews(ctx context.Context, _ string, limit int, maxAge time.Duration) ([]model.NewsItem, error) {
+// ListMarketNews 返回市场新闻缓存；market 为空时用于首页摘要读取全量新闻。
+func (store *Store) ListMarketNews(ctx context.Context, market string, limit int, maxAge time.Duration) ([]model.NewsItem, error) {
 	query := store.db.WithContext(ctx).
 		Where("deleted_at IS NULL").
 		Order("published_at DESC").
 		Order("id DESC")
+	if market != "" {
+		query = query.Where("market = ?", market)
+	}
 	if maxAge > 0 {
 		query = query.Where("updated_at >= ?", time.Now().UTC().Add(-maxAge))
 	}
@@ -267,6 +271,67 @@ func (store *Store) GetAIConfig(ctx context.Context, id int64) (model.AIConfig, 
 // SoftDeleteAIConfig 对 AI 配置执行软删除。
 func (store *Store) SoftDeleteAIConfig(ctx context.Context, id int64) error {
 	return store.db.WithContext(ctx).Delete(&model.AIConfig{}, id).Error
+}
+
+// SaveDataSourceCredential 按 provider_id 创建或更新数据源凭据元数据和加密密文。
+func (store *Store) SaveDataSourceCredential(ctx context.Context, credential *model.DataSourceCredential) error {
+	if credential == nil {
+		return fmt.Errorf("dao data source credential is required")
+	}
+	var existing model.DataSourceCredential
+	err := store.db.WithContext(ctx).
+		Where("provider_id = ? AND deleted_at IS NULL", credential.ProviderID).
+		First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return store.db.WithContext(ctx).Create(credential).Error
+	}
+	if err != nil {
+		return err
+	}
+	credential.ID = existing.ID
+	credential.CreatedAt = existing.CreatedAt
+	return store.db.WithContext(ctx).Save(credential).Error
+}
+
+// ListDataSourceCredentials 返回未软删除的数据源凭据配置。
+func (store *Store) ListDataSourceCredentials(ctx context.Context) ([]model.DataSourceCredential, error) {
+	var credentials []model.DataSourceCredential
+	err := store.db.WithContext(ctx).
+		Where("deleted_at IS NULL").
+		Order("provider_id ASC").
+		Find(&credentials).Error
+	return credentials, err
+}
+
+// GetDataSourceCredential 按 provider_id 返回未软删除的数据源凭据配置。
+func (store *Store) GetDataSourceCredential(ctx context.Context, providerID string) (model.DataSourceCredential, bool, error) {
+	var credential model.DataSourceCredential
+	err := store.db.WithContext(ctx).
+		Where("provider_id = ? AND deleted_at IS NULL", providerID).
+		First(&credential).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.DataSourceCredential{}, false, nil
+	}
+	if err != nil {
+		return model.DataSourceCredential{}, false, err
+	}
+	return credential, true, nil
+}
+
+// ClearDataSourceCredential 清除指定 provider 的敏感密文并标记为未配置。
+func (store *Store) ClearDataSourceCredential(ctx context.Context, providerID string) error {
+	updates := map[string]any{
+		"credential_status":    "not_configured",
+		"encrypted_credential": "",
+		"credential_nonce":     "",
+		"masked_credential":    "",
+		"last_test_status":     "untested",
+		"last_test_messages":   "",
+	}
+	return store.db.WithContext(ctx).
+		Model(&model.DataSourceCredential{}).
+		Where("provider_id = ? AND deleted_at IS NULL", providerID).
+		Updates(updates).Error
 }
 
 // SavePromptTemplate 创建或更新 Prompt 模板。
@@ -463,6 +528,89 @@ func (store *Store) GetSettings(ctx context.Context, keys []string) ([]model.Set
 		Order("key ASC").
 		Find(&settings).Error
 	return settings, err
+}
+
+// CreateNotification 写入一条应用内通知，通知只引用源对象，不复制源业务数据。
+func (store *Store) CreateNotification(ctx context.Context, notification *model.Notification) error {
+	if notification == nil {
+		return fmt.Errorf("dao notification is required")
+	}
+	notification.Title = logger.RedactText(notification.Title)
+	notification.Content = logger.RedactText(notification.Content)
+	return store.db.WithContext(ctx).Create(notification).Error
+}
+
+// FindNotificationBySource 按来源对象和通知类型查找未删除通知，用于任务终态通知去重。
+func (store *Store) FindNotificationBySource(ctx context.Context, sourceType string, sourceID string, notificationType string) (model.Notification, bool, error) {
+	var notification model.Notification
+	err := store.db.WithContext(ctx).
+		Where("source_type = ? AND source_id = ? AND type = ?", sourceType, sourceID, notificationType).
+		First(&notification).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Notification{}, false, nil
+	}
+	if err != nil {
+		return model.Notification{}, false, err
+	}
+	return notification, true, nil
+}
+
+// ListNotifications 按分页读取应用内通知，并返回同一过滤条件下的总数。
+func (store *Store) ListNotifications(ctx context.Context, unreadOnly bool, limit int, offset int) ([]model.Notification, int64, error) {
+	query := store.db.WithContext(ctx).Model(&model.Notification{})
+	if unreadOnly {
+		query = query.Where("is_read = ?", false)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var notifications []model.Notification
+	err := query.
+		Order("created_at DESC").
+		Order("id DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&notifications).Error
+	return notifications, total, err
+}
+
+// CountUnreadNotifications 返回未读应用内通知数量，用于全局通知角标。
+func (store *Store) CountUnreadNotifications(ctx context.Context) (int64, error) {
+	var count int64
+	err := store.db.WithContext(ctx).
+		Model(&model.Notification{}).
+		Where("is_read = ?", false).
+		Count(&count).Error
+	return count, err
+}
+
+// MarkNotificationsRead 将指定通知标记为已读，重复调用保持幂等。
+func (store *Store) MarkNotificationsRead(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	return store.db.WithContext(ctx).
+		Model(&model.Notification{}).
+		Where("id IN ?", ids).
+		Updates(map[string]any{"is_read": true, "read_at": &now}).Error
+}
+
+// MarkAllNotificationsRead 将所有未读通知标记为已读，用于通知浮层批量操作。
+func (store *Store) MarkAllNotificationsRead(ctx context.Context) error {
+	now := time.Now().UTC()
+	return store.db.WithContext(ctx).
+		Model(&model.Notification{}).
+		Where("is_read = ?", false).
+		Updates(map[string]any{"is_read": true, "read_at": &now}).Error
+}
+
+// ClearReadNotifications 清理已读通知记录，不删除任务、报告或其他来源数据。
+func (store *Store) ClearReadNotifications(ctx context.Context) error {
+	return store.db.WithContext(ctx).
+		Where("is_read = ?", true).
+		Delete(&model.Notification{}).Error
 }
 
 // SaveSchedulerJob 创建或更新桌面可管理的调度任务配置。

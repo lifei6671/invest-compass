@@ -30,8 +30,11 @@ export type WorkspaceSettingsState = {
 };
 
 export type NotificationSettingsState = {
+  inAppEnabled: boolean;
+  systemEnabled: boolean;
   taskSuccessNotification: boolean;
   taskFailedNotification: boolean;
+  providerErrorNotification: boolean;
 };
 
 export type DesktopSettingsState = {
@@ -85,8 +88,11 @@ export const initialWorkspace: WorkspaceSettingsState = {
 };
 
 export const initialNotificationSettings: NotificationSettingsState = {
+  inAppEnabled: defaultSettingsValues.notificationsInAppEnabled,
+  systemEnabled: defaultSettingsValues.notificationsSystemEnabled,
   taskSuccessNotification: defaultSettingsValues.taskSuccessNotification,
   taskFailedNotification: defaultSettingsValues.taskFailedNotification,
+  providerErrorNotification: defaultSettingsValues.providerErrorNotification,
 };
 
 export const initialDesktopSettings: DesktopSettingsState = {

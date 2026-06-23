@@ -15,19 +15,24 @@ import {
   fieldDescriptions,
   freshnessItems,
   sourceItems,
-} from "./mock";
+} from "./staticData";
 
-export function DataSourceDescriptionPage() {
+type DataSourceDescriptionPageProps = {
+  onViewOverview: () => void;
+  onViewCredentials: () => void;
+};
+
+export function DataSourceDescriptionPage({ onViewOverview, onViewCredentials }: DataSourceDescriptionPageProps) {
   const { message } = AntApp.useApp();
 
   return (
     <>
       <div className="data-description-workspace">
-        <DataUsageOverviewCard value={dataUsageOverview} onViewOverview={() => message.info("数据源概览待接入")} />
+        <DataUsageOverviewCard value={dataUsageOverview} onViewOverview={onViewOverview} />
         <div className="data-description-card-grid">
-          <DataSourceExplanationCard items={sourceItems} onViewProvider={() => message.info("Provider 配置待接入")} />
+          <DataSourceExplanationCard items={sourceItems} onViewDataSource={onViewOverview} />
           <DataFreshnessCard items={freshnessItems} />
-          <AIContextExplanationCard dataTypes={aiContextDataTypes} outputNatures={aiOutputNatures} onViewCredentials={() => message.info("凭据管理待接入")} />
+          <AIContextExplanationCard dataTypes={aiContextDataTypes} outputNatures={aiOutputNatures} onViewCredentials={onViewCredentials} />
           <DataComplianceBoundaryCard />
           <FieldDescriptionCard items={fieldDescriptions} onViewMore={() => message.info("字段说明待接入")} />
           <DataFAQCard items={faqItems} onOpenFAQ={() => message.info("FAQ 详情待接入")} onViewMore={() => message.info("更多 FAQ 待接入")} />

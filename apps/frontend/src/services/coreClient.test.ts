@@ -17,6 +17,11 @@ import {
   marketQuote,
   newsList,
   newsMarket,
+  notificationsClearRead,
+  notificationsList,
+  notificationsMarkAllRead,
+  notificationsMarkRead,
+  notificationsUnreadCount,
   openExternalURL,
   promptTemplatesCreate,
   promptTemplatesDelete,
@@ -747,6 +752,48 @@ describe("coreClient", () => {
       { command: "providers_status", payload: {} },
       { command: "check_update", payload: {} },
       { command: "export_logs", payload: { targetDir: "/tmp" } },
+    ]);
+  });
+
+  test("应用内通知方法通过固定 Tauri command 调用后端 API", async () => {
+    const calls: Array<{ command: string; payload?: unknown }> = [];
+    mockIPC((command, payload) => {
+      calls.push({ command, payload });
+      switch (command) {
+        case "notifications_list":
+          return {
+            code: 0,
+            message: "ok",
+            data: {
+              items: [{ id: 1, type: "task", level: "success", title: "任务完成", content: "", is_read: false, created_at: "2026-06-23T09:00:00Z" }],
+              total: 1,
+              limit: 20,
+              offset: 0,
+            },
+          };
+        case "notifications_unread_count":
+          return { code: 0, message: "ok", data: { count: 1 } };
+        case "notifications_mark_read":
+        case "notifications_mark_all_read":
+        case "notifications_clear_read":
+          return { code: 0, message: "ok", data: { ok: true } };
+        default:
+          throw new Error(`unexpected command ${command}`);
+      }
+    });
+
+    await expect(notificationsList({ unread_only: false, limit: 20, offset: 0 })).resolves.toMatchObject({ total: 1 });
+    await expect(notificationsUnreadCount()).resolves.toEqual({ count: 1 });
+    await expect(notificationsMarkRead({ ids: [1] })).resolves.toEqual({ ok: true });
+    await expect(notificationsMarkAllRead()).resolves.toEqual({ ok: true });
+    await expect(notificationsClearRead()).resolves.toEqual({ ok: true });
+
+    expect(calls).toEqual([
+      { command: "notifications_list", payload: { payload: { unread_only: false, limit: 20, offset: 0 } } },
+      { command: "notifications_unread_count", payload: {} },
+      { command: "notifications_mark_read", payload: { payload: { ids: [1] } } },
+      { command: "notifications_mark_all_read", payload: {} },
+      { command: "notifications_clear_read", payload: {} },
     ]);
   });
 

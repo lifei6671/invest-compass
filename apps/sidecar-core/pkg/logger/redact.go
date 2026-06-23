@@ -10,13 +10,13 @@ const RedactedValue = "[REDACTED]"
 
 var sensitivePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(^|[{\s,])("?(authorization|proxy-authorization)"?\s*:\s*)"([^"\\]|\\.)*"`),
-	regexp.MustCompile(`(?i)(^|[{\s,])("?(api[_-]?key|apikey|license[_-]?key|licensekey|proxy[_-]?password|proxypassword)"?\s*:\s*)"([^"\\]|\\.)*"`),
+	regexp.MustCompile(`(?i)(^|[{\s,])("?(api[_-]?key|apikey|license[_-]?key|licensekey|proxy[_-]?password|proxypassword|cookie|token|access[_-]?token|refresh[_-]?token)"?\s*:\s*)"([^"\\]|\\.)*"`),
 	regexp.MustCompile(`(?i)(^|[{\s,])("?(position[_-]?snapshot|position[_-]?input|holding[_-]?input|user[_-]?position|userposition|portfolio)"?\s*:\s*)"([^"\\]|\\.)*"`),
 	regexp.MustCompile(`(?i)(^|[{\s,])("?(authorization|proxy-authorization)"?\s*:\s*)"?[^"\r\n,}]+\"?`),
-	regexp.MustCompile(`(?i)(^|[{\s,])("?(api[_-]?key|apikey|license[_-]?key|licensekey|proxy[_-]?password|proxypassword)"?\s*:\s*)"?[^"\r\n,}]+\"?`),
+	regexp.MustCompile(`(?i)(^|[{\s,])("?(api[_-]?key|apikey|license[_-]?key|licensekey|proxy[_-]?password|proxypassword|cookie|token|access[_-]?token|refresh[_-]?token)"?\s*:\s*)"?[^"\r\n,}]+\"?`),
 	regexp.MustCompile(`(?i)(^|[{\s,])("?(position[_-]?snapshot|position[_-]?input|holding[_-]?input|user[_-]?position|userposition|portfolio)"?\s*:\s*)"?[^"\r\n,}]+\"?`),
 	regexp.MustCompile(`(?i)(authorization|proxy-authorization)\s*:\s*[^\r\n]+`),
-	regexp.MustCompile(`(?i)(api[_-]?key|apikey|license[_-]?key|licensekey|proxy[_-]?password|proxypassword)\s*[:=]\s*[^\r\n,;]+`),
+	regexp.MustCompile(`(?i)(api[_-]?key|apikey|license[_-]?key|licensekey|proxy[_-]?password|proxypassword|cookie|token|access[_-]?token|refresh[_-]?token)\s*[:=]\s*[^\r\n,;]+`),
 	regexp.MustCompile(`(?i)(position[_-]?snapshot|position[_-]?input|holding[_-]?input|user[_-]?position|userposition|portfolio)\s*[:=]\s*[^\r\n]+`),
 }
 

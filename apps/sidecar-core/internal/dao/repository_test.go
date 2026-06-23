@@ -337,6 +337,47 @@ func TestNewsRepositoryMatchesSymbolExactly(t *testing.T) {
 	}
 }
 
+// TestNewsRepositoryFiltersMarketNewsByMarket 验证市场新闻缓存会保存 market 字段并支持按市场过滤。
+func TestNewsRepositoryFiltersMarketNewsByMarket(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)
+
+	if err := store.SaveNewsItems(ctx, []model.NewsItem{
+		{Title: "A股新闻", Market: "CN", URL: "https://example.com/cn", ContentHash: "hash-cn", PublishedAt: now, Source: "provider-a"},
+		{Title: "美股新闻", Market: "US", URL: "https://example.com/us", ContentHash: "hash-us", PublishedAt: now.Add(-time.Hour), Source: "provider-a"},
+	}); err != nil {
+		t.Fatalf("save market news items: %v", err)
+	}
+	if err := store.SaveNewsItems(ctx, []model.NewsItem{
+		{Title: "A股新闻更新", Market: "HK", URL: "https://example.com/hk", ContentHash: "hash-cn", PublishedAt: now, Source: "provider-b"},
+	}); err != nil {
+		t.Fatalf("update market news item: %v", err)
+	}
+
+	cnItems, err := store.ListMarketNews(ctx, "CN", 10, time.Hour)
+	if err != nil {
+		t.Fatalf("list CN market news: %v", err)
+	}
+	if len(cnItems) != 0 {
+		t.Fatalf("expected updated item to leave CN market, got %+v", cnItems)
+	}
+	hkItems, err := store.ListMarketNews(ctx, "HK", 10, time.Hour)
+	if err != nil {
+		t.Fatalf("list HK market news: %v", err)
+	}
+	if len(hkItems) != 1 || hkItems[0].ContentHash != "hash-cn" || hkItems[0].Market != "HK" {
+		t.Fatalf("unexpected HK market news: %+v", hkItems)
+	}
+	allItems, err := store.ListMarketNews(ctx, "", 10, time.Hour)
+	if err != nil {
+		t.Fatalf("list all market news: %v", err)
+	}
+	if len(allItems) != 2 {
+		t.Fatalf("expected unscoped market news to include all markets, got %+v", allItems)
+	}
+}
+
 // TestAIConfigRepositoryHidesSoftDeletedRows 验证 AI 配置 repository 只返回未删除配置。
 func TestAIConfigRepositoryHidesSoftDeletedRows(t *testing.T) {
 	store := newTestStore(t)

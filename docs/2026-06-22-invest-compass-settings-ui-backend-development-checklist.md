@@ -109,7 +109,7 @@ go test ./...
 
 ## 2. RG-S0：契约与数据基线
 
-### [ ] S0-01 建立 UI 到后端对接矩阵的执行基线
+### [x] S0-01 建立 UI 到后端对接矩阵的执行基线
 
 依赖：两份盘点文档。
 
@@ -123,6 +123,7 @@ go test ./...
 
 - 本清单保持为唯一推进入口。
 - 两份盘点文档只保留方案明细和上下文，不直接当迭代板。
+- 主对接清单第 16 节作为页面、按钮、typed service、Rust command、Go API、SQLite / Provider / vault 数据来源的契约矩阵。
 
 验收标准：
 
@@ -132,6 +133,11 @@ go test ./...
 验证方式：
 
 - 人工 review 本文档和两份盘点文档链接是否一致。
+
+执行记录：
+
+- 已在 `docs/2026-06-22-invest-compass-frontend-backend-integration-checklist.md` 第 16 节补齐 FE02 页面契约矩阵。
+- 设置中心相关缺口继续使用本清单的 S2-S6 任务编号推进。
 
 ### [ ] S0-02 清理或冻结隐藏旧页面入口
 
@@ -228,13 +234,13 @@ go test ./...
 - K 线：`/api/market/kline` 缓存不足时调用 Provider，并通过 `SaveKlines` 写入 `klines`。
 - 指标：`/api/market/indicators` 基于 K 线缓存或 Provider 结果计算，指标结果不单独落库。
 - 新闻：`/api/news/list` 和 `/api/news/market` 缓存不足时调用 Provider，标准化、去重后通过 `SaveNewsItems` 写入 `news_items`。
-- 调度：`QuoteRefreshRunner`、`KlineRefreshRunner`、`NewsRefreshRunner` 均包含写库和 `IngestionWatermark` 更新逻辑。
+- 调度：`StockProfileRefreshRunner`、`QuoteRefreshRunner`、`KlineRefreshRunner`、`NewsRefreshRunner` 均包含写库和 `IngestionWatermark` 更新逻辑。
 
 仍需补齐：
 
-- 股票基础资料的主动刷新或全量种子入库流程。
+- 股票基础资料已补 active watchlist 主动刷新；全量种子入库流程暂不扩展。
 - 行情快照只保留每个 symbol 最新一条，不满足历史行情统计。
-- 市场新闻缓存当前不单独维护 market 字段，`ListMarketNews` 读取的是全量新闻倒序。
+- 市场新闻缓存已补 `market` 字段和 `ListMarketNews` 市场过滤；历史数据迁移和前端多市场筛选仍需按需求推进。
 - UI 对接前缺少统一的“入库闭环验收任务”，需要在 S5-00 系列执行。
 
 交付物：
@@ -701,32 +707,39 @@ go test ./...
 - `pnpm --dir apps build`。
 - Provider service 测试。
 
-### [!] S3-02 数据源凭据加密 SQLite schema 确认
+### [x] S3-02 数据源凭据加密 SQLite schema 确认
 
 依赖：S0-01。
 
-阻塞原因：
+执行结果：
 
-- 需要新增数据库表和加密密钥管理，属于数据库和安全边界变更。
+- 2026-06-23 已新增 `DataSourceCredential` 模型并纳入 GORM migration。
+- SQLite 表保存 Provider 配置、脱敏值、AES-GCM 密文、nonce 和最近本地预检状态。
+- 加密密钥保存在工作区 `credentials/data-source.key`，不写入 SQLite。
 
-推荐 schema：
+已实现 schema：
 
 ```text
-provider_credentials
+data_source_credentials
   id
   provider_id
+  provider_name
+  capability
   auth_type
+  base_url
+  credential_status
   encrypted_credential
-  nonce
-  key_version
-  encryption_alg
+  credential_nonce
   masked_credential
-  status
+  note
   expires_at
   last_tested_at
   last_test_status
+  last_test_response_time
+  last_test_messages
   created_at
   updated_at
+  deleted_at
 ```
 
 推荐边界：
@@ -742,7 +755,12 @@ provider_credentials
 - 加密密钥和密文不在同一存储层。
 - 导出日志会二次脱敏。
 
-### [ ] S3-03 数据源凭据 API 和 Rust command 白名单
+验证结果：
+
+- `go test ./internal/service/datasourcecredential ./internal/actions/datasourcecredential`
+- `pnpm --dir apps check`
+
+### [x] S3-03 数据源凭据 API 和 Rust command 白名单
 
 依赖：S3-02 确认。
 
@@ -755,9 +773,11 @@ provider_credentials
 
 交付物：
 
-- `dataSourceCredentialsList/GetMasked/Save/Clear/Test` 或等价命名能力。
-- Go service/dao/model。
-- Rust command。
+- `dataSourceCredentialsList/Save/Clear/Test`。
+- `data_source_credentials_list/save/clear/test`。
+- `POST /api/data-source/credentials/list/save/clear/test`。
+- Go service/dao/model/action。
+- Rust command 固定 path 安全护栏。
 
 验收标准：
 
@@ -771,7 +791,13 @@ provider_credentials
 - Rust command 测试。
 - secret 搜索检查。
 
-### [ ] S3-04 凭据管理页接入真实脱敏状态
+验证结果：
+
+- `node --test apps/desktop/test/security-config.test.mjs`
+- `pnpm --dir apps --filter @invest-compass/desktop test`
+- `pnpm --dir apps check`
+
+### [~] S3-04 凭据管理页接入真实脱敏状态
 
 依赖：S3-03。
 
@@ -786,6 +812,8 @@ provider_credentials
 交付物：
 
 - 凭据管理页真实数据接入。
+- 已删除 `credentials/mock.ts`。
+- `DataSourceCredentialPage` 改为调用 typed service。
 
 验收标准：
 
@@ -798,7 +826,17 @@ provider_credentials
 - 页面手工验收。
 - `pnpm --dir apps build`。
 
-### [ ] S3-05 Provider 使用凭据的运行时注入
+阻塞记录：
+
+- 2026-06-23 执行 FE03 桌面安全护栏时，`DataSourceCredentialPage` 仍命中 mock 数据扫描。
+- 当前页面只能在 S3-02 和 S3-03 确认后接入真实脱敏状态；确认前不能继续保留假 Provider 凭据状态作为真实能力。
+
+推进记录：
+
+- 2026-06-23 已接入真实脱敏状态、保存、清除、本地预检。
+- 仍需在运行中页面手工验收 1440x900 布局、保存后刷新回显、清除后状态和错误提示。
+
+### [~] S3-05 Provider 使用凭据的运行时注入
 
 依赖：S3-03。
 
@@ -824,7 +862,13 @@ provider_credentials
 - Provider 单元测试。
 - 日志脱敏测试。
 
-### [ ] S3-06 数据说明页保留静态说明并校准链接
+进展记录：
+
+- 2026-06-23 已新增 `datasourcecredential.Service.Resolve`，可按 `provider_id` 解密并生成仅供 Go core 内部短暂使用的运行时凭据结构。
+- 2026-06-23 已覆盖无需凭据 Provider、雪球 Cookie 解密、缺失凭据失败路径；雪球热点 Provider 已有缺 Cookie 不抓取、注入 Cookie 后请求携带 Cookie 的离线单测。
+- 生产请求是否切换到雪球热点、财联社、Alpha Vantage 或其他真实 Provider，需要结合页面入口和数据授权边界确认；确认前不把 `UnconfiguredProvider` 静默替换为真实外部访问。
+
+### [~] S3-06 数据说明页保留静态说明并校准链接
 
 依赖：S0-04。
 
@@ -847,11 +891,17 @@ provider_credentials
 
 - 页面手工验收。
 
+进展记录：
+
+- 2026-06-23 已将顶部“查看数据源概览”和 A 卡片“查看数据源”接入到已存在的“数据源概览”子 Tab。
+- 2026-06-23 已将“查看凭据管理”接入到已存在的“凭据管理”子 Tab。
+- 字段说明、FAQ 详情和更多 FAQ 仍为待接入提示，不打开不存在页面或外链。
+
 ---
 
 ## 6. RG-S4：通知与工作区迁移
 
-### [ ] S4-01 通知设置项接入 settings
+### [~] S4-01 通知设置项接入 settings
 
 依赖：S0-03。
 
@@ -877,15 +927,27 @@ provider_credentials
 - settings 测试。
 - 前端手工验收。
 
-### [!] S4-02 应用内通知表和 API 确认
+进展记录：
+
+- 2026-06-23 已在基础设置页接入 `notifications.in_app_enabled`、`notifications.system_enabled`、`notifications.task_success`、`notifications.task_failed`、`notifications.provider_error` 的真实 `settings_get/settings_set` 读写。
+- 2026-06-23 已补充前端测试覆盖通知设置读取、逐项保存和 App 级基础设置展示。
+- 应用内通知表/API、TopBar 未读角标/列表浮层、系统级通知实际触发仍属于 S4-02 至 S4-04，未在本任务中实现。
+
+### [~] S4-02 应用内通知表和 API
 
 依赖：S4-01。
 
-阻塞原因：
+执行动作：
 
-- 需要新增 SQLite 表和 API。
+- [x] 新增 SQLite `notifications` 表，保存通知摘要、源对象引用、路由、已读状态和时间戳。
+- [x] 新增 Go service/dao/action：分页列表、未读数量、标记已读、全部已读、清理已读。
+- [x] 新增 Rust 白名单命令：`notifications_list`、`notifications_unread_count`、`notifications_mark_read`、`notifications_mark_all_read`、`notifications_clear_read`。
+- [x] 新增前端 typed invoke service 封装，后续 TopBar 只允许从 `coreClient.ts` 取数。
+- [x] 通知标题和正文在写入和响应边界做脱敏处理。
+- [ ] TopBar 角标和浮层接入，归属 S4-03。
+- [ ] 任务和 Provider 事件生产通知，归属 S4-05。
 
-推荐 schema：
+已落地 schema：
 
 ```text
 notifications
@@ -899,10 +961,12 @@ notifications
   route
   is_read
   created_at
+  updated_at
   read_at
+  deleted_at
 ```
 
-推荐 API：
+已落地 API：
 
 ```text
 notificationsList({ unread_only, limit, offset })
@@ -914,12 +978,19 @@ notificationsClearRead()
 
 验收标准：
 
-- 未读数量可查询。
-- 通知列表可分页。
-- 点击通知可按 route 跳转。
-- 清理已读不影响任务、报告等源数据。
+- [x] 未读数量可查询。
+- [x] 通知列表可分页。
+- [ ] 点击通知可按 route 跳转，需 S4-03 TopBar 浮层接入后验收。
+- [x] 清理已读不影响任务、报告等源数据，仅清理通知表已读记录。
+- [x] Rust command 安全扫描确认通知 command 固定映射，不存在通用代理。
 
-### [ ] S4-03 TopBar 通知角标和浮层
+验证方式：
+
+- [x] `go test ./internal/service/notification ./internal/actions/notification`
+- [x] `pnpm --dir apps --filter @invest-compass/frontend test -- src/services/coreClient.test.ts`
+- [x] `node apps/desktop/test/security-config.test.mjs`
+
+### [x] S4-03 TopBar 通知角标和浮层
 
 依赖：S4-02 确认并实现。
 
@@ -937,71 +1008,98 @@ notificationsClearRead()
 验收标准：
 
 - 未读数量实时更新。
-- 点击通知可跳到报告、任务或设置相关页面。
+- 点击通知可跳到报告、任务、设置等白名单页面；未知 route 只标记已读，不跳转。
 - 浮层关闭后状态不丢失。
 
 验证方式：
 
-- 前端手工验收。
-- `pnpm --dir apps build`。
+- [x] 前端自动化覆盖 TopBar Badge、Popover、单条已读和白名单 route 跳转。
+- [ ] 前端手工验收。
+- [x] `pnpm --dir apps --filter @invest-compass/frontend test -- src/app/App.test.tsx -t "TopBar"`
+- [x] `pnpm --dir apps --filter @invest-compass/frontend check`
+- [x] `pnpm --dir apps --filter @invest-compass/frontend build`
 
-### [ ] S4-04 系统级通知接入 Tauri 通知插件
+### [~] S4-04 系统级通知接入 Tauri 通知插件
 
 依赖：S4-01。
 
 执行动作：
 
-- 复用 `@tauri-apps/plugin-notification` 和 Rust `tauri-plugin-notification`。
-- 首次使用前检查并请求权限。
-- 任务成功、任务失败、Provider 异常按设置触发系统通知。
-- 权限被拒绝时只保留应用内通知。
+- [x] 复用 `@tauri-apps/plugin-notification` 和 Rust `tauri-plugin-notification`。
+- [x] 首次使用前检查并请求权限。
+- [x] 系统通知触发服务按任务成功、任务失败、Provider 异常开关决定是否触发。
+- [x] 权限被拒绝时只保留应用内通知链路，不抛错中断业务。
+- [x] 接入真实任务和 Provider 事件后触发系统通知，归属 S4-05。
 
 交付物：
 
-- 系统通知触发服务。
-- 权限降级逻辑。
+- [x] 系统通知触发服务。
+- [x] 权限降级逻辑。
+- [x] 敏感字段脱敏逻辑。
 
 验收标准：
 
-- macOS 能看到系统通知。
-- 权限拒绝不会报错中断任务。
-- 通知内容不包含敏感凭据。
+- [ ] macOS 能看到系统通知。
+- [x] 权限拒绝不会报错中断任务。
+- [x] 通知内容不包含敏感凭据。
 
 验证方式：
 
-- macOS 手工验收。
-- Tauri permission 检查。
+- [ ] macOS 手工验收。
+- [x] Tauri permission 检查。
+- [x] `pnpm --dir apps --filter @invest-compass/frontend test -- src/services/desktopNotification.test.ts`
+- [x] `pnpm --dir apps --filter @invest-compass/frontend check`
+- [x] `pnpm --dir apps --filter @invest-compass/frontend build`
+- [x] `node apps/desktop/test/security-config.test.mjs`
 
-### [ ] S4-05 任务和 Provider 事件生成通知
+### [~] S4-05 任务和 Provider 事件生成通知
 
 依赖：S4-02、S4-04。
 
 执行动作：
 
-- 监听任务事件 `TASK_SUCCESS`、`TASK_FAILED`。
-- Provider 状态从正常变异常时生成通知。
-- 通知写入应用内表，并按开关触发系统通知。
+- [x] 分析任务 `SUCCESS` / `FAILED` 终态写入应用内通知。
+- [x] Provider 状态接口发现已配置 Provider 不可用且有 `LastError` 时写入应用内通知。
+- [x] Provider 未配置空态不生成异常通知，避免启动后刷无效通知。
+- [x] 系统通知消费新增应用内通知，并按设置开关触发系统通知。
 
 交付物：
 
-- 通知事件生产链路。
+- 应用内通知事件生产链路。
+- 系统通知事件消费链路。
 
 验收标准：
 
-- 同一任务完成不会重复生成多条通知。
-- Provider 异常通知有去重或频率限制。
-- 通知 route 可跳转到源页面。
+- [x] 同一任务完成不会重复生成多条通知。
+- [x] Provider 异常通知按 `source_type + source_id + type` 去重。
+- [x] 任务成功优先跳转报告详情；无报告时跳转任务历史。
+- [x] 任务失败跳转任务历史。
+- [x] Provider 异常跳转基础设置页。
+- [x] 系统级通知自动触发逻辑。
+- [ ] macOS 系统通知手工验收。
 
 验证方式：
 
-- Go service 测试。
-- 前端手工验收。
+- [x] `GOCACHE=/private/tmp/invest-compass-go-cache go test ./internal/service/notification ./internal/service/analysis ./internal/actions/providers`
+- [x] `pnpm --dir apps --filter @invest-compass/frontend test -- src/app/App.test.tsx -t "TopBar"`
+- [x] `pnpm --dir apps --filter @invest-compass/frontend check`
+- [ ] 前端手工验收：生成任务成功/失败通知、点击通知跳转。
+- [ ] 前端手工验收：Provider 异常通知点击后跳转基础设置页。
+- [ ] macOS 手工验收：系统通知中心可见任务成功、任务失败和 Provider 异常通知。
+
+进展记录：
+
+- 2026-06-23 已接入 Go `notification.Service.NotifyTaskTerminal` / `NotifyProviderError`。
+- 2026-06-23 已在分析任务执行器成功/失败终态后生成应用内通知；通知失败不反向改变任务终态。
+- 2026-06-23 已在 Provider 状态接口对真实异常生成应用内通知，并跳过未配置 Provider 空态。
+- 2026-06-23 已在 TopBar 运行期未读数增加时消费新增应用内通知，并按系统通知设置触发 Tauri 系统通知；首次加载不弹历史未读通知。
+- 受限：完整 `internal/actions` / `cmd/invest-compass-core` 测试在当前环境受 SQLite FTS5 和监听权限限制，已通过受影响包窄范围测试。
 
 ---
 
 ## 7. RG-S5：全局 UI 页面真实数据对接
 
-### [ ] S5-00A 验收股票基础信息搜索入库闭环
+### [~] S5-00A 验收股票基础信息搜索入库闭环
 
 依赖：S0-05。
 
@@ -1033,10 +1131,18 @@ notificationsClearRead()
 
 验证方式：
 
-- `go test ./...`，重点覆盖 `TestStockSearchUpsertsStockCache` 和 `TestStockSearchServiceFallsBackToProviderAndEnqueuesIndexJobs`。
+- `go test -tags sqlite_fts5 ./internal/service/search ./internal/actions/stocks ./internal/dao`，重点覆盖 `TestStockSearchServiceFallsBackToProviderAndEnqueuesIndexJobs`。
 - 前端全局搜索手工验收。
 
-### [!] S5-00B 补齐股票基础资料主动刷新或种子入库流程
+进展记录：
+
+- 2026-06-23 已通过后端自动化验证：
+  - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/service/search ./internal/actions/stocks ./internal/dao -run 'TestStockSearch|TestSearchMigrationCreatesIndexSchema|TestProbeSQLiteFTS5ReportsAvailable'`
+  - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/service/search ./internal/actions/stocks ./internal/dao`
+- 2026-06-23 结论：Provider fallback 写入 `stocks`、搜索索引 outbox、FTS5 schema 探测和 Provider 未配置错误边界已有测试覆盖。
+- 待验收：前端全局搜索和自选股添加入口的手工链路复核。
+
+### [~] S5-00B 补齐股票基础资料主动刷新或种子入库流程
 
 依赖：S5-00A。
 
@@ -1045,11 +1151,11 @@ notificationsClearRead()
 - 当前股票基础信息主要在搜索 fallback 时被动写入；如果用户没有搜索过某只股票，`stocks` 可能没有完整基础资料。
 - 个股详情需要的公司资料、行业、概念、上市日期、状态等字段不能只依赖搜索触发。
 
-推荐方案：
+执行方案：
 
-- 新增 `StockProfileProvider` 或复用已有 fundamental provider，按 symbol 拉取基础资料。
-- 新增固定接口 `stockProfile({ symbol })`，缓存 miss 时抓取并 `UpsertStocks`。
+- 复用现有 `MarketProvider.Search` 能力，按 symbol code 拉取基础资料。
 - 新增调度任务 `stock_profile_refresh`，对 active watchlist 做增量刷新。
+- 刷新结果通过 `UpsertStocks` 写入 `stocks`，并写入搜索索引 outbox。
 - 搜索索引重建读取 `stocks`，不直接访问 Provider。
 
 验收标准：
@@ -1058,7 +1164,17 @@ notificationsClearRead()
 - 基础资料刷新后 `stocks` 字段更新，搜索索引任务入队。
 - 后端缺 Provider 时页面展示空态，不填假行业、假概念。
 
-### [ ] S5-00C 验收行情快照和 K 线入库闭环
+进展记录：
+
+- 2026-06-23 已落地后端主动刷新：
+  - `StockProfileRefreshRunner` 支持 `stock_profile_refresh`。
+  - `DefaultJobRegistry` 已注册“股票基础资料刷新”任务类型。
+  - 生产 scheduler 已挂载对应 runner。
+- 2026-06-23 已通过后端自动化验证：
+  - `go test -tags sqlite_fts5 ./internal/service/scheduler ./internal/dao -run 'TestStockProfileRefreshRunner|TestDefaultJobRegistryIncludesStockProfileRefresh|TestNewsRepositoryFiltersMarketNewsByMarket'`
+- 待验收：设置页刷新任务 UI 是否开放该任务类型，以及个股详情基础资料缓存 miss 时是否需要新增固定查询接口。
+
+### [~] S5-00C 验收行情快照和 K 线入库闭环
 
 依赖：S0-05。
 
@@ -1090,8 +1206,16 @@ notificationsClearRead()
 
 验证方式：
 
-- `go test ./...`，重点覆盖 market action、DAO repository、scheduler runner。
+- `go test -tags sqlite_fts5 ./internal/actions/market ./internal/service/scheduler ./internal/dao`，重点覆盖 market action、DAO repository、scheduler runner。
 - 个股详情和自选股手工验收。
+
+进展记录：
+
+- 2026-06-23 已通过后端自动化验证：
+  - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/actions/market ./internal/service/scheduler ./internal/dao`
+  - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/actions -run 'TestMarketQuote|TestMarketKline|TestMarketIndicators|TestRefreshSymbolAllCreatesQuoteKlineAndNewsRuns|Test.*QuoteRefresh|Test.*KlineRefresh'`
+- 2026-06-23 结论：quote 最新快照写入、K 线幂等缓存、指标按缓存计算、缓存不足回源写入、调度 quote/kline 写入和水位更新已有测试覆盖。
+- 待验收：个股详情、自选股页面触发行情和 K 线读取的前端手工链路复核。
 
 ### [!] S5-00D 明确行情历史统计是否需要新增表
 
@@ -1107,12 +1231,18 @@ notificationsClearRead()
 - 如需要历史行情快照，新增 `quote_snapshots` 或分时表，按 `symbol + quote_time` 幂等保存，并设置保留周期。
 - 不要把当前 `quotes` 改成无限追加表，避免破坏现有最新快照读取语义。
 
+概念说明：
+
+- “当前行情快照”指 `quotes` 表中每个 symbol 的最新一条行情，适合展示现价、涨跌幅、成交额等当前状态。
+- “历史行情快照”指把每次轮询或刷新得到的 quote 按时间追加保存，例如 `symbol + quote_time` 一条，用于盘中变化趋势、刷新历史、涨跌分布历史等统计。
+- 历史行情快照不同于 K 线：K 线是固定周期 OHLCV 聚合数据；历史 quote snapshot 是原始轮询点位。
+
 验收标准：
 
 - UI 统计口径明确：当前快照统计或历史快照统计。
 - 没有历史表前，不展示需要历史数据支撑的趋势结论。
 
-### [ ] S5-00E 验收新闻资讯入库闭环
+### [~] S5-00E 验收新闻资讯入库闭环
 
 依赖：S0-05。
 
@@ -1144,30 +1274,46 @@ notificationsClearRead()
 
 验证方式：
 
-- `go test ./...`，重点覆盖 news action、DAO repository、scheduler news runner。
+- `go test -tags sqlite_fts5 ./internal/actions/news ./internal/service/scheduler ./internal/dao`，重点覆盖 news action、DAO repository、scheduler news runner。
 - 资讯中心和 Dashboard 手工验收。
 
-### [!] S5-00F 补齐市场新闻 market 维度
+进展记录：
+
+- 2026-06-23 已通过后端自动化验证：
+  - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/actions/news ./internal/service/scheduler ./internal/dao`
+  - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/actions -run 'TestNews|Test.*News|TestMarketNews|TestSymbolNews|TestDashboardSummaryUsesRealStoreData'`
+- 2026-06-23 结论：新闻缓存读取、Provider 回源、标准化去重、`content_hash` 幂等写入、个股新闻 symbol 查询、市场新闻缓存读取、新闻调度写入和水位更新已有测试覆盖。
+- 待验收：资讯中心和 Dashboard 新闻模块的前端手工链路复核。
+
+### [~] S5-00F 补齐市场新闻 market 维度
 
 依赖：S5-00E。
 
-阻塞原因：
+原阻塞原因：
 
 - 当前 `NewsItem` 没有 market 字段；`ListMarketNews(ctx, market, ...)` 目前忽略 market 参数，按全量新闻倒序读取。
 
-推荐方案：
+执行方案：
 
-- 如果首版只支持 A 股市场新闻，可在 UI 和文档中明确 `market=CN`，暂不扩表。
-- 如果要支持多市场，给 `news_items` 增加 `market` 字段，Provider 写入时带市场，`ListMarketNews` 按 market 过滤。
-- 搜索索引重建和新闻统计同步使用 market 字段。
+- `news_items` 增加 `market` 字段。
+- `/api/news/market` 和市场新闻调度写入时保存请求 market。
+- `/api/news/list` 和个股新闻调度写入时保存 symbol 所属 market。
+- `ListMarketNews(ctx, market, ...)` 在 market 非空时按 market 过滤；market 为空时仍用于全量摘要读取。
 
 验收标准：
 
 - 市场新闻筛选口径明确。
 - 多市场切换时不会混入其他市场新闻。
-- 未扩表前不展示多市场新闻筛选。
+- 旧数据没有 market 时不会被误判为指定市场新闻。
 
-### [ ] S5-01 AppShell / TopBar 全局状态接入
+进展记录：
+
+- 2026-06-23 已落地后端字段、DAO 和写库链路。
+- 2026-06-23 已通过后端自动化验证：
+  - `go test -tags sqlite_fts5 ./internal/service/scheduler ./internal/dao -run 'TestStockProfileRefreshRunner|TestDefaultJobRegistryIncludesStockProfileRefresh|TestNewsRepositoryFiltersMarketNewsByMarket'`
+- 待验收：前端是否需要开放多市场新闻筛选；若开放，需要明确旧数据 market 为空时的展示策略。
+
+### [~] S5-01 AppShell / TopBar 全局状态接入
 
 依赖：S4-03、S5-00A、S5-00C、S5-00E。
 
@@ -1192,6 +1338,22 @@ notificationsClearRead()
 
 - 前端手工验收。
 - `pnpm --dir apps build`。
+
+进展记录：
+
+- 2026-06-23 已确认 TopBar 使用真实 `dashboardStore` / `stockSearch` / `notifications_*` command：
+  - 市场状态和数据更新时间从 dashboard quote 状态推导。
+  - 搜索通过 `stockSearch` 跳转到个股详情。
+  - 刷新按钮调用 `dashboardStore.load()`。
+  - 通知角标、通知浮层、标记已读和清理已读接入应用内通知接口。
+- 2026-06-23 修复 Dashboard / TopBar 数字边界：
+  - 自选股涨跌分布缺失计数字段时不再渲染 `NaN`。
+  - 通知未读数异常响应时角标按 0 处理，不渲染 `NaN`。
+- 2026-06-23 已通过自动化验证：
+  - `pnpm --dir apps --filter @invest-compass/frontend test -- src/components/dashboard/DashboardOverview.test.tsx src/app/App.test.tsx -t 'Dashboard|TopBar|通知|搜索|刷新'`
+  - `pnpm --dir apps --filter @invest-compass/frontend check`
+  - `pnpm --dir apps --filter @invest-compass/frontend build`
+- 待验收：真实桌面环境中 TopBar 搜索跳转、刷新行为和通知浮层手工复核。
 
 ### [ ] S5-02 总览页恢复真实 dashboard 数据流
 

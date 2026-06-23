@@ -3,10 +3,10 @@ import type { DataSourceExplanationItem } from "../types";
 
 type DataSourceExplanationCardProps = {
   items: DataSourceExplanationItem[];
-  onViewProvider: () => void;
+  onViewDataSource: () => void;
 };
 
-export function DataSourceExplanationCard({ items, onViewProvider }: DataSourceExplanationCardProps) {
+export function DataSourceExplanationCard({ items, onViewDataSource }: DataSourceExplanationCardProps) {
   return (
     <section className="data-description-card data-description-small-card">
       <h2>A. 数据来源说明</h2>
@@ -25,8 +25,8 @@ export function DataSourceExplanationCard({ items, onViewProvider }: DataSourceE
           </div>
         ))}
       </div>
-      <Button className="data-description-link-button data-description-bottom-button" onClick={onViewProvider}>
-        查看 Provider 配置
+      <Button className="data-description-link-button data-description-bottom-button" onClick={onViewDataSource}>
+        查看数据源
       </Button>
     </section>
   );

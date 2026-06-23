@@ -82,12 +82,15 @@ function IndexQuoteCard(props: { item: DashboardQuoteState; trend: MarketKlineIt
 }
 
 function WatchlistDistributionCard(props: { state: DashboardViewState }) {
+  const upCount = watchlistCount(props.state.summary.watchlist.up_count);
+  const downCount = watchlistCount(props.state.summary.watchlist.down_count);
+  const flatCount = watchlistCount(props.state.summary.watchlist.flat_count);
+  const total = upCount + downCount + flatCount;
   const rows = [
-    { label: "上涨", value: props.state.summary.watchlist.up_count, percent: watchlistPercent(props.state, props.state.summary.watchlist.up_count), tone: "up" },
-    { label: "下跌", value: props.state.summary.watchlist.down_count, percent: watchlistPercent(props.state, props.state.summary.watchlist.down_count), tone: "down" },
-    { label: "平盘", value: props.state.summary.watchlist.flat_count, percent: watchlistPercent(props.state, props.state.summary.watchlist.flat_count), tone: "flat" },
+    { label: "上涨", value: upCount, percent: watchlistPercent(total, upCount), tone: "up" },
+    { label: "下跌", value: downCount, percent: watchlistPercent(total, downCount), tone: "down" },
+    { label: "平盘", value: flatCount, percent: watchlistPercent(total, flatCount), tone: "flat" },
   ];
-  const total = watchlistTotal(props.state);
   return (
     <DashboardCard className="h-[270px] overflow-hidden" title="自选股涨跌分布" action={<InfoCircleTooltip title="基于自选股最新行情统计，未读取到行情的股票不计入涨跌分布。" />}>
       <div className="grid min-h-[190px] grid-cols-[minmax(148px,1fr)_128px_minmax(116px,0.8fr)] items-center gap-3">
@@ -110,7 +113,7 @@ function WatchlistDistributionCard(props: { state: DashboardViewState }) {
             <InfoCircleOutlined className="shrink-0 text-[14px] text-slate-400" />
           </div>
           <MetricLine label="平均涨跌幅" value={averageWatchlistChange(props.state.watchlistRows)} tone={percentTone(averageWatchlistChangeNumber(props.state.watchlistRows))} />
-          <MetricLine label="上涨概率" value={total > 0 ? `${((props.state.summary.watchlist.up_count / total) * 100).toFixed(2)}%` : "--"} tone="up" />
+          <MetricLine label="上涨概率" value={total > 0 ? `${((upCount / total) * 100).toFixed(2)}%` : "--"} tone="up" />
           <MetricLine label="较昨日变化" value="暂未接入" tone="flat" />
         </div>
       </div>
@@ -369,12 +372,11 @@ function TaskStatusTag(props: { status: string }) {
   return <Tag color={color}>{props.status}</Tag>;
 }
 
-function watchlistTotal(state: DashboardViewState) {
-  return state.summary.watchlist.up_count + state.summary.watchlist.down_count + state.summary.watchlist.flat_count;
+function watchlistCount(value: number) {
+  return Number.isFinite(value) ? value : 0;
 }
 
-function watchlistPercent(state: DashboardViewState, value: number) {
-  const total = watchlistTotal(state);
+function watchlistPercent(total: number, value: number) {
   if (total === 0) {
     return "--";
   }

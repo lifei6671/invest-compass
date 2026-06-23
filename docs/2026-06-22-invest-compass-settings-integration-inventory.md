@@ -335,14 +335,17 @@ Go task/provider/system event
 - 同一 `source_type + source_id + source_event_id` 只能生成一条通知。
 - 没有 `source_event_id` 的 Provider 状态类通知，按 `source_type + source_id + type + 日期小时` 做粗粒度去重。
 
-缺口：
+当前状态与缺口：
 
-- 没有通知列表表。
-- 没有通知 CRUD API。
-- TopBar 只有静态通知按钮，没有 Badge 和浮层。
-- `sendDesktopNotification` helper 未接全局事件。
-- 设置页通知开关还未接 `settingsGet/settingsSet`。
-- 系统通知权限拒绝后的 UI 降级提示未实现。
+- 已完成：`notifications` 表、应用内通知 CRUD API、Rust `notifications_*` command。
+- 已完成：TopBar Bell 未读 Badge、通知列表浮层、单条已读、全部已读、清理已读。
+- 已完成：点击通知只允许白名单应用内 route 跳转；未知 route 只标记已读，不跳转。
+- 已完成：系统通知触发服务支持设置开关、权限拒绝降级和敏感字段脱敏。
+- 已完成：分析任务成功/失败终态生成应用内通知；任务成功优先跳转报告详情，无报告时跳转任务历史，任务失败跳转任务历史。
+- 已完成：Provider 状态接口对真实异常生成应用内通知；未配置 Provider 空态不生成通知，Provider 异常通知跳转基础设置页。
+- 已完成：TopBar 运行期未读数增加时消费新增应用内通知，并按系统通知设置触发系统通知；首次加载不弹历史未读通知。
+- 待推进：系统通知权限拒绝后的 UI 降级提示未实现。
+- 待验收：macOS 系统通知中心手工验收。
 
 ---
 
@@ -761,19 +764,19 @@ proxy_credential_ref
 
 任务：
 
-- 新增 `notifications` 表和通知 CRUD API。
-- 新增 `notificationsUnreadCount` 读取未读数量。
-- TopBar Bell 增加 Badge 角标。
-- 点击 Bell 弹出通知列表浮层。
-- 任务终态事件和 Provider 异常生成应用内通知。
-- 系统级通知复用 Tauri notification 插件，并受设置项控制。
+- `[x]` 新增 `notifications` 表和通知 CRUD API。
+- `[x]` 新增 `notificationsUnreadCount` 读取未读数量。
+- `[x]` TopBar Bell 增加 Badge 角标。
+- `[x]` 点击 Bell 弹出通知列表浮层。
+- `[ ]` 任务终态事件和 Provider 异常生成应用内通知。
+- `[~]` 系统级通知复用 Tauri notification 插件，并受设置项控制；真实事件触发和 macOS 手工验收待 S4-05。
 
 验收标准：
 
 - `TASK_SUCCESS` / `TASK_FAILED` 只生成一条应用内通知。
 - TopBar 未读数刷新正确。
-- 点击通知后标记已读并跳转应用内 route。
-- 系统通知权限未授予时不崩溃，并在设置页提示。
+- 点击通知后标记已读；白名单 route 跳转到应用内页面，未知 route 不跳转。
+- 系统通知权限未授予时不崩溃；设置页权限提示待补。
 - 关闭系统级通知后不再调用 `sendDesktopNotification`。
 
 ### 步骤 3：缓存和索引保持现有真实接口

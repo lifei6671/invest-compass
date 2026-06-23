@@ -7,7 +7,9 @@ import { authTypeText, CredentialStatusTag } from "./CredentialStatusTag";
 
 type CredentialConfigCardProps = {
   value: CredentialConfig;
+  credentialInput: string;
   onChange: (value: CredentialConfig) => void;
+  onCredentialInputChange: (value: string) => void;
   onAuthTypeChange: (value: CredentialAuthType) => void;
   onSave: () => void;
   onTest: () => void;
@@ -75,7 +77,13 @@ export function CredentialConfigCard(props: CredentialConfigCardProps) {
         </Field>
         <Field label={`${authTypeText(props.value.authType)} / 凭据内容`} htmlFor="credential-masked-content" alignStart>
           <div className="credential-textarea-wrap">
-            <Input.TextArea id="credential-masked-content" className="credential-textarea credential-secret-textarea" value={props.value.maskedCredential} autoSize={false} onChange={(event) => update("maskedCredential", event.target.value)} />
+            <Input.TextArea
+              id="credential-masked-content"
+              className="credential-textarea credential-secret-textarea"
+              value={props.credentialInput || props.value.maskedCredential}
+              autoSize={false}
+              onChange={(event) => props.onCredentialInputChange(event.target.value)}
+            />
             <EyeInvisibleOutlined className="credential-eye-icon" />
           </div>
           <p className="credential-helper">保存后仅展示脱敏状态，明文不在前端回显。</p>

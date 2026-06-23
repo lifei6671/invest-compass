@@ -582,6 +582,7 @@ fn build_workspace_migration_plan(
     )
 }
 
+/// 构造工作区迁移预检结果，并用调用方传入的可用空间做容量判断。
 fn build_workspace_migration_plan_with_available_space(
     current_path: &Path,
     target_path: &Path,
@@ -736,6 +737,7 @@ fn workspace_selected_size(path: &Path, include_cache: bool) -> std::io::Result<
     Ok(size)
 }
 
+/// 递归统计路径大小，缺失的可选迁移目录按 0 字节处理。
 fn path_size(path: &Path) -> std::io::Result<u64> {
     if !path.exists() {
         return Ok(0);
@@ -751,6 +753,7 @@ fn path_size(path: &Path) -> std::io::Result<u64> {
     Ok(size)
 }
 
+/// 复制单个工作区条目，目录会递归复制，文件会先确保父目录存在。
 fn copy_workspace_entry(source: &Path, target: &Path) -> std::io::Result<()> {
     let metadata = source.metadata()?;
     if metadata.is_file() {
@@ -784,6 +787,7 @@ fn validate_workspace_target_writable(target_path: &Path) -> std::io::Result<()>
     Ok(())
 }
 
+/// 判断候选路径是否位于基准目录内部，用于阻止嵌套迁移目标。
 fn path_is_inside(candidate: &Path, base: &Path) -> bool {
     candidate.starts_with(base) && candidate != base
 }
@@ -815,6 +819,7 @@ fn read_available_space_bytes(path: &Path) -> Result<Option<u64>, String> {
     }
 }
 
+/// 从目标路径向上查找最近存在的目录，便于读取所在卷的可用空间。
 fn nearest_existing_path(path: &Path) -> PathBuf {
     let mut current = path;
     loop {
@@ -828,6 +833,7 @@ fn nearest_existing_path(path: &Path) -> PathBuf {
     }
 }
 
+/// 通过 POSIX `df -Pk` 读取 Unix/macOS 目标路径所在卷的可用空间。
 fn read_unix_available_space_bytes(path: &Path) -> Result<u64, String> {
     let output = Command::new("df")
         .args(["-Pk"])
@@ -843,6 +849,7 @@ fn read_unix_available_space_bytes(path: &Path) -> Result<u64, String> {
 }
 
 #[cfg(target_os = "windows")]
+/// 通过 PowerShell 读取 Windows 目标盘符的可用空间。
 fn read_windows_available_space_bytes(path: &Path) -> Result<u64, String> {
     let drive = path
         .components()
@@ -869,10 +876,12 @@ fn read_windows_available_space_bytes(path: &Path) -> Result<u64, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
+/// 非 Windows 平台不提供 Windows 可用空间读取实现。
 fn read_windows_available_space_bytes(_path: &Path) -> Result<u64, String> {
     Err("windows available space reader is unavailable on this platform".to_string())
 }
 
+/// 解析 `df -Pk` 输出中的 Available 列，并转换为字节数。
 fn parse_df_available_space_bytes(output: &str) -> Result<u64, String> {
     let line = output
         .lines()
@@ -1380,6 +1389,7 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    /// 为工作区命令测试生成唯一临时目录，避免并发测试互相污染。
     fn unique_test_dir(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "invest-compass-{name}-{}-{}",

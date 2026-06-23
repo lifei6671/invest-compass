@@ -11,11 +11,13 @@ import (
 	analysisaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/analysis"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/cache"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/dashboard"
+	datasourcecredentialaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/datasourcecredential"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/health"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/httpx"
 	logexportaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/logexport"
 	marketaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/market"
 	newsaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/news"
+	notificationaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/notification"
 	promptaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/prompt"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/providers"
 	reportaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/reports"
@@ -29,6 +31,7 @@ import (
 	watchlistaction "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/watchlist"
 	aiservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/ai"
 	dashboardservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/dashboard"
+	datasourcecredentialservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/datasourcecredential"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
 	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
@@ -54,6 +57,7 @@ type Config struct {
 	PromptTemplateStore   promptaction.Store
 	AIConfigStore         aiconfigaction.Store
 	AIConfigTester        aiservice.ConfigTester
+	ProviderNotifier      providers.Notifier
 	AnalysisStore         analysisaction.Store
 	AnalysisExecutor      analysisaction.Executor
 	AnalysisTransact      analysisaction.TransactFunc
@@ -65,6 +69,8 @@ type Config struct {
 	CacheStatsProvider    cache.StatsProvider
 	CacheCleaner          cache.Cleaner
 	SettingsStore         settingsaction.Store
+	NotificationStore     notificationaction.Store
+	DataSourceCredentials datasourcecredentialservice.Service
 	SchedulerStore        scheduleraction.Store
 	SchedulerQueue        schedulerservice.Queue
 	SchedulerService      scheduleraction.Service
@@ -153,6 +159,7 @@ func Routes(config Config) []httpx.Route {
 		Security:       security,
 		MarketProvider: config.MarketProvider,
 		NewsProvider:   config.NewsProvider,
+		Notifier:       config.ProviderNotifier,
 	})...)
 	routes = append(routes, dashboard.Routes(dashboard.Config{
 		Security:       security,
@@ -169,6 +176,14 @@ func Routes(config Config) []httpx.Route {
 	routes = append(routes, settingsaction.Routes(settingsaction.Config{
 		Security: security,
 		Store:    config.SettingsStore,
+	})...)
+	routes = append(routes, notificationaction.Routes(notificationaction.Config{
+		Security: security,
+		Store:    config.NotificationStore,
+	})...)
+	routes = append(routes, datasourcecredentialaction.Routes(datasourcecredentialaction.Config{
+		Security: security,
+		Service:  config.DataSourceCredentials,
 	})...)
 	routes = append(routes, scheduleraction.Routes(scheduleraction.Config{
 		Security: security,

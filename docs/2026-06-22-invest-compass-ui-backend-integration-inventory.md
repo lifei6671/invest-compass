@@ -83,7 +83,7 @@ UI 页面 / 组件
 
 | 页面 | 当前 UI 状态 | 当前真实接入 | 主要缺口 |
 | --- | --- | --- | --- |
-| AppShell / TopBar | 已有全局壳层 | 全局股票搜索接 `stockSearch`；刷新按钮调用 `dashboardStore.load()`；状态卡读取 dashboard store | 通知按钮未接应用内通知 Badge/浮层；系统通知 helper 未消费事件；窗口控制未接；Dashboard 页面会覆盖 store 为空状态 |
+| AppShell / TopBar | 已有全局壳层 | 全局股票搜索接 `stockSearch`；刷新按钮调用 `dashboardStore.load()`；状态卡读取 dashboard store；通知按钮接 `notificationsUnreadCount/notificationsList/notificationsMarkRead` 并展示 Badge/Popover | 系统通知 helper 未消费事件；窗口控制未接；Dashboard 页面会覆盖 store 为空状态 |
 | 总览 | 静态金融工作台卡片 | 代码中存在 `dashboardStore` 真实编排，但当前页面 mount 时写入空态 | 需要恢复真实 `dashboardSummary/coreHealth/watchlistList/marketQuote/marketKline` 数据流 |
 | 自选股 | 表格/卡片和添加弹窗完成 | 添加弹窗搜索接 `stockSearch`；备注搜索接 `searchWatchlistNotes` | 列表、新增、删除、编辑未接 `watchlist*`；行情字段未接 `marketQuote`；刷新未接 |
 | 个股详情 | 空态页面完成 | 无 | 应接 `marketQuote/marketKline/marketIndicators/newsList`；缺公司资料、行业、概念、标签备注持久化接口 |
@@ -149,8 +149,8 @@ UI 页面 / 组件
 
 缺口：
 
-- 通知按钮只展示，不读取应用内通知列表，也没有未读数量角标。
-- 系统级通知 helper 已存在，但未接全局任务/Provider 事件。
+- 应用内通知 Badge/Popover 已接入，分析任务终态和 Provider 真实异常已生成应用内通知。
+- 系统级通知 helper 已接入 TopBar 运行期新增通知消费；macOS 系统通知手工验收和权限拒绝 UI 提示仍待补。
 - Sidebar 折叠禁用。
 - 当前 Dashboard 页面 mount 时写入静态空态，会覆盖 store；应改为统一调用 `dashboardStore.load()`。
 
@@ -850,9 +850,9 @@ UI 页面 / 组件
     - 但连接测试没有 Go/Rust command。
 
 12. 通知列表与通知设置持久化
-    - TopBar 通知按钮未接。
-    - 设置页通知卡片未保存。
-    - 缺应用内通知 `notifications` 表、未读数量接口和通知列表浮层。
+    - TopBar 通知按钮已接未读角标、列表浮层、单条已读、全部已读、清理已读。
+    - 设置页通知卡片已接 `settingsGet/settingsSet`。
+    - 应用内通知 `notifications` 表、未读数量接口和通知列表浮层已完成。
     - 系统级通知已有 Tauri 插件基础，但未接事件触发和权限降级提示。
 
 13. 关于页资源打开

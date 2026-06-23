@@ -24,9 +24,11 @@ import (
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/server"
 	aiservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/ai"
 	analysisservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/analysis"
+	datasourcecredentialservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/datasourcecredential"
 	logexportservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/logexport"
 	marketservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
+	notificationservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/notification"
 	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/sidecar"
 	taskservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/task"
@@ -155,7 +157,7 @@ func main() {
 			lifecycle.requestShutdown()
 		})
 	}
-	handler := actions.NewHandler(buildActionsConfig(handshake.Token, store, schedulerQueue, schedulerService, taskLogService, taskLogWriter, logSource, func() {
+	handler := actions.NewHandler(buildActionsConfig(handshake.Token, *workspace, store, schedulerQueue, schedulerService, taskLogService, taskLogWriter, logSource, func() {
 		lifecycleDiagnostic("shutdown_requested", "source", "internal_api")
 		lifecycle.requestShutdown()
 	}))
@@ -286,6 +288,10 @@ func newProductionScheduler(store *dao.Store, now func() time.Time) (*schedulers
 		Queue: schedulerQueue,
 		Now:   now,
 		Runners: map[string]schedulerservice.Runner{
+			schedulerservice.CronTypeStockProfileRefresh: schedulerservice.StockProfileRefreshRunner{
+				Provider: marketservice.UnconfiguredProvider{},
+				Store:    store,
+			},
 			schedulerservice.CronTypeCNAShareQuoteRefresh: schedulerservice.QuoteRefreshRunner{
 				Provider: marketservice.UnconfiguredProvider{},
 				Store:    store,
@@ -377,7 +383,9 @@ func applyTaskLogRetention(ctx context.Context, store *dao.Store, ndjsonWriter *
 }
 
 // buildActionsConfig 组装生产 actions 依赖，避免 main 漏注入后端能力。
-func buildActionsConfig(token string, store *dao.Store, schedulerQueue *schedulerservice.ExecutionQueue, schedulerService *schedulerservice.Service, taskLogService tasklogservice.Service, taskLogWriter tasklogservice.StageWriter, logSource *logexportservice.MemorySource, onShutdown func()) actions.Config {
+func buildActionsConfig(token string, workspace string, store *dao.Store, schedulerQueue *schedulerservice.ExecutionQueue, schedulerService *schedulerservice.Service, taskLogService tasklogservice.Service, taskLogWriter tasklogservice.StageWriter, logSource *logexportservice.MemorySource, onShutdown func()) actions.Config {
+	dataSourceCredentialKeyPath := filepath.Join(workspace, "credentials", "data-source.key")
+	notificationService := notificationservice.NewService(store)
 	return actions.Config{
 		Version:             version,
 		Token:               token,
@@ -395,8 +403,9 @@ func buildActionsConfig(token string, store *dao.Store, schedulerQueue *schedule
 		PromptTemplateStore: store,
 		AIConfigStore:       store,
 		AIConfigTester:      aiservice.OpenAIConfigTester{},
+		ProviderNotifier:    notificationService,
 		AnalysisStore:       store,
-		AnalysisExecutor:    analysisservice.Executor{Store: store, TaskLogWriter: taskLogWriter},
+		AnalysisExecutor:    analysisservice.Executor{Store: store, TaskLogWriter: taskLogWriter, TaskNotifier: notificationService},
 		AnalysisTransact: func(ctx context.Context, run func(analysisaction.Store) error) error {
 			return store.WithTransaction(ctx, func(tx *dao.Store) error {
 				return run(tx)
@@ -407,6 +416,8 @@ func buildActionsConfig(token string, store *dao.Store, schedulerQueue *schedule
 		ReportStore:           store,
 		DashboardStore:        store,
 		SettingsStore:         store,
+		NotificationStore:     store,
+		DataSourceCredentials: datasourcecredentialservice.NewService(store, datasourcecredentialservice.FileKeyProvider{Path: dataSourceCredentialKeyPath}),
 		SchedulerStore:        store,
 		SchedulerQueue:        schedulerQueue,
 		SchedulerService:      schedulerService,

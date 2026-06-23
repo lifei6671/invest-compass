@@ -298,12 +298,13 @@ test("桌面能力读取真实状态并保存到对应后端能力", async () =>
   await waitFor(() => {
     expect(calls.some((call) => call.command === "autostart_get")).toBe(true);
   });
-  const switches = screen.getAllByRole("switch");
-  expect(switches[2]).not.toBeChecked();
-  expect(switches[3]).not.toBeChecked();
+  const autostartSwitch = getSwitchByTitle("开机自启动");
+  const closeToTraySwitch = getSwitchByTitle("关闭后最小化到托盘");
+  expect(autostartSwitch).not.toBeChecked();
+  expect(closeToTraySwitch).not.toBeChecked();
 
-  fireEvent.click(switches[2]);
-  fireEvent.click(switches[3]);
+  fireEvent.click(autostartSwitch);
+  fireEvent.click(closeToTraySwitch);
 
   await waitFor(() => {
     expect(calls).toContainEqual({ command: "autostart_set", payload: { enabled: true } });
@@ -311,6 +312,105 @@ test("桌面能力读取真实状态并保存到对应后端能力", async () =>
   expect(calls).toContainEqual({
     command: "settings_set",
     payload: { payload: { items: [{ key: "window.close_to_tray", value: "true" }] } },
+  });
+});
+
+test("通知设置读取真实 settings 并逐项保存", async () => {
+  const calls: Array<{ command: string; payload?: unknown }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "settings_get": {
+        const keys = (payload as { keys?: string[] }).keys ?? [];
+        if (keys.includes("notifications.in_app_enabled")) {
+          return {
+            code: 0,
+            message: "ok",
+            data: {
+              items: [
+                { key: "notifications.in_app_enabled", value: "true" },
+                { key: "notifications.system_enabled", value: "true" },
+                { key: "notifications.task_success", value: "true" },
+                { key: "notifications.task_failed", value: "false" },
+                { key: "notifications.provider_error", value: "true" },
+              ],
+            },
+          };
+        }
+        if (keys.includes("window.close_to_tray")) {
+          return { code: 0, message: "ok", data: { items: [{ key: "window.close_to_tray", value: "true" }] } };
+        }
+        return { code: 0, message: "ok", data: { items: [] } };
+      }
+      case "settings_set":
+        return { code: 0, message: "ok", data: { saved_keys: ["notifications.system_enabled"] } };
+      case "workspace_get":
+        return { code: 0, message: "ok", data: { path: "/Users/demo/Documents/Invest Compass" } };
+      case "autostart_get":
+        return { enabled: false };
+      case "ai_config_list":
+        return { code: 0, message: "ok", data: { items: [defaultAIConfig] } };
+      case "cache_stats":
+        return { code: 0, message: "ok", data: { total_bytes: 0, items: [] } };
+      case "search_status":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            fts5_status: "available",
+            gse_status: "fallback",
+            search_status: "ready",
+            active_stock_batch_id: "",
+            active_document_batch_id: "",
+            running_rebuild_task_id: "",
+            stock_index_count: 0,
+            report_index_count: 0,
+            news_index_count: 0,
+            watchlist_note_index_count: 0,
+            last_rebuild_at: "",
+            tokenizer_name: "simple",
+            tokenizer_version: "1",
+            dictionary_hash: "builtin",
+          },
+        };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(
+    <AntApp>
+      <SettingsBasicPage />
+    </AntApp>,
+  );
+
+  await waitFor(() => {
+    expect(calls).toContainEqual({
+      command: "settings_get",
+      payload: {
+        keys: [
+          "notifications.in_app_enabled",
+          "notifications.system_enabled",
+          "notifications.task_success",
+          "notifications.task_failed",
+          "notifications.provider_error",
+        ],
+      },
+    });
+  });
+  expect(getSwitchByTitle("应用内通知")).toBeChecked();
+  expect(getSwitchByTitle("系统级通知")).toBeChecked();
+  expect(getSwitchByTitle("任务成功通知")).toBeChecked();
+  expect(getSwitchByTitle("任务失败通知")).not.toBeChecked();
+  expect(getSwitchByTitle("Provider 异常通知")).toBeChecked();
+
+  fireEvent.click(getSwitchByTitle("系统级通知"));
+
+  await waitFor(() => {
+    expect(calls).toContainEqual({
+      command: "settings_set",
+      payload: { payload: { items: [{ key: "notifications.system_enabled", value: "false" }] } },
+    });
   });
 });
 
@@ -785,4 +885,13 @@ function clickSelectOption(label: string) {
     throw new Error(`missing option ${label}`);
   }
   fireEvent.click(option);
+}
+
+function getSwitchByTitle(title: string): HTMLElement {
+  const row = screen.getByText(title).closest(".settings-basic-switch-row");
+  const switchElement = row?.querySelector("[role='switch']");
+  if (!(switchElement instanceof HTMLElement)) {
+    throw new Error(`missing switch for ${title}`);
+  }
+  return switchElement;
 }

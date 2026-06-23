@@ -67,7 +67,7 @@ func (runner NewsRefreshRunner) runMarket(ctx context.Context, run model.Schedul
 	if err != nil {
 		return RunResult{}, fmt.Errorf("fetch market news: %s", logger.RedactError(err))
 	}
-	return runner.saveNews(ctx, run, market, items)
+	return runner.saveNews(ctx, run, market, market, items)
 }
 
 // runSymbols 执行个股新闻刷新。
@@ -97,7 +97,7 @@ func (runner NewsRefreshRunner) runSymbols(ctx context.Context, run model.Schedu
 		if err != nil {
 			return result, fmt.Errorf("fetch symbol news %s: %s", symbol.String(), logger.RedactError(err))
 		}
-		nextResult, err := runner.saveNews(ctx, run, symbol.String(), items)
+		nextResult, err := runner.saveNews(ctx, run, symbol.String(), symbol.Market, items)
 		if err != nil {
 			return result, err
 		}
@@ -132,7 +132,7 @@ func newsSymbols(ctx context.Context, store NewsRefreshStore, scopeKey string) (
 }
 
 // saveNews 标准化、去重并写入新闻缓存和水位。
-func (runner NewsRefreshRunner) saveNews(ctx context.Context, run model.SchedulerRun, scopeKey string, items []newsservice.Item) (RunResult, error) {
+func (runner NewsRefreshRunner) saveNews(ctx context.Context, run model.SchedulerRun, scopeKey string, market string, items []newsservice.Item) (RunResult, error) {
 	normalized, err := newsservice.NormalizeItems(items)
 	if err != nil {
 		return RunResult{}, fmt.Errorf("normalize news items: %w", err)
@@ -141,7 +141,7 @@ func (runner NewsRefreshRunner) saveNews(ctx context.Context, run model.Schedule
 	if len(deduped) == 0 {
 		return RunResult{SkippedReason: "empty_news"}, nil
 	}
-	modelItems := modelNewsItemsFromService(deduped)
+	modelItems := modelNewsItemsFromService(deduped, market)
 	if err := runner.Store.SaveNewsItems(ctx, modelItems); err != nil {
 		return RunResult{}, fmt.Errorf("save news items: %w", err)
 	}
@@ -171,11 +171,13 @@ func parseNewsParams(raw string) (newsParams, error) {
 }
 
 // modelNewsItemsFromService 将标准化新闻模型转换为持久化模型。
-func modelNewsItemsFromService(items []newsservice.Item) []model.NewsItem {
+func modelNewsItemsFromService(items []newsservice.Item, market string) []model.NewsItem {
+	normalizedMarket := strings.ToUpper(strings.TrimSpace(market))
 	modelItems := make([]model.NewsItem, 0, len(items))
 	for _, item := range items {
 		modelItems = append(modelItems, model.NewsItem{
 			Source:      item.Source,
+			Market:      normalizedMarket,
 			Title:       item.Title,
 			URL:         item.URL,
 			Summary:     item.Summary,

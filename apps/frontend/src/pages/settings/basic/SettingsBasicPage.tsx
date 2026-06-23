@@ -35,6 +35,7 @@ import { SettingsRiskNotice } from "../components/SettingsRiskNotice";
 import { useDashboardStore } from "../../../stores/dashboardStore";
 import {
   basicSettingsKeys,
+  notificationSettingsKeys,
   settingsKey,
 } from "./settingsKeys";
 import {
@@ -74,6 +75,14 @@ const basicSettingKeyByField: Record<PersistedBasicSettingsKey, string> = {
   quoteRefreshInterval: settingsKey.quoteRefreshInterval,
   defaultKlinePeriod: settingsKey.klineDefaultPeriod,
   defaultAdjustType: settingsKey.klineDefaultAdjust,
+};
+
+const notificationSettingKeyByField: Record<keyof NotificationSettingsState, string> = {
+  inAppEnabled: settingsKey.notificationsInAppEnabled,
+  systemEnabled: settingsKey.notificationsSystemEnabled,
+  taskSuccessNotification: settingsKey.notificationsTaskSuccess,
+  taskFailedNotification: settingsKey.notificationsTaskFailed,
+  providerErrorNotification: settingsKey.notificationsProviderError,
 };
 
 export function SettingsBasicPage() {
@@ -145,6 +154,22 @@ export function SettingsBasicPage() {
   useEffect(() => {
     void loadWorkspaceSettings();
   }, [loadWorkspaceSettings]);
+
+  const loadNotificationSettings = useCallback(async () => {
+    try {
+      const settings = await settingsGet([...notificationSettingsKeys]);
+      setNotificationSettings((current) => ({
+        ...current,
+        ...notificationSettingsFromItems(settings.items),
+      }));
+    } catch (error) {
+      handleInitialLoadError("通知设置", error);
+    }
+  }, [handleInitialLoadError]);
+
+  useEffect(() => {
+    void loadNotificationSettings();
+  }, [loadNotificationSettings]);
 
   const loadCacheSummary = useCallback(async (options: InitialLoadOptions = {}) => {
     try {
@@ -357,6 +382,28 @@ export function SettingsBasicPage() {
     }
   };
 
+  const handleNotificationSettingsChange = (nextValue: NotificationSettingsState) => {
+    const previousValue = notificationSettings;
+    setNotificationSettings(nextValue);
+    const changedKey = findChangedNotificationSettingsKey(previousValue, nextValue);
+    if (!changedKey) {
+      return;
+    }
+    void saveNotificationSetting(changedKey, nextValue[changedKey], previousValue);
+  };
+
+  const saveNotificationSetting = async (field: keyof NotificationSettingsState, value: boolean, previousValue: NotificationSettingsState) => {
+    try {
+      await settingsSet({
+        items: [{ key: notificationSettingKeyByField[field], value: String(value) }],
+      });
+      message.success("通知设置已更新");
+    } catch (error) {
+      setNotificationSettings(previousValue);
+      message.error(error instanceof Error ? error.message : "通知设置保存失败");
+    }
+  };
+
   const saveAutostartSetting = async (enabled: boolean, previousValue: DesktopSettingsState) => {
     try {
       const result = await autostartSet(enabled);
@@ -398,10 +445,7 @@ export function SettingsBasicPage() {
         />
         <NotificationSettingsCard
           value={notificationSettings}
-          onChange={(value) => {
-            setNotificationSettings(value);
-            message.success("通知设置已更新");
-          }}
+          onChange={handleNotificationSettingsChange}
         />
         <DesktopCapabilityCard
           value={desktopSettings}
@@ -500,6 +544,16 @@ function basicSettingsFromItems(items: SettingItem[]): Partial<BasicSettingsStat
   return settings;
 }
 
+function notificationSettingsFromItems(items: SettingItem[]): Partial<NotificationSettingsState> {
+  return {
+    inAppEnabled: readBooleanSetting(items, settingsKey.notificationsInAppEnabled, initialNotificationSettings.inAppEnabled),
+    systemEnabled: readBooleanSetting(items, settingsKey.notificationsSystemEnabled, initialNotificationSettings.systemEnabled),
+    taskSuccessNotification: readBooleanSetting(items, settingsKey.notificationsTaskSuccess, initialNotificationSettings.taskSuccessNotification),
+    taskFailedNotification: readBooleanSetting(items, settingsKey.notificationsTaskFailed, initialNotificationSettings.taskFailedNotification),
+    providerErrorNotification: readBooleanSetting(items, settingsKey.notificationsProviderError, initialNotificationSettings.providerErrorNotification),
+  };
+}
+
 function readBooleanSetting(items: SettingItem[], key: string, fallback: boolean): boolean {
   const value = items.find((item) => item.key === key)?.value;
   if (value === "true") {
@@ -524,6 +578,15 @@ function assignIfDefined<Key extends keyof BasicSettingsState>(settings: Partial
 
 function findChangedBasicSettingsKey(previousValue: BasicSettingsState, nextValue: BasicSettingsState): keyof BasicSettingsState | null {
   for (const key of Object.keys(nextValue) as Array<keyof BasicSettingsState>) {
+    if (previousValue[key] !== nextValue[key]) {
+      return key;
+    }
+  }
+  return null;
+}
+
+function findChangedNotificationSettingsKey(previousValue: NotificationSettingsState, nextValue: NotificationSettingsState): keyof NotificationSettingsState | null {
+  for (const key of Object.keys(nextValue) as Array<keyof NotificationSettingsState>) {
     if (previousValue[key] !== nextValue[key]) {
       return key;
     }

@@ -619,6 +619,45 @@ export type CacheCleanResult = {
   cleaned_targets: string[];
 };
 
+export type NotificationItem = {
+  id: number;
+  type: string;
+  level: string;
+  title: string;
+  content: string;
+  source_type?: string;
+  source_id?: string;
+  route?: string;
+  is_read: boolean;
+  created_at: string;
+  read_at?: string | null;
+};
+
+export type NotificationsListPayload = {
+  unread_only: boolean;
+  limit: number;
+  offset: number;
+};
+
+export type NotificationsListResult = {
+  items: NotificationItem[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type NotificationsUnreadCountResult = {
+  count: number;
+};
+
+export type NotificationsMarkReadPayload = {
+  ids: number[];
+};
+
+export type NotificationsActionResult = {
+  ok: boolean;
+};
+
 export type SearchIndexStatus = {
   fts5_status: string;
   gse_status?: string;
@@ -677,6 +716,101 @@ export type ProviderStatusItem = {
 
 export type ProvidersStatusResult = {
   items: ProviderStatusItem[];
+};
+
+export type DataSourceCredentialAuthType = "none" | "api_key" | "cookie" | "bearer_token" | "custom_header";
+
+export type DataSourceCredentialStatus = "normal" | "not_configured" | "expired" | "expiring" | "failed";
+
+export type DataSourceCredentialProvider = {
+  id: string;
+  name: string;
+  capability: string;
+  status: DataSourceCredentialStatus;
+  authType: DataSourceCredentialAuthType;
+  iconType: string;
+};
+
+export type DataSourceCredentialConfig = {
+  providerId: string;
+  providerName: string;
+  capability: string;
+  authType: DataSourceCredentialAuthType;
+  baseUrl: string;
+  credentialStatus: DataSourceCredentialStatus;
+  expiresAt?: string;
+  timeoutSeconds: number;
+  rateLimitPerMinute: number;
+  maskedCredential: string;
+  note?: string;
+};
+
+export type DataSourceCredentialTestTarget = {
+  label: string;
+  value: string;
+};
+
+export type DataSourceCredentialTestResult = {
+  status: "success" | "failed" | "untested";
+  responseTimeMs?: number;
+  testedAt?: string;
+  messages: string[];
+};
+
+export type DataSourceCredentialOverview = {
+  configuredCount: number;
+  expiringSoonCount: number;
+  expiredCount: number;
+};
+
+export type DataSourceCredentialHealthItem = {
+  name: string;
+  status: "normal" | "limited" | "failed";
+  rateLimitText: string;
+};
+
+export type DataSourceCredentialOperationLog = {
+  id: string;
+  action: string;
+  status: "success" | "failed";
+  time: string;
+};
+
+export type DataSourceCredentialsListResult = {
+  providers: DataSourceCredentialProvider[];
+  configs: Record<string, DataSourceCredentialConfig>;
+  selectedProviderId: string;
+  testTargets: DataSourceCredentialTestTarget[];
+  testResult: DataSourceCredentialTestResult;
+  overview: DataSourceCredentialOverview;
+  healthItems: DataSourceCredentialHealthItem[];
+  operationLogs: DataSourceCredentialOperationLog[];
+};
+
+export type DataSourceCredentialSavePayload = {
+  config: DataSourceCredentialConfig;
+  credential: string;
+};
+
+export type DataSourceCredentialSaveResult = {
+  config: DataSourceCredentialConfig;
+};
+
+export type DataSourceCredentialClearPayload = {
+  providerId: string;
+};
+
+export type DataSourceCredentialClearResult = {
+  config: DataSourceCredentialConfig;
+};
+
+export type DataSourceCredentialTestPayload = {
+  providerId: string;
+  target: string;
+};
+
+export type DataSourceCredentialTestResponse = {
+  result: DataSourceCredentialTestResult;
 };
 
 export type UpdateCheckResult = {
@@ -1151,6 +1285,51 @@ export async function cacheClean(targets: string[]): Promise<CacheCleanResult> {
   return unwrapCoreResponse(response);
 }
 
+/// 通过固定 Rust command 读取应用内通知列表。
+export async function notificationsList(
+  payload: NotificationsListPayload,
+): Promise<NotificationsListResult> {
+  const response = await invoke<CoreEnvelope<NotificationsListResult>>("notifications_list", {
+    payload,
+  });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取应用内未读通知数量。
+export async function notificationsUnreadCount(): Promise<NotificationsUnreadCountResult> {
+  const response = await invoke<CoreEnvelope<NotificationsUnreadCountResult>>(
+    "notifications_unread_count",
+  );
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 标记指定应用内通知为已读。
+export async function notificationsMarkRead(
+  payload: NotificationsMarkReadPayload,
+): Promise<NotificationsActionResult> {
+  const response = await invoke<CoreEnvelope<NotificationsActionResult>>(
+    "notifications_mark_read",
+    { payload },
+  );
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 标记全部应用内通知为已读。
+export async function notificationsMarkAllRead(): Promise<NotificationsActionResult> {
+  const response = await invoke<CoreEnvelope<NotificationsActionResult>>(
+    "notifications_mark_all_read",
+  );
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 清理已读应用内通知。
+export async function notificationsClearRead(): Promise<NotificationsActionResult> {
+  const response = await invoke<CoreEnvelope<NotificationsActionResult>>(
+    "notifications_clear_read",
+  );
+  return unwrapCoreResponse(response);
+}
+
 /// 通过固定 Rust command 读取搜索索引状态，设置中心不直接访问 Go core。
 export async function searchStatus(): Promise<SearchIndexStatus> {
   const response = await invoke<CoreEnvelope<SearchIndexStatus>>("search_status");
@@ -1186,6 +1365,47 @@ export async function providersStatus(): Promise<ProvidersStatusResult> {
   const response = await invoke<CoreEnvelope<ProviderStatusItem[] | ProvidersStatusResult>>("providers_status");
   const data = unwrapCoreResponse(response);
   return { items: Array.isArray(data) ? data : data.items };
+}
+
+/// 通过固定 Rust command 读取数据源凭据页数据，只接收脱敏展示字段。
+export async function dataSourceCredentialsList(): Promise<DataSourceCredentialsListResult> {
+  const response = await invoke<CoreEnvelope<DataSourceCredentialsListResult>>(
+    "data_source_credentials_list",
+  );
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 保存数据源凭据，credential 只作为一次性字段进入 Go core 加密流程。
+export async function dataSourceCredentialsSave(
+  payload: DataSourceCredentialSavePayload,
+): Promise<DataSourceCredentialSaveResult> {
+  const response = await invoke<CoreEnvelope<DataSourceCredentialSaveResult>>(
+    "data_source_credentials_save",
+    { payload },
+  );
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 清除数据源凭据密文。
+export async function dataSourceCredentialsClear(
+  payload: DataSourceCredentialClearPayload,
+): Promise<DataSourceCredentialClearResult> {
+  const response = await invoke<CoreEnvelope<DataSourceCredentialClearResult>>(
+    "data_source_credentials_clear",
+    { payload },
+  );
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 执行数据源凭据本地预检，不访问真实外部 Provider。
+export async function dataSourceCredentialsTest(
+  payload: DataSourceCredentialTestPayload,
+): Promise<DataSourceCredentialTestResponse> {
+  const response = await invoke<CoreEnvelope<DataSourceCredentialTestResponse>>(
+    "data_source_credentials_test",
+    { payload },
+  );
+  return unwrapCoreResponse(response);
 }
 
 /// 通过固定 Rust command 检查更新提示。

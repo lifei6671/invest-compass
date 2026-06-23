@@ -188,7 +188,7 @@ FE7 自动化、桌面 smoke 和验收报告
 
 ### FE02 生成页面契约矩阵
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：FE00
 - 交付物：
   - 对接记录，可放入本文附录或单独验收记录。
@@ -208,7 +208,7 @@ FE7 自动化、桌面 smoke 和验收报告
 
 ### FE03 检查安全扫描和架构护栏
 
-- 状态：`[ ]`
+- 状态：`[x]`
 - 依赖：FE02
 - 交付物：
   - `apps/desktop/test/security-config.test.mjs`
@@ -223,6 +223,19 @@ FE7 自动化、桌面 smoke 和验收报告
   - 如有安全扫描失败，必须先修复或降级为阻塞任务。
 - 退出条件：
   - 对接期间不会因页面改造绕过既有安全边界。
+
+阻塞记录：
+
+- 2026-06-23 执行 `pnpm --dir apps --filter @invest-compass/desktop test`，46 项中 45 项通过。
+- 唯一失败项为“前端生产源码禁止 mock 数据伪装真实能力”，命中 `apps/frontend/src/pages/settings/data-source/credentials/DataSourceCredentialPage.tsx` 引用 `credentials/mock.ts`。
+- 该页面涉及 Provider token / Cookie 凭据保存、脱敏回显和连接测试，当前缺少真实 schema、Rust command 和 Go API，已映射到 S3-02、S3-03、S3-04、S3-05。
+- 按本清单规则，不能通过改名、继续本地 mock 或假测试绕过，需要先确认数据源凭据真实方案或页面降级方案。
+
+解决记录：
+
+- 2026-06-23 已新增数据源凭据加密 SQLite schema、Go service/action、Rust 白名单 command 和前端 typed service。
+- `DataSourceCredentialPage` 已移除 `credentials/mock.ts`，改为调用 `dataSourceCredentialsList/Save/Clear/Test`。
+- 验证通过：`pnpm --dir apps --filter @invest-compass/desktop test`、`pnpm --dir apps check`、`git diff --check`。
 
 ---
 
@@ -797,3 +810,85 @@ pnpm --dir apps release:check:local
 | AI 分析 | `analysisTaskCreate` / `analysisTaskSubscribe` / `taskEvents` | `analysis_task_create` / `analysis_task_subscribe` / `task_events` | `POST /api/analysis/tasks` / `POST /api/tasks/events/stream` / `POST /api/tasks/events` | 运行中、成功、失败、取消 | `App.test.tsx` |
 
 实际执行时必须补全所有首版页面，并把缺失测试或阻塞项写入验收记录。
+
+---
+
+## 16. FE02 页面契约矩阵执行结果
+
+> 生成时间：2026-06-23
+>
+> 代码基线：
+>
+> - typed service：`apps/frontend/src/services/coreClient.ts`
+> - Rust command：`apps/desktop/src-tauri/src/commands/`
+> - Go API：`apps/sidecar-core/internal/actions/`
+> - SQLite 模型：`apps/sidecar-core/internal/model/schema.go`
+>
+> 说明：
+>
+> - 本节是后续 FE03-FE28 的对接索引，不表示下列页面都已通过真实数据验收。
+> - 标记为 `[!]` 的能力不得继续 mock；需要先确认接口、数据库或页面处理方案。
+
+### 16.1 全局壳层与只读页面
+
+| 页面 / 区域 | 展示数据与点击动作 | typed service | Rust command | Go API / 桌面能力 | SQLite / 数据来源 | 状态与后续任务 |
+| --- | --- | --- | --- | --- | --- | --- |
+| AppShell / Sidebar / TopBar | Go Core、SQLite、数据源状态；刷新；股票搜索；应用内通知未读角标与列表浮层 | `coreHealth`、`providersStatus`、`stockSearch`、`notificationsUnreadCount`、`notificationsList`、`notificationsMarkRead`、`notificationsMarkAllRead`、`notificationsClearRead` | `core_health`、`providers_status`、`stock_search`、`notifications_*` | `POST /internal/health`、`POST /api/providers/status`、`POST /api/stocks/search`、`POST /api/notifications/*` | `stocks`、Provider 状态、sidecar runtime、`notifications` | `[~]` FE04、FE06、S4-03、S5-01；系统级通知触发仍见 S4-04/S4-05 |
+| Dashboard 总览 | 概览指标、最近报告、自选摘要、Provider 状态 | `dashboardSummary`、`providersStatus` | `dashboard_summary`、`providers_status` | `POST /api/dashboard/summary`、`POST /api/providers/status` | `watchlists`、`analysis_reports`、`tasks`、Provider 状态 | `[ ]` FE07、S5-02；真实 Provider 未配置时只能展示不可用或空态 |
+| 自选股 | 列表、行情补全、新增、编辑、删除、搜索股票 | `watchlistList`、`watchlistCreate`、`watchlistUpdate`、`watchlistDelete`、`marketQuote`、`stockSearch` | `watchlist_*`、`market_quote`、`stock_search` | `POST /api/watchlist/*`、`POST /api/market/quote`、`POST /api/stocks/search` | `watchlists`、`stocks`、`quotes`、Provider | `[ ]` FE08、FE13、S5-03；扩展字段需确认，见 S5-04 |
+| 个股详情 | 行情、K 线、指标、新闻、外链打开 | `marketQuote`、`marketKline`、`marketIndicators`、`newsList`、`openExternalURL` | `market_quote`、`market_kline`、`market_indicators`、`news_list`、`open_external_url` | `POST /api/market/quote`、`POST /api/market/kline`、`POST /api/market/indicators`、`POST /api/news/list`、系统浏览器 | `quotes`、`klines`、`news_items`、Provider | `[ ]` FE09、S5-05；公司资料和标签接口缺口见 S5-06 |
+| 资讯中心 | 市场新闻、个股新闻、筛选、打开原文 | `newsMarket`、`newsList`、`openExternalURL` | `news_market`、`news_list`、`open_external_url` | `POST /api/news/market`、`POST /api/news/list`、系统浏览器 | `news_items`、新闻 Provider | `[ ]` FE10、S5-12；侧栏统计、热点、加入上下文见 S5-13 |
+| 报告历史 | 报告列表、详情、删除、全文搜索 | `reportList`、`reportGet`、`reportDelete`、`searchReports` | `report_list`、`report_get`、`report_delete`、`search_reports` | `POST /api/reports/*`、`POST /api/search/reports` | `analysis_reports`、`search_documents`、FTS | `[ ]` FE11、FE20、S5-09；收藏、批量、导出、统计见 S5-10 |
+| 任务历史 | 任务列表、详情、事件、日志、诊断、上下文、日志导出 | `taskList`、`taskGet`、`taskEvents`、`taskLogsList`、`taskLogGet`、`taskLogSummary`、`taskLogDiagnosis`、`taskLogContext`、`taskLogsExport` | `task_*`、`task_log_*`、`task_logs_export` | `POST /api/tasks/*`、`POST /api/tasks/logs/*` | `tasks`、`task_events`、`task_log_entries` | `[ ]` FE12、FE21、S5-14；重试和报告跳转规则见 S5-15 |
+
+### 16.2 AI、模型、Prompt 与长任务
+
+| 页面 / 区域 | 展示数据与点击动作 | typed service | Rust command | Go API / 桌面能力 | SQLite / 数据来源 | 状态与后续任务 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 模型配置 | 模型列表、新增、编辑、删除、默认模型、连通性测试 | `aiConfigList`、`aiConfigSave`、`aiConfigDelete`、`aiConfigTest` | `ai_config_list`、`ai_config_save`、`ai_config_delete`、`ai_config_test` | `POST /api/ai/configs/*`；Rust vault 注入 API Key | `ai_configs` + 本地 vault 引用 | `[~]` FE15、S2-01/S2-02/S2-03；测试依赖外部模型网络和用户密钥 |
+| 基础设置默认 AI 模型 | 读取同一份默认模型；修改后立即保存 | `settingsGet`、`settingsSet`、`aiConfigList`、`aiConfigSave` | `settings_get`、`settings_set`、`ai_config_list`、`ai_config_save` | `POST /api/settings/*`、`POST /api/ai/configs/*` | `settings`、`ai_configs` | `[~]` S1-01、S2-02；与模型配置页共享同一配置源 |
+| Prompt 配置 | 模板列表、详情、新增、编辑、删除 | `promptTemplatesList`、`promptTemplatesGet`、`promptTemplatesCreate`、`promptTemplatesUpdate`、`promptTemplatesDelete` | `prompt_templates_*` | `POST /api/prompt-templates/*` | `prompt_templates` | `[ ]` FE14、S2-04/S2-05；必须校验首版类型和变量白名单 |
+| AI 分析 | 创建分析任务、取消、SSE 事件、任务完成后报告落地 | `analysisTaskCreate`、`analysisTaskCancel`、`analysisTaskSubscribe`、`taskEvents`、`reportGet` | `analysis_task_create`、`analysis_task_cancel`、`analysis_task_subscribe`、`task_events`、`report_get` | `POST /api/analysis/tasks`、`POST /api/tasks/cancel`、`POST /api/tasks/events/stream`、`POST /api/tasks/events` | `tasks`、`task_events`、`analysis_reports`、模型 Provider | `[ ]` FE17、FE18、FE19、S5-07/S5-08；依赖可用默认模型和真实行情/新闻上下文 |
+
+### 16.3 设置中心
+
+| 页面 / 区域 | 展示数据与点击动作 | typed service | Rust command | Go API / 桌面能力 | SQLite / 数据来源 | 状态与后续任务 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 基础设置 | 主题、语言、市场、刷新频率、K 线周期、复权类型、默认 AI 模型 | `settingsGet`、`settingsSet`、`aiConfigList` | `settings_get`、`settings_set`、`ai_config_list` | `POST /api/settings/get`、`POST /api/settings/set`、`POST /api/ai/configs/list` | `settings`、`ai_configs` | `[~]` S1-01；本期已隐藏“其他设置” |
+| 工作区设置 | 当前目录、选择目录、打开目录、迁移预检、迁移执行 | `workspaceGet`、`workspaceSet`、`workspaceOpen`、`workspaceMigrationPlan`、`workspaceMigrate`、`selectDirectory` | `workspace_get`、`workspace_set`、`workspace_open`、`workspace_migration_plan`、`workspace_migrate`、`select_directory` | `POST /api/workspace/get`、`POST /api/workspace/set`、系统文件选择/文件管理器 | `settings` + 用户文件系统 | `[~]` S1-02/S1-03；跨平台人工验收仍待补齐 |
+| 缓存管理 | 缓存统计、清理缓存 | `cacheStats`、`cacheClean` | `cache_stats`、`cache_clean` | `POST /api/cache/stats`、`POST /api/cache/clean` | 工作区缓存目录、任务日志 | `[~]` S1-05；清理不得删除报告和配置 |
+| 搜索索引 | FTS/GSE 状态、索引数量、重建全部/分类索引 | `searchStatus`、`searchRebuild` | `search_status`、`search_rebuild` | `POST /api/search/status`、`POST /api/search/rebuild` | `search_index_*`、`stocks`、`analysis_reports`、`news_items`、`watchlists` | `[~]` S1-06；GSE 当前可显示 fallback，不作为阻塞 |
+| 桌面能力 | 开机自启、关闭后托盘 | `autostartGet`、`autostartSet`、`settingsGet`、`settingsSet` | `autostart_get`、`autostart_set`、`settings_get`、`settings_set` | Tauri autostart plugin、`POST /api/settings/*` | 系统登录项、`settings` | `[~]` S1-04；Windows/macOS 差异需手工验收 |
+| 代理设置 | 代理模式、代理地址、脱敏回显、编辑入口 | `settingsGet`、`settingsSet` | `settings_get`、`settings_set` | `POST /api/settings/*` | `settings`；代理密码应走 vault | `[!]` S2-06/S2-07；代理密码安全存储和连接测试接口需确认 |
+| 数据源概览 | Provider 真实状态、Provider 不可用空态 | `providersStatus` | `providers_status` | `POST /api/providers/status` | Provider runtime 状态 | `[ ]` S3-01；不能用假 Provider 状态 |
+| 凭据管理 | Provider 凭据脱敏状态、保存、清除、测试连接 | `dataSourceCredentialsList`、`dataSourceCredentialsSave`、`dataSourceCredentialsClear`、`dataSourceCredentialsTest` | `data_source_credentials_list`、`data_source_credentials_save`、`data_source_credentials_clear`、`data_source_credentials_test` | `POST /api/data-source/credentials/list`、`POST /api/data-source/credentials/save`、`POST /api/data-source/credentials/clear`、`POST /api/data-source/credentials/test` | `data_source_credentials`；AES-GCM 密文 + 工作区密钥文件 | `[~]` S3-02/S3-03 已完成；S3-04 待页面手工验收；S3-05 已补 resolver，生产 Provider 接入点待确认 |
+| 数据说明 | 数据范围、来源、时效、AI 上下文边界、FAQ | 静态说明 + 子 Tab 切换 + `message.info` | 无 | 无 | 文档型静态页面 | `[~]` S3-06；数据源概览、凭据管理跳转已接入，页面手工验收待补 |
+| 通知设置 / TopBar 通知 | 系统通知开关、应用内未读角标、通知列表浮层 | `settingsGet/settingsSet`、`notificationsList`、`notificationsUnreadCount`、`notificationsMarkRead`、`notificationsMarkAllRead`、`notificationsClearRead`、`sendConfiguredDesktopNotification` | `settings_get/settings_set`、`notifications_*`、Tauri notification plugin | `POST /api/settings/*`、`POST /api/notifications/*`；系统通知走 Rust/Tauri | `settings`、`notifications` | `[~]` S4-01/S4-02/S4-03 已接 settings、通知表/API、TopBar Badge/Popover；S4-04 系统通知服务和权限降级已接，真实事件触发和 macOS 手工验收待 S4-05 |
+| 关于应用 | 检查更新、日志导出 | `checkUpdate`、`exportLogs` | `check_update`、`export_logs` | `POST /api/update/check`、`POST /api/logs/export` | manifest 源、日志目录 | `[ ]` S6-01/S6-02；LICENSE/用户手册/发布说明打开方式见 S6-03 |
+
+### 16.4 隐藏或冻结入口
+
+| 入口 | 现有能力 | 风险 | 后续任务 |
+| --- | --- | --- | --- |
+| Scheduler / 调度任务 | `scheduler*` typed service、Rust command、Go API 已存在 | 页面入口是否进入首版仍需产品确认；不要主动暴露复杂调度后台 | S0-02 |
+| Provider 配置、同步策略子 Tab | 当前 UI 已按要求从数据源子标签移除 | 不应在未确认前重新加回入口 | S0-02、S3-01 |
+| 数据源凭据真实保存 | 已新增加密 SQLite 保存、脱敏回显、本地预检 API 和运行时 resolver | 生产请求尚未确认切换到哪些真实 Provider，不能宣称页面 Provider 已可用凭据访问 | S3-05 |
+
+### 16.5 FE02 缺口索引
+
+- `[!]` S2-07：代理连接测试接口未确认，不能实现假测试成功。
+- `[~]` S3-05：Provider 运行时 resolver 已完成；配置好的 Cookie/token 要用于哪些生产 Provider 请求仍需确认。
+- `[~]` S4-02/S4-03/S4-04/S4-05：应用内通知表/API、Rust command、TopBar 未读角标和通知列表浮层已实现；分析任务终态和 Provider 真实异常已生成应用内通知；TopBar 已消费运行期新增通知并按设置触发系统通知；macOS 系统通知手工验收和权限拒绝 UI 提示仍需推进。
+- `[!]` S5-04：自选股扩展字段与展示口径未确认。
+- `[!]` S5-06：个股详情公司资料和标签接口未确认。
+- `[!]` S5-10：报告收藏、批量、导出、统计接口未确认。
+- `[!]` S5-13：资讯侧栏统计、热点和加入上下文接口未确认。
+- `[!]` S5-15：任务重试和报告跳转规则未确认。
+- `[!]` S6-03：LICENSE、用户手册、发布说明打开方式未确认。
+
+### 16.6 FE02 验收记录
+
+- 已覆盖页面：Dashboard、自选股、个股详情、资讯中心、模型配置、Prompt 配置、AI 分析、报告历史、任务历史、设置中心、AppShell/TopBar。
+- 已覆盖链路：typed service、Rust command、Go API、SQLite / Provider / vault / 文件系统数据来源。
+- 已标记停止线：所有缺后端、缺数据库或缺页面决策的能力均映射到 `[!]` 任务编号。
+- 本次验证：docs-only 修改执行 `git diff --check`。

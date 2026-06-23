@@ -112,7 +112,7 @@ func handleList(config Config) http.HandlerFunc {
 			return
 		}
 		if config.Store != nil {
-			if err := config.Store.SaveNewsItems(request.Context(), modelNewsItemsFromService(normalized)); err != nil {
+			if err := config.Store.SaveNewsItems(request.Context(), modelNewsItemsFromService(normalized, symbol.Market)); err != nil {
 				writeCacheError(response, context, "个股新闻缓存写入失败", err)
 				return
 			}
@@ -170,7 +170,7 @@ func handleMarket(config Config) http.HandlerFunc {
 			return
 		}
 		if config.Store != nil {
-			if err := config.Store.SaveNewsItems(request.Context(), modelNewsItemsFromService(normalized)); err != nil {
+			if err := config.Store.SaveNewsItems(request.Context(), modelNewsItemsFromService(normalized, market)); err != nil {
 				writeCacheError(response, context, "市场新闻缓存写入失败", err)
 				return
 			}
@@ -283,11 +283,13 @@ func itemDataFromModels(items []model.NewsItem) []itemData {
 }
 
 // modelNewsItemsFromService 转换 Provider 新闻为可持久化缓存模型。
-func modelNewsItemsFromService(items []newsservice.Item) []model.NewsItem {
+func modelNewsItemsFromService(items []newsservice.Item, market string) []model.NewsItem {
+	normalizedMarket := strings.ToUpper(strings.TrimSpace(market))
 	result := make([]model.NewsItem, 0, len(items))
 	for _, item := range items {
 		result = append(result, model.NewsItem{
 			Source:      item.Source,
+			Market:      normalizedMarket,
 			Title:       item.Title,
 			URL:         item.URL,
 			Summary:     item.Summary,

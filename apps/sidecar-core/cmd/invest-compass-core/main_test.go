@@ -272,7 +272,7 @@ func TestBuildActionsConfigInjectsProductionAIConfigTester(t *testing.T) {
 		t.Fatalf("new scheduler service: %v", err)
 	}
 	taskLogService := tasklogservice.Service{Store: store}
-	config := buildActionsConfig("test-token", store, queue, schedulerService, taskLogService, nil, logSource, func() {})
+	config := buildActionsConfig("test-token", t.TempDir(), store, queue, schedulerService, taskLogService, nil, logSource, func() {})
 
 	if config.AIConfigTester == nil {
 		t.Fatal("production actions config must inject AI config tester")
@@ -292,7 +292,7 @@ func TestBuildActionsConfigKeepsMarketProviderUnconfiguredUntilComplianceReady(t
 		t.Fatalf("new scheduler service: %v", err)
 	}
 	taskLogService := tasklogservice.Service{Store: store}
-	config := buildActionsConfig("test-token", store, queue, schedulerService, taskLogService, nil, logSource, func() {})
+	config := buildActionsConfig("test-token", t.TempDir(), store, queue, schedulerService, taskLogService, nil, logSource, func() {})
 
 	if config.MarketProvider == nil || config.NewsProvider == nil {
 		t.Fatalf("production config must inject explicit provider implementations: %+v", config)

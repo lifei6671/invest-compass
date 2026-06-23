@@ -85,6 +85,7 @@ type Kline struct {
 type NewsItem struct {
 	ID          int64 `gorm:"primaryKey;autoIncrement"`
 	Source      string
+	Market      string `gorm:"size:16;index"`
 	Title       string `gorm:"not null"`
 	URL         string
 	Summary     string
@@ -115,6 +116,31 @@ type AIConfig struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	DeletedAt      gorm.DeletedAt
+}
+
+// DataSourceCredential 是第三方数据源凭据配置表，真实凭据只允许加密后保存。
+type DataSourceCredential struct {
+	ID                   int64  `gorm:"primaryKey;autoIncrement"`
+	ProviderID           string `gorm:"not null;uniqueIndex"`
+	ProviderName         string `gorm:"not null"`
+	Capability           string
+	AuthType             string `gorm:"not null"`
+	BaseURL              string
+	CredentialStatus     string `gorm:"not null;default:not_configured"`
+	ExpiresAt            *time.Time
+	TimeoutSeconds       int
+	RateLimitPerMinute   int
+	EncryptedCredential  string
+	CredentialNonce      string
+	MaskedCredential     string
+	Note                 string
+	LastTestStatus       string
+	LastTestResponseTime int
+	LastTestedAt         *time.Time
+	LastTestMessages     string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            gorm.DeletedAt
 }
 
 // PromptTemplate 是 Prompt 模板表，variables 保存首版白名单变量的序列化结果。
@@ -178,6 +204,23 @@ type Setting struct {
 	Value     string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Notification 是应用内通知表，只保存可展示摘要和源对象引用，不复制任务或报告源数据。
+type Notification struct {
+	ID         int64  `gorm:"primaryKey;autoIncrement"`
+	Type       string `gorm:"not null;index"`
+	Level      string `gorm:"not null;index"`
+	Title      string `gorm:"not null"`
+	Content    string
+	SourceType string `gorm:"index"`
+	SourceID   string `gorm:"index"`
+	Route      string
+	IsRead     bool `gorm:"not null;default:false;index"`
+	ReadAt     *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	DeletedAt  gorm.DeletedAt
 }
 
 // SchedulerJob 是桌面可管理的调度任务配置，cron_type 对应调度注册表中的业务任务类型。

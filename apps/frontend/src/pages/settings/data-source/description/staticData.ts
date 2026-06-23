@@ -14,7 +14,7 @@ export const sourceItems: DataSourceExplanationItem[] = [
   { name: "行情数据", source: "AkShare / EastMoney", description: "实时行情与分时/盘口数据", status: "normal" },
   { name: "K线历史", source: "AkShare", description: "日线/周线/分钟线（近 5 年）", status: "normal" },
   { name: "基础资料", source: "AkShare", description: "公司资料、财务指标等", status: "normal" },
-  { name: "个股新闻", source: "聚合新闻源", description: "个股相关新闻与公告", status: "normal" },
+  { name: "个股新闻", source: "聚合新闻源", description: "个股相关新闻", status: "normal" },
   { name: "市场新闻", source: "聚合新闻源", description: "宏观/行业/市场综合新闻", status: "normal" },
   { name: "扩展海外源", source: "Alpha Vantage", description: "美股等海外行情（可选）", status: "limited" },
 ];

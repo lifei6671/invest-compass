@@ -36,7 +36,10 @@ export function DataSourceSettingsPage() {
       {activeSubTab === "credentials" ? (
         <DataSourceCredentialPage />
       ) : activeSubTab === "description" ? (
-        <DataSourceDescriptionPage />
+        <DataSourceDescriptionPage
+          onViewOverview={() => setActiveSubTab("overview")}
+          onViewCredentials={() => setActiveSubTab("credentials")}
+        />
       ) : (
         <>
           <DataSourceBaseSettingsCard

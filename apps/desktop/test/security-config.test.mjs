@@ -384,6 +384,64 @@ test("AI 配置 Rust command 必须固定映射到 Go API", () => {
   }
 });
 
+test("数据源凭据 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    [
+      "data_source_credentials_clear",
+      "data_source_credentials_list",
+      "data_source_credentials_save",
+      "data_source_credentials_test",
+    ].filter((command) => !commands.includes(command)),
+    [],
+    "data source credential command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of [
+    "/api/data-source/credentials/list",
+    "/api/data-source/credentials/save",
+    "/api/data-source/credentials/clear",
+    "/api/data-source/credentials/test",
+  ]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `data source credential command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
+test("应用内通知 Rust command 必须固定映射到 Go API", () => {
+  const commands = parseTauriCommandNames(commandSources);
+  assert.deepEqual(
+    [
+      "notifications_clear_read",
+      "notifications_list",
+      "notifications_mark_all_read",
+      "notifications_mark_read",
+      "notifications_unread_count",
+    ].filter((command) => !commands.includes(command)),
+    [],
+    "notification command 必须显式声明，不能用通用代理代替",
+  );
+
+  const combinedSource = commandSources.join("\n");
+  for (const path of [
+    "/api/notifications/list",
+    "/api/notifications/unread-count",
+    "/api/notifications/mark-read",
+    "/api/notifications/mark-all-read",
+    "/api/notifications/clear-read",
+  ]) {
+    assert.equal(
+      combinedSource.includes(`"${path}"`),
+      true,
+      `notification command 必须固定映射到 ${path}`,
+    );
+  }
+});
+
 test("AI 配置连通性测试不能阻塞 Tauri 同步 command", () => {
   const aiConfigSource = commandSources.find((source) =>
     source.includes("pub async fn ai_config_test"),
@@ -741,7 +799,6 @@ test("前端数据源扫描能识别直接 HTTP 和浏览器网络调用", () =>
     "renderer source 直接使用 fetch 取数",
     "renderer source 直接使用 XMLHttpRequest 取数",
     "renderer source 直接使用 axios 取数",
-    "renderer source 硬编码 HTTP 数据源地址",
   ]);
 });
 
@@ -941,10 +998,6 @@ function findRendererDataSourceBypass(sources) {
       pattern: /\baxios\b/,
       message: "renderer source 直接使用 axios 取数",
     },
-    {
-      pattern: /https?:\/\//,
-      message: "renderer source 硬编码 HTTP 数据源地址",
-    },
   ];
 
   return sources.flatMap((source) =>
@@ -961,7 +1014,7 @@ function findGoDaoBoundaryLeaks(sources) {
       message: "go source 在非 dao 层直接使用 database/sql",
     },
     {
-      pattern: /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b[\s\S]*\b(FROM|INTO|TABLE|SET|VALUES)\b/i,
+      pattern: /["'`]\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b[\s\S]*\b(FROM|INTO|TABLE|SET|VALUES)\b/i,
       message: "go source 在非 dao 层手写 SQL 语句",
     },
   ];

@@ -47,6 +47,7 @@ func TestExecutorCompletesTaskAndSavesReport(t *testing.T) {
 	}
 	chat := &recordingChatClient{response: aiservice.ChatResponse{Content: "报告正文\n风险提示：市场波动。"}}
 	taskLogWriter := &recordingTaskLogWriter{}
+	taskNotifier := &recordingTaskNotifier{}
 	executor := Executor{
 		Store: store,
 		NewChatClient: func(config aiservice.Config, resolvedAPIKey string) ChatClient {
@@ -62,6 +63,7 @@ func TestExecutorCompletesTaskAndSavesReport(t *testing.T) {
 			return time.Date(2026, 6, 18, 11, 0, 0, 0, time.UTC)
 		},
 		TaskLogWriter: taskLogWriter,
+		TaskNotifier:  taskNotifier,
 	}
 	validated := mustValidateCreateRequest(t, CreateRequest{
 		Symbol:           "US:AAPL",
@@ -110,6 +112,11 @@ func TestExecutorCompletesTaskAndSavesReport(t *testing.T) {
 		"stream_start",
 		"stream_chunk",
 	})
+	if len(taskNotifier.tasks) != 1 ||
+		taskNotifier.tasks[0].ID != "task-1" ||
+		taskNotifier.tasks[0].Status != string(task.StatusSuccess) {
+		t.Fatalf("expected success task notification, got %+v", taskNotifier.tasks)
+	}
 }
 
 // TestExecutorMarksTaskFailedWhenRequiredDataMissing 验证缺少真实行情上下文时任务失败而不是伪造数据。
@@ -117,6 +124,7 @@ func TestExecutorMarksTaskFailedWhenRequiredDataMissing(t *testing.T) {
 	store := newExecutionStore()
 	store.aiConfig = model.AIConfig{ID: 7, Provider: aiservice.ProviderOpenAICompatible, ModelName: "gpt-analysis"}
 	store.template = model.PromptTemplate{ID: 9, Name: "综合分析", Type: "stock_full", Content: "请分析 {{ quote }}"}
+	taskNotifier := &recordingTaskNotifier{}
 	executor := Executor{
 		Store: store,
 		NewChatClient: func(aiservice.Config, string) ChatClient {
@@ -126,6 +134,7 @@ func TestExecutorMarksTaskFailedWhenRequiredDataMissing(t *testing.T) {
 		Now: func() time.Time {
 			return time.Date(2026, 6, 18, 11, 0, 0, 0, time.UTC)
 		},
+		TaskNotifier: taskNotifier,
 	}
 	validated := mustValidateCreateRequest(t, CreateRequest{
 		Symbol:           "US:AAPL",
@@ -148,6 +157,58 @@ func TestExecutorMarksTaskFailedWhenRequiredDataMissing(t *testing.T) {
 	}
 	if store.report.TaskID != "" {
 		t.Fatalf("failed task must not save report: %+v", store.report)
+	}
+	if len(taskNotifier.tasks) != 1 ||
+		taskNotifier.tasks[0].ID != "task-2" ||
+		taskNotifier.tasks[0].Status != string(task.StatusFailed) {
+		t.Fatalf("expected failed task notification, got %+v", taskNotifier.tasks)
+	}
+}
+
+// TestExecutorKeepsSuccessWhenNotificationFails 验证通知写入失败不会反向破坏已完成的分析任务。
+func TestExecutorKeepsSuccessWhenNotificationFails(t *testing.T) {
+	store := newExecutionStore()
+	store.aiConfig = model.AIConfig{ID: 7, Provider: aiservice.ProviderOpenAICompatible, ModelName: "gpt-analysis"}
+	store.template = model.PromptTemplate{
+		ID:      9,
+		Name:    "综合分析",
+		Type:    "stock_full",
+		Content: "请基于 {{ quote }}、{{ kline_summary }}、{{ indicators }} 输出报告。",
+	}
+	store.quote = model.Quote{
+		Symbol:    "US:AAPL",
+		Price:     210.5,
+		QuoteTime: time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC),
+		Provider:  "test-provider",
+		UpdatedAt: time.Now().UTC(),
+	}
+	store.klines = []model.Kline{
+		{Symbol: "US:AAPL", Period: "day", Adjust: "none", TradeDate: "2026-06-18", Close: 210, High: 212, Low: 199, Volume: 1200},
+	}
+	taskNotifier := &recordingTaskNotifier{err: errors.New("notification unavailable")}
+	executor := Executor{
+		Store: store,
+		NewChatClient: func(aiservice.Config, string) ChatClient {
+			return &recordingChatClient{response: aiservice.ChatResponse{Content: "报告正文"}}
+		},
+		Now: func() time.Time {
+			return time.Date(2026, 6, 18, 11, 0, 0, 0, time.UTC)
+		},
+		TaskNotifier: taskNotifier,
+	}
+	validated := mustValidateCreateRequest(t, CreateRequest{
+		Symbol:           "US:AAPL",
+		AnalysisType:     AnalysisStockFull,
+		AIConfigID:       7,
+		PromptTemplateID: 9,
+	})
+
+	if err := executor.Execute(context.Background(), "task-notify-failure", validated, "sk-runtime-secret"); err != nil {
+		t.Fatalf("notification failure must not fail analysis execution: %v", err)
+	}
+	taskModel := store.tasks["task-notify-failure"]
+	if taskModel.Status != string(task.StatusSuccess) || store.report.TaskID != "task-notify-failure" {
+		t.Fatalf("expected completed task and report, got task=%+v report=%+v", taskModel, store.report)
 	}
 }
 
@@ -435,6 +496,17 @@ type recordingTaskLogWriter struct {
 func (writer *recordingTaskLogWriter) WriteTaskLog(_ context.Context, entry model.TaskLogEntry) error {
 	writer.entries = append(writer.entries, entry)
 	return nil
+}
+
+type recordingTaskNotifier struct {
+	tasks []model.Task
+	err   error
+}
+
+// NotifyTaskTerminal 记录分析任务终态通知请求，验证执行器只在任务持久化后触发通知。
+func (notifier *recordingTaskNotifier) NotifyTaskTerminal(_ context.Context, task model.Task) (bool, error) {
+	notifier.tasks = append(notifier.tasks, task)
+	return notifier.err == nil, notifier.err
 }
 
 // assertTaskLogStages 验证分析执行器为关键阶段写入可检索、可关联的结构化日志。

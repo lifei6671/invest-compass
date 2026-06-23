@@ -12,6 +12,8 @@ import (
 )
 
 const (
+	// CronTypeStockProfileRefresh 表示股票基础资料主动刷新任务。
+	CronTypeStockProfileRefresh = "stock_profile_refresh"
 	// CronTypeCNAShareKlineRefresh 表示 A 股 K 线刷新任务。
 	CronTypeCNAShareKlineRefresh = "cn_a_share_kline_refresh"
 	// CronTypeMarketNewsRefresh 表示市场新闻刷新任务。
@@ -40,6 +42,7 @@ type JobRegistry struct {
 // DefaultJobRegistry 返回首批支持或规划中的调度任务类型。
 func DefaultJobRegistry() JobRegistry {
 	types := []JobTypeMetadata{
+		{CronType: CronTypeStockProfileRefresh, Label: "股票基础资料刷新", DefaultCronExpr: "0 8 * * 1-5", DefaultWindow: TradeWindowAnyTime, Market: "CN", Enabled: true},
 		{CronType: CronTypeCNAShareQuoteRefresh, Label: "A 股行情刷新", DefaultCronExpr: "30 9 * * 1-5", DefaultWindow: TradeWindowTradingTime, Market: "CN", Enabled: true},
 		{CronType: CronTypeCNAShareKlineRefresh, Label: "A 股 K 线刷新", DefaultCronExpr: "30 15 * * 1-5", DefaultWindow: TradeWindowAfterClose, Market: "CN", Enabled: true},
 		{CronType: CronTypeMarketNewsRefresh, Label: "市场新闻刷新", DefaultCronExpr: "0 */2 * * 1-5", DefaultWindow: TradeWindowAnyTime, Market: "CN", Enabled: true},
@@ -55,6 +58,7 @@ func DefaultJobRegistry() JobRegistry {
 // Types 返回按稳定顺序排列的任务类型元数据。
 func (registry JobRegistry) Types() []JobTypeMetadata {
 	orderedCronTypes := []string{
+		CronTypeStockProfileRefresh,
 		CronTypeCNAShareQuoteRefresh,
 		CronTypeCNAShareKlineRefresh,
 		CronTypeMarketNewsRefresh,

@@ -107,10 +107,12 @@ type fakeMetadataTokenizer struct {
 	tokens   []string
 }
 
+// Tokenize 返回测试预置 token，用于验证重建流程不会依赖真实分词器。
 func (tokenizer fakeMetadataTokenizer) Tokenize(_ string) []string {
 	return tokenizer.tokens
 }
 
+// Metadata 返回测试预置分词元数据，用于校验索引批次可追溯字段。
 func (tokenizer fakeMetadataTokenizer) Metadata() TokenizerMetadata {
 	return tokenizer.metadata
 }

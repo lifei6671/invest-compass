@@ -1,4 +1,4 @@
-import { Badge, Button, Input, Layout, Space, Tag, Tooltip } from "antd";
+import { Badge, Button, Empty, Input, Layout, Popover, Space, Spin, Tag, Tooltip } from "antd";
 import {
   BellOutlined,
   CheckSquareOutlined,
@@ -13,10 +13,28 @@ import {
   StarOutlined,
 } from "@ant-design/icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useDashboardStore, type DashboardViewState } from "../stores/dashboardStore";
 import { formatClock, latestDashboardQuoteTime } from "../components/dashboard/dashboardUtils";
-import { coreHealth, providersStatus, stockSearch, type CoreHealth, type ProviderStatusItem } from "../services/coreClient";
+import {
+  coreHealth,
+  notificationsClearRead,
+  notificationsList,
+  notificationsMarkAllRead,
+  notificationsMarkRead,
+  notificationsUnreadCount,
+  providersStatus,
+  settingsGet,
+  stockSearch,
+  type CoreHealth,
+  type NotificationItem,
+  type ProviderStatusItem,
+} from "../services/coreClient";
+import {
+  sendConfiguredDesktopNotification,
+  type DesktopNotificationKind,
+  type DesktopNotificationSettings,
+} from "../services/desktopNotification";
 import appIconUrl from "../assets/invest-compass-icon.png";
 
 const { Content, Header, Sider } = Layout;
@@ -50,6 +68,15 @@ const navIconByLabel = {
   任务历史: CheckSquareOutlined,
   设置: SettingOutlined,
 } as const;
+
+const notificationPollIntervalMs = 30_000;
+
+const desktopNotificationSettingKeys = [
+  "notifications.system_enabled",
+  "notifications.task_success",
+  "notifications.task_failed",
+  "notifications.provider_error",
+] as const;
 
 export function AppShell(props: { routes: AppRouteMap; navItems: readonly AppNavItem[]; children: ReactNode }) {
   const location = useLocation();
@@ -117,6 +144,124 @@ function TopBar() {
   const [keyword, setKeyword] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notificationLoading, setNotificationLoading] = useState(false);
+  const [notificationItems, setNotificationItems] = useState<NotificationItem[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const previousUnreadCountRef = useRef<number | null>(null);
+  const desktopNotifiedIdsRef = useRef<Set<number>>(new Set());
+
+  const sendUnreadDesktopNotifications = useCallback(async () => {
+    const result = await notificationsList({ unread_only: true, limit: 5, offset: 0 });
+    const settings = await loadDesktopNotificationSettings();
+    for (const item of result.items) {
+      if (item.is_read || desktopNotifiedIdsRef.current.has(item.id)) {
+        continue;
+      }
+      const kind = notificationKindFromItem(item);
+      if (!kind) {
+        continue;
+      }
+      const delivery = await sendConfiguredDesktopNotification(
+        { kind, title: item.title, body: item.content || item.title },
+        settings,
+      );
+      if (delivery.sent || delivery.reason !== "failed") {
+        desktopNotifiedIdsRef.current.add(item.id);
+      }
+    }
+  }, []);
+
+  const loadNotificationUnreadCount = useCallback(async (options?: { notifyDesktop?: boolean }) => {
+    const result = await notificationsUnreadCount();
+    const nextCount = Number.isFinite(result.count) ? Math.max(0, result.count) : 0;
+    const previousCount = previousUnreadCountRef.current;
+    previousUnreadCountRef.current = nextCount;
+    setNotificationUnreadCount(nextCount);
+    if (options?.notifyDesktop && previousCount !== null && nextCount > previousCount) {
+      await sendUnreadDesktopNotifications();
+    }
+  }, [sendUnreadDesktopNotifications]);
+
+  const loadNotifications = useCallback(async () => {
+    setNotificationLoading(true);
+    try {
+      const result = await notificationsList({ unread_only: false, limit: 20, offset: 0 });
+      setNotificationItems(result.items);
+      await loadNotificationUnreadCount();
+    } finally {
+      setNotificationLoading(false);
+    }
+  }, [loadNotificationUnreadCount]);
+
+  useEffect(() => {
+    loadNotificationUnreadCount()
+      .catch(() => {
+        previousUnreadCountRef.current = 0;
+        setNotificationUnreadCount(0);
+      });
+    const timer = window.setInterval(() => {
+      void loadNotificationUnreadCount({ notifyDesktop: true }).catch(() => {
+        previousUnreadCountRef.current = 0;
+        setNotificationUnreadCount(0);
+      });
+    }, notificationPollIntervalMs);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [loadNotificationUnreadCount]);
+
+  const handleNotificationOpenChange = (open: boolean) => {
+    setNotificationOpen(open);
+    if (open) {
+      void loadNotifications().catch(() => {
+        setNotificationItems([]);
+        setNotificationUnreadCount(0);
+      });
+    }
+  };
+
+  const markNotificationRead = async (item: NotificationItem) => {
+    if (item.is_read) {
+      return;
+    }
+    await notificationsMarkRead({ ids: [item.id] });
+    setNotificationItems((items) =>
+      items.map((current) =>
+        current.id === item.id
+          ? { ...current, is_read: true, read_at: current.read_at ?? new Date().toISOString() }
+          : current,
+      ),
+    );
+    setNotificationUnreadCount((count) => Math.max(0, count - 1));
+  };
+
+  const handleNotificationClick = async (item: NotificationItem) => {
+    try {
+      await markNotificationRead(item);
+      const route = resolveNotificationRoute(item.route);
+      if (route) {
+        setNotificationOpen(false);
+        navigate(route);
+      }
+    } catch {
+      // 标记已读失败时保留当前浮层，避免界面显示与后端状态不一致。
+    }
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    await notificationsMarkAllRead();
+    setNotificationItems((items) =>
+      items.map((item) => ({ ...item, is_read: true, read_at: item.read_at ?? new Date().toISOString() })),
+    );
+    setNotificationUnreadCount(0);
+  };
+
+  const handleClearReadNotifications = async () => {
+    await notificationsClearRead();
+    setNotificationItems((items) => items.filter((item) => !item.is_read));
+    await loadNotificationUnreadCount();
+  };
 
   const submitSearch = async () => {
     const nextKeyword = keyword.trim();
@@ -147,6 +292,61 @@ function TopBar() {
     }
   };
 
+  const notificationContent = (
+    <div className="w-[360px] overflow-hidden rounded-[10px] bg-white">
+      <div className="flex items-center justify-between border-b border-[#edf1f7] px-1 pb-3">
+        <div className="text-[15px] font-semibold text-[#111827]">通知</div>
+        <Space size={8}>
+          <Button
+            className="h-7 px-2 text-[12px]"
+            disabled={notificationUnreadCount === 0}
+            type="link"
+            onClick={() => void handleMarkAllNotificationsRead()}
+          >
+            全部已读
+          </Button>
+          <Button className="h-7 px-2 text-[12px]" type="link" onClick={() => void handleClearReadNotifications()}>
+            清理已读
+          </Button>
+        </Space>
+      </div>
+      <Spin spinning={notificationLoading}>
+        <div className="max-h-[360px] overflow-y-auto py-2">
+          {notificationItems.length === 0 ? (
+            <Empty className="my-8" image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无通知" />
+          ) : (
+            <div className="flex flex-col">
+              {notificationItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-label={`通知：${item.title}`}
+                  className="grid w-full grid-cols-[8px_1fr] gap-3 border-0 border-b border-solid border-[#edf1f7] bg-white px-1 py-3 text-left transition last:border-b-0 hover:bg-[#f8fbff]"
+                  onClick={() => void handleNotificationClick(item)}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={[
+                      "mt-[7px] h-2 w-2 rounded-full",
+                      item.is_read ? "bg-[#cbd5e1]" : notificationLevelClassName(item.level),
+                    ].join(" ")}
+                  />
+                  <span className="min-w-0">
+                    <span className="flex items-center justify-between gap-3">
+                      <span className="truncate text-[13px] font-semibold text-[#111827]">{item.title}</span>
+                      <span className="shrink-0 text-[12px] text-[#8a94a6]">{formatNotificationTime(item.created_at)}</span>
+                    </span>
+                    <span className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#64748b]">{item.content}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </Spin>
+    </div>
+  );
+
   return (
     <Header className="app-glass-topbar sticky top-0 z-10 flex h-[72px] items-center gap-4 overflow-visible border-b border-[#e3e9f2] !px-8 shadow-none">
       <Tooltip title={searchError ?? "按 Enter 搜索股票"}>
@@ -172,13 +372,97 @@ function TopBar() {
         <Button className="h-9 px-4 text-[14px]" icon={<ReloadOutlined />} onClick={() => void load()}>
           刷新
         </Button>
-        <Button aria-label="通知" className="h-9 px-3 text-[14px]" type="text" icon={<BellOutlined />}>通知</Button>
+        <Popover
+          arrow={false}
+          content={notificationContent}
+          open={notificationOpen}
+          placement="bottomRight"
+          trigger="click"
+          onOpenChange={handleNotificationOpenChange}
+        >
+          <Badge count={notificationUnreadCount} size="small" overflowCount={99}>
+            <Button aria-label="通知" className="h-9 px-3 text-[14px]" type="text" icon={<BellOutlined />}>
+              通知
+            </Button>
+          </Badge>
+        </Popover>
         <Button className="h-9 px-3 text-[14px]" type="text" icon={<SettingOutlined />} onClick={() => navigate("/settings")}>
           设置
         </Button>
       </Space>
     </Header>
   );
+}
+
+function resolveNotificationRoute(route?: string): string | null {
+  const value = route?.trim() ?? "";
+  if (!value) {
+    return null;
+  }
+  const exactRoutes = new Set(["/", "/watchlist", "/analysis", "/reports", "/news", "/tasks", "/settings"]);
+  if (exactRoutes.has(value)) {
+    return value;
+  }
+  if (/^\/reports\/\d+$/.test(value)) {
+    return value;
+  }
+  if (/^\/stocks\/[A-Za-z0-9._:%-]+$/.test(value)) {
+    return value;
+  }
+  return null;
+}
+
+async function loadDesktopNotificationSettings(): Promise<DesktopNotificationSettings> {
+  const result = await settingsGet([...desktopNotificationSettingKeys]);
+  const values = new Map(result.items.map((item) => [item.key, item.value]));
+  return {
+    systemEnabled: settingBoolean(values, "notifications.system_enabled", true),
+    taskSuccessNotification: settingBoolean(values, "notifications.task_success", true),
+    taskFailedNotification: settingBoolean(values, "notifications.task_failed", true),
+    providerErrorNotification: settingBoolean(values, "notifications.provider_error", true),
+  };
+}
+
+function settingBoolean(values: Map<string, string>, key: string, fallback: boolean): boolean {
+  const value = values.get(key);
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  return fallback;
+}
+
+function notificationKindFromItem(item: NotificationItem): DesktopNotificationKind | null {
+  if (item.type === "task_success" || item.type === "task_failed" || item.type === "provider_error") {
+    return item.type;
+  }
+  return null;
+}
+
+function notificationLevelClassName(level: string): string {
+  if (level === "success") {
+    return "bg-[#16a34a]";
+  }
+  if (level === "warning") {
+    return "bg-[#f97316]";
+  }
+  if (level === "error") {
+    return "bg-[#ff4d4f]";
+  }
+  return "bg-[#1677ff]";
+}
+
+function formatNotificationTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function dashboardQuoteStatus(state: DashboardViewState | null): { badge: "default" | "error" | "success"; marketLabel: string; timeLabel: string } {

@@ -81,6 +81,20 @@ const basicSettingsGetPayload = {
   keys: ["app.theme", "app.language", "market.default", "quote.refresh_interval", "kline.default_period", "kline.default_adjust"],
 };
 
+const notificationSettingsGetPayload = {
+  keys: [
+    "notifications.in_app_enabled",
+    "notifications.system_enabled",
+    "notifications.task_success",
+    "notifications.task_failed",
+    "notifications.provider_error",
+  ],
+};
+
+function withoutGlobalNotificationUnreadCalls<TCall extends { command: string }>(calls: TCall[]): TCall[] {
+  return calls.filter((call) => call.command !== "notifications_unread_count");
+}
+
 const defaultAIConfig = {
   id: 1,
   name: "DeepSeek",
@@ -95,6 +109,115 @@ const defaultAIConfig = {
   timeout_seconds: 120,
   stream_enabled: true,
   is_default: true,
+};
+
+const dataSourceCredentialListFixture = {
+  providers: [
+    { id: "eastmoney", name: "EastMoney", capability: "行情 / K线", status: "normal", authType: "none", iconType: "eastmoney" },
+    { id: "akshare", name: "AkShare", capability: "基础数据", status: "normal", authType: "none", iconType: "akshare" },
+    { id: "alpha-vantage", name: "Alpha Vantage", capability: "海外行情", status: "not_configured", authType: "api_key", iconType: "alpha-vantage" },
+    { id: "cls", name: "财联社", capability: "快讯 / 日历", status: "normal", authType: "cookie", iconType: "cls" },
+    { id: "xueqiu", name: "雪球", capability: "讨论热度", status: "not_configured", authType: "cookie", iconType: "xueqiu" },
+    { id: "custom-http", name: "Custom HTTP", capability: "自定义接口", status: "not_configured", authType: "bearer_token", iconType: "custom-http" },
+  ],
+  configs: {
+    "eastmoney": {
+      providerId: "eastmoney",
+      providerName: "EastMoney",
+      capability: "行情 / K线",
+      authType: "none",
+      baseUrl: "https://quote.eastmoney.com",
+      credentialStatus: "normal",
+      timeoutSeconds: 15,
+      rateLimitPerMinute: 30,
+      maskedCredential: "",
+      note: "",
+    },
+    akshare: {
+      providerId: "akshare",
+      providerName: "AkShare",
+      capability: "基础数据",
+      authType: "none",
+      baseUrl: "local://akshare",
+      credentialStatus: "normal",
+      timeoutSeconds: 15,
+      rateLimitPerMinute: 30,
+      maskedCredential: "",
+      note: "",
+    },
+    "alpha-vantage": {
+      providerId: "alpha-vantage",
+      providerName: "Alpha Vantage",
+      capability: "海外行情",
+      authType: "api_key",
+      baseUrl: "https://www.alphavantage.co",
+      credentialStatus: "not_configured",
+      timeoutSeconds: 15,
+      rateLimitPerMinute: 30,
+      maskedCredential: "",
+      note: "",
+    },
+    cls: {
+      providerId: "cls",
+      providerName: "财联社",
+      capability: "快讯 / 行业事件 / 日历",
+      authType: "cookie",
+      baseUrl: "https://www.cls.cn",
+      credentialStatus: "normal",
+      expiresAt: "2025-06-30 23:59",
+      timeoutSeconds: 15,
+      rateLimitPerMinute: 30,
+      maskedCredential: "uid=****; token=****; session=****",
+      note: "",
+    },
+    xueqiu: {
+      providerId: "xueqiu",
+      providerName: "雪球",
+      capability: "讨论热度",
+      authType: "cookie",
+      baseUrl: "https://xueqiu.com",
+      credentialStatus: "not_configured",
+      timeoutSeconds: 15,
+      rateLimitPerMinute: 30,
+      maskedCredential: "",
+      note: "",
+    },
+    "custom-http": {
+      providerId: "custom-http",
+      providerName: "Custom HTTP",
+      capability: "自定义接口",
+      authType: "bearer_token",
+      baseUrl: "https://api.example.test",
+      credentialStatus: "not_configured",
+      timeoutSeconds: 15,
+      rateLimitPerMinute: 30,
+      maskedCredential: "",
+      note: "",
+    },
+  },
+  selectedProviderId: "cls",
+  testTargets: [
+    { label: "快讯接口（/api/flash）", value: "flash" },
+    { label: "日历接口（/api/calendar）", value: "calendar" },
+    { label: "行业事件接口（/api/events）", value: "events" },
+  ],
+  testResult: {
+    status: "success",
+    responseTimeMs: 186,
+    testedAt: "2025-05-20 15:28:41",
+    messages: ["行情接口可访问", "新闻接口已授权"],
+  },
+  overview: { configuredCount: 3, expiringSoonCount: 1, expiredCount: 1 },
+  healthItems: [
+    { name: "行情源", status: "normal", rateLimitText: "28 次/分钟" },
+    { name: "新闻源", status: "normal", rateLimitText: "26 次/分钟" },
+    { name: "海外源", status: "limited", rateLimitText: "12 次/分钟" },
+  ],
+  operationLogs: [
+    { id: "1", action: "更新财联社 Cookie", status: "success", time: "15:28:41" },
+    { id: "2", action: "测试 Alpha Vantage Key", status: "success", time: "15:20:13" },
+    { id: "3", action: "清除雪球过期凭据", status: "success", time: "14:55:02" },
+  ],
 };
 
 test("首版主导航和路由范围只包含 MVP 页面", () => {
@@ -310,6 +433,140 @@ test("顶部搜索通过后端股票搜索跳转到首个真实结果", async ()
   });
 });
 
+test("TopBar 通知按钮展示未读角标并点击通知跳转白名单页面", async () => {
+  const calls: Array<{ command: string; payload?: any }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+      case "dashboard_summary":
+        return { code: 0, message: "ok", data: emptyDashboardFixture };
+      case "watchlist_list":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "market_quote":
+        return { code: 0, message: "ok", data: { symbol: "000001.SH", price: 0, change: 0, change_percent: 0 } };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 2 } };
+      case "notifications_list":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              {
+                id: 7,
+                type: "task",
+                level: "success",
+                title: "任务完成",
+                content: "浦发银行分析已完成",
+                route: "/reports/3",
+                is_read: false,
+                created_at: "2026-06-23T09:00:00Z",
+              },
+            ],
+            total: 1,
+            limit: 20,
+            offset: 0,
+          },
+        };
+      case "notifications_mark_read":
+        return { code: 0, message: "ok", data: { ok: true } };
+      case "report_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            id: 3,
+            task_id: "task-report-3",
+            symbol: "600000.SH",
+            title: "浦发银行分析",
+            analysis_type: "stock_full",
+            model_name: "DeepSeek",
+            content_markdown: "## 结论",
+            risk_summary: "仅供研究",
+            created_at: "2026-06-23T09:00:00Z",
+            updated_at: "2026-06-23T09:00:00Z",
+          },
+        };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByRole("button", { name: /通知/ }));
+
+  const notification = await screen.findByRole("button", { name: /通知：任务完成/ });
+  expect(screen.getByText("浦发银行分析已完成")).toBeInTheDocument();
+  fireEvent.click(notification);
+
+  await waitFor(() => {
+    expect(window.location.hash).toBe("#/reports/3");
+  });
+  expect(calls).toContainEqual({ command: "notifications_mark_read", payload: { payload: { ids: [7] } } });
+});
+
+test("TopBar 点击未知通知 route 只标记已读不跳转", async () => {
+  const calls: Array<{ command: string; payload?: any }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+      case "dashboard_summary":
+        return { code: 0, message: "ok", data: emptyDashboardFixture };
+      case "watchlist_list":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "market_quote":
+        return { code: 0, message: "ok", data: { symbol: "000001.SH", price: 0, change: 0, change_percent: 0 } };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 1 } };
+      case "notifications_list":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              {
+                id: 8,
+                type: "provider",
+                level: "warning",
+                title: "数据源异常",
+                content: "Provider 状态异常",
+                route: "/provider/debug/8",
+                is_read: false,
+                created_at: "2026-06-23T09:10:00Z",
+              },
+            ],
+            total: 1,
+            limit: 20,
+            offset: 0,
+          },
+        };
+      case "notifications_mark_read":
+        return { code: 0, message: "ok", data: { ok: true } };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+
+  await screen.findByText("1");
+  fireEvent.click(screen.getByRole("button", { name: /通知/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /通知：数据源异常/ }));
+
+  await waitFor(() => {
+    expect(calls).toContainEqual({ command: "notifications_mark_read", payload: { payload: { ids: [8] } } });
+  });
+  expect(window.location.hash).toBe("");
+});
+
 test("Dashboard 首页不展示旧版 Provider 异常空态", async () => {
   mockIPC((command) => {
     if (command === "dashboard_summary") {
@@ -383,7 +640,7 @@ test("自选股页面默认展示空态并支持备注范围搜索", async () =>
     expect(screen.getByText("中际旭创")).toBeInTheDocument();
   });
   expect(screen.getByText("北美客户订单")).toBeInTheDocument();
-  expect(calls).toEqual([
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([
     {
       command: "search_watchlist_notes",
       payload: { payload: { keyword: "北美客户", symbols: [], limit: 20, offset: 0, sort: "relevance" } },
@@ -656,7 +913,7 @@ test("AI 分析页展示空态工作台并只使用本地交互", async () => {
   expect(screen.queryByText("下单")).not.toBeInTheDocument();
   expect(screen.queryByText("券商账户")).not.toBeInTheDocument();
   expect(screen.queryByText("自动交易")).not.toBeInTheDocument();
-  expect(calls).toEqual([]);
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([]);
 });
 
 test("AI 分析生成中页面展示空任务态并只使用本地交互", async () => {
@@ -712,7 +969,7 @@ test("AI 分析生成中页面展示空任务态并只使用本地交互", async
   expect(screen.queryByText("下单")).not.toBeInTheDocument();
   expect(screen.queryByText("券商账户")).not.toBeInTheDocument();
   expect(screen.queryByText("自动交易")).not.toBeInTheDocument();
-  expect(calls).toEqual([]);
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([]);
 });
 
 test("分析报告历史页面展示空态并按报告范围搜索", async () => {
@@ -793,7 +1050,7 @@ test("分析报告历史页面展示空态并按报告范围搜索", async () =>
   });
 
   expect(screen.queryByRole("button", { name: "复制 生益科技 个股综合分析" })).not.toBeInTheDocument();
-  expect(calls).toEqual([
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([
     {
       command: "search_reports",
       payload: { payload: { keyword: "雅克", symbols: [], limit: 20, offset: 0, sort: "relevance" } },
@@ -901,7 +1158,7 @@ test("分析报告详情页面无报告时展示空态并可返回列表", async
     expect(screen.getByRole("heading", { name: "分析报告历史" })).toBeInTheDocument();
   });
 
-  expect(calls).toEqual([]);
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([]);
 });
 
 test("分析报告详情页面按路由 ID 读取真实报告", async () => {
@@ -938,7 +1195,7 @@ test("分析报告详情页面按路由 ID 读取真实报告", async () => {
   expect(screen.getAllByText(/核心结论/).length).toBeGreaterThan(0);
   expect(screen.getByText(/仅作研究辅助，不构成投资建议/)).toBeInTheDocument();
   expect(screen.getByText(/估值波动风险/)).toBeInTheDocument();
-  expect(calls).toEqual([{ command: "report_get", payload: { id: 3 } }]);
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([{ command: "report_get", payload: { id: 3 } }]);
 });
 
 test("任务历史页面默认展示空态且不暴露假任务", async () => {
@@ -961,7 +1218,152 @@ test("任务历史页面默认展示空态且不暴露假任务", async () => {
   expect(screen.queryByText("task_20250520_152834_abcd1234")).not.toBeInTheDocument();
   expect(screen.queryByText("生益科技 个股综合分析")).not.toBeInTheDocument();
   expect(screen.queryByText("事件流")).not.toBeInTheDocument();
-  expect(calls).toEqual([]);
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([]);
+});
+
+test("TopBar 运行期新增未读通知时按设置触发系统通知", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  notificationIsPermissionGrantedMock.mockResolvedValue(true);
+  let unreadCountCalls = 0;
+  mockIPC((command, payload) => {
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+      case "dashboard_summary":
+        return { code: 0, message: "ok", data: emptyDashboardFixture };
+      case "watchlist_list":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "market_quote":
+        return { code: 0, message: "ok", data: { symbol: "000001.SH", price: 0, change: 0, change_percent: 0 } };
+      case "notifications_unread_count":
+        unreadCountCalls += 1;
+        return { code: 0, message: "ok", data: { count: unreadCountCalls === 1 ? 0 : 1 } };
+      case "notifications_list":
+        expect(payload).toEqual({ payload: { unread_only: true, limit: 5, offset: 0 } });
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              {
+                id: 11,
+                type: "task_success",
+                level: "success",
+                title: "任务完成",
+                content: "浦发银行分析已完成",
+                route: "/reports/3",
+                is_read: false,
+                created_at: "2026-06-23T09:00:00Z",
+              },
+            ],
+            total: 1,
+            limit: 5,
+            offset: 0,
+          },
+        };
+      case "settings_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              { key: "notifications.system_enabled", value: "true" },
+              { key: "notifications.task_success", value: "true" },
+              { key: "notifications.task_failed", value: "true" },
+              { key: "notifications.provider_error", value: "true" },
+            ],
+          },
+        };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+  await waitFor(() => {
+    expect(unreadCountCalls).toBe(1);
+  });
+  expect(notificationSendMock).not.toHaveBeenCalled();
+
+  await vi.advanceTimersByTimeAsync(30_000);
+
+  await waitFor(() => {
+    expect(notificationSendMock).toHaveBeenCalledWith({
+      title: "任务完成",
+      body: "浦发银行分析已完成",
+    });
+  });
+});
+
+test("TopBar 系统通知关闭时不触发系统通知", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  notificationIsPermissionGrantedMock.mockResolvedValue(true);
+  let unreadCountCalls = 0;
+  mockIPC((command) => {
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+      case "dashboard_summary":
+        return { code: 0, message: "ok", data: emptyDashboardFixture };
+      case "watchlist_list":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "market_quote":
+        return { code: 0, message: "ok", data: { symbol: "000001.SH", price: 0, change: 0, change_percent: 0 } };
+      case "notifications_unread_count":
+        unreadCountCalls += 1;
+        return { code: 0, message: "ok", data: { count: unreadCountCalls === 1 ? 0 : 1 } };
+      case "notifications_list":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              {
+                id: 12,
+                type: "provider_error",
+                level: "warning",
+                title: "数据源异常",
+                content: "行情 Provider 不可用",
+                route: "/settings",
+                is_read: false,
+                created_at: "2026-06-23T09:00:00Z",
+              },
+            ],
+            total: 1,
+            limit: 5,
+            offset: 0,
+          },
+        };
+      case "settings_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              { key: "notifications.system_enabled", value: "false" },
+              { key: "notifications.task_success", value: "true" },
+              { key: "notifications.task_failed", value: "true" },
+              { key: "notifications.provider_error", value: "true" },
+            ],
+          },
+        };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+  await waitFor(() => {
+    expect(unreadCountCalls).toBe(1);
+  });
+
+  await vi.advanceTimersByTimeAsync(30_000);
+
+  await waitFor(() => {
+    expect(unreadCountCalls).toBeGreaterThan(1);
+  });
+  expect(notificationSendMock).not.toHaveBeenCalled();
+  expect(notificationIsPermissionGrantedMock).not.toHaveBeenCalled();
 });
 
 test("任务历史页面筛选和重置保持空态", async () => {
@@ -990,7 +1392,7 @@ test("任务历史页面筛选和重置保持空态", async () => {
   fireEvent.click(screen.getByRole("button", { name: /重\s*置/ }));
   expect(screen.queryByText("生益科技 个股综合分析")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /取消/ })).not.toBeInTheDocument();
-  expect(calls).toEqual([]);
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([]);
 });
 
 test("设置中心基础设置页展示真实空态并支持基础交互", async () => {
@@ -1051,6 +1453,10 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
         },
       };
     }
+    const dataSourceCredentialResponse = dataSourceCredentialCommandResponse(command, payload);
+    if (dataSourceCredentialResponse) {
+      return dataSourceCredentialResponse;
+    }
     throw new Error(`unexpected command ${command}`);
   });
 
@@ -1088,12 +1494,13 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.queryByText("帮助我们改进产品（不会收集个人信息）")).not.toBeInTheDocument();
   expect(screen.getByText("敏感信息会脱敏保存；日志导出前将自动清理 API Key 与代理密码。")).toBeInTheDocument();
 
-  const switches = screen.getAllByRole("switch");
-  expect(switches).toHaveLength(4);
-  expect(switches[0]).toBeChecked();
-  expect(switches[1]).toBeChecked();
-  expect(switches[2]).not.toBeChecked();
-  expect(switches[3]).toBeChecked();
+  expect(getSwitchByTitle("应用内通知")).toBeChecked();
+  expect(getSwitchByTitle("系统级通知")).toBeChecked();
+  expect(getSwitchByTitle("任务成功通知")).toBeChecked();
+  expect(getSwitchByTitle("任务失败通知")).toBeChecked();
+  expect(getSwitchByTitle("Provider 异常通知")).toBeChecked();
+  expect(getSwitchByTitle("开机自启动")).not.toBeChecked();
+  expect(getSwitchByTitle("关闭后最小化到托盘")).toBeChecked();
 
   fireEvent.click(screen.getByRole("button", { name: "选择目录" }));
   fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
@@ -1281,12 +1688,13 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.queryByText("升级 Pro")).not.toBeInTheDocument();
   expect(screen.queryByText("立即更新")).not.toBeInTheDocument();
 
-  expect(calls).toEqual([
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([
     { command: "core_health", payload: {} },
     { command: "providers_status", payload: {} },
     { command: "settings_get", payload: basicSettingsGetPayload },
     { command: "ai_config_list", payload: {} },
     { command: "workspace_get", payload: {} },
+    { command: "settings_get", payload: notificationSettingsGetPayload },
     { command: "cache_stats", payload: {} },
     { command: "search_status", payload: {} },
     { command: "autostart_get", payload: {} },
@@ -1340,6 +1748,10 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
         },
       };
     }
+    const dataSourceCredentialResponse = dataSourceCredentialCommandResponse(command, payload);
+    if (dataSourceCredentialResponse) {
+      return dataSourceCredentialResponse;
+    }
     throw new Error(`unexpected command ${command}`);
   });
 
@@ -1353,7 +1765,9 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
   expect(screen.getByRole("tab", { name: "数据说明" })).toHaveAttribute("aria-selected", "true");
   fireEvent.click(screen.getByRole("tab", { name: "凭据管理" }));
   expect(screen.getByRole("tab", { name: "凭据管理" })).toHaveAttribute("aria-selected", "true");
-  expect(screen.getByText("Provider 列表")).toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.getByText("Provider 列表")).toBeInTheDocument();
+  });
   expect(screen.getByText("凭据配置")).toBeInTheDocument();
   expect(screen.getByText("连接测试")).toBeInTheDocument();
   expect(screen.getByText("安全与存储说明")).toBeInTheDocument();
@@ -1401,17 +1815,25 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
   expect(screen.queryByRole("tab", { name: "Provider 配置" })).not.toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: "同步策略" })).not.toBeInTheDocument();
 
-  expect(calls).toEqual([
-    { command: "core_health", payload: {} },
-    { command: "providers_status", payload: {} },
-    { command: "settings_get", payload: basicSettingsGetPayload },
-    { command: "ai_config_list", payload: {} },
-    { command: "workspace_get", payload: {} },
-    { command: "cache_stats", payload: {} },
-    { command: "search_status", payload: {} },
-    { command: "autostart_get", payload: {} },
-    { command: "settings_get", payload: { keys: ["window.close_to_tray"] } },
+  expect(withoutGlobalNotificationUnreadCalls(calls).map((call) => call.command)).toEqual([
+    "core_health",
+    "providers_status",
+    "settings_get",
+    "ai_config_list",
+    "workspace_get",
+    "settings_get",
+    "cache_stats",
+    "search_status",
+    "autostart_get",
+    "settings_get",
+    "data_source_credentials_list",
+    "data_source_credentials_save",
+    "data_source_credentials_test",
+    "data_source_credentials_clear",
   ]);
+  expect(calls).toContainEqual({ command: "settings_get", payload: basicSettingsGetPayload });
+  expect(calls).toContainEqual({ command: "settings_get", payload: notificationSettingsGetPayload });
+  expect(calls).toContainEqual({ command: "data_source_credentials_clear", payload: { payload: { providerId: "alpha-vantage" } } });
 }, 10_000);
 
 test("数据源设置数据说明页展示说明模块并仅使用本地交互", async () => {
@@ -1455,6 +1877,10 @@ test("数据源设置数据说明页展示说明模块并仅使用本地交互",
           dictionary_hash: "builtin",
         },
       };
+    }
+    const dataSourceCredentialResponse = dataSourceCredentialCommandResponse(command, payload);
+    if (dataSourceCredentialResponse) {
+      return dataSourceCredentialResponse;
     }
     throw new Error(`unexpected command ${command}`);
   });
@@ -1528,9 +1954,23 @@ test("数据源设置数据说明页展示说明模块并仅使用本地交互",
   expect(screen.queryByText("Authorization")).not.toBeInTheDocument();
   expect(screen.queryByText("Proxy-Authorization")).not.toBeInTheDocument();
 
+  fireEvent.click(screen.getByRole("button", { name: "查看数据源" }));
+  expect(screen.getByRole("tab", { name: "数据源概览" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("数据源基础设置")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("tab", { name: "数据说明" }));
   fireEvent.click(screen.getByRole("button", { name: "查看数据源概览" }));
-  fireEvent.click(screen.getByRole("button", { name: "查看 Provider 配置" }));
+  expect(screen.getByRole("tab", { name: "数据源概览" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("数据源基础设置")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("tab", { name: "数据说明" }));
   fireEvent.click(screen.getByRole("button", { name: "查看凭据管理 >" }));
+  expect(screen.getByRole("tab", { name: "凭据管理" })).toHaveAttribute("aria-selected", "true");
+  await waitFor(() => {
+    expect(screen.getByText("Provider 列表")).toBeInTheDocument();
+  });
+
+  fireEvent.click(screen.getByRole("tab", { name: "数据说明" }));
   fireEvent.click(screen.getByRole("button", { name: "查看更多字段说明 >" }));
   fireEvent.click(screen.getByRole("button", { name: "为什么部分资讯需要凭据？ right" }));
   fireEvent.click(screen.getByRole("button", { name: "查看更多 FAQ >" }));
@@ -1538,16 +1978,18 @@ test("数据源设置数据说明页展示说明模块并仅使用本地交互",
   expect(screen.queryByRole("tab", { name: "同步策略" })).not.toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "数据说明" })).toHaveAttribute("aria-selected", "true");
 
-  expect(calls).toEqual([
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([
     { command: "core_health", payload: {} },
     { command: "providers_status", payload: {} },
     { command: "settings_get", payload: basicSettingsGetPayload },
     { command: "ai_config_list", payload: {} },
     { command: "workspace_get", payload: {} },
+    { command: "settings_get", payload: notificationSettingsGetPayload },
     { command: "cache_stats", payload: {} },
     { command: "search_status", payload: {} },
     { command: "autostart_get", payload: {} },
     { command: "settings_get", payload: { keys: ["window.close_to_tray"] } },
+    { command: "data_source_credentials_list", payload: {} },
   ]);
 }, 10_000);
 
@@ -2078,3 +2520,62 @@ test("AppErrorBoundary 捕获渲染异常并显示失败状态", () => {
     consoleError.mockRestore();
   }
 });
+
+function getSwitchByTitle(title: string): HTMLElement {
+  const row = screen.getByText(title).closest(".settings-basic-switch-row");
+  const switchElement = row?.querySelector("[role='switch']");
+  if (!(switchElement instanceof HTMLElement)) {
+    throw new Error(`missing switch for ${title}`);
+  }
+  return switchElement;
+}
+
+function dataSourceCredentialCommandResponse(command: string, payload?: unknown): unknown {
+  if (command === "data_source_credentials_list") {
+    return { code: 0, message: "ok", data: dataSourceCredentialListFixture };
+  }
+  if (command === "data_source_credentials_save") {
+    const config = (payload as { payload?: { config?: Record<string, unknown> } } | undefined)?.payload?.config;
+    return {
+      code: 0,
+      message: "ok",
+      data: {
+        config: {
+          ...config,
+          credentialStatus: "normal",
+          maskedCredential: "sk-****",
+        },
+      },
+    };
+  }
+  if (command === "data_source_credentials_clear") {
+    const providerId = (payload as { payload?: { providerId?: string } } | undefined)?.payload?.providerId ?? "alpha-vantage";
+    const config = dataSourceCredentialListFixture.configs[providerId as keyof typeof dataSourceCredentialListFixture.configs];
+    return {
+      code: 0,
+      message: "ok",
+      data: {
+        config: {
+          ...config,
+          credentialStatus: "not_configured",
+          maskedCredential: "",
+        },
+      },
+    };
+  }
+  if (command === "data_source_credentials_test") {
+    return {
+      code: 0,
+      message: "ok",
+      data: {
+        result: {
+          status: "success",
+          responseTimeMs: 168,
+          testedAt: "2025-05-20 15:30:00",
+          messages: ["本地凭据预检通过"],
+        },
+      },
+    };
+  }
+  return undefined;
+}
