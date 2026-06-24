@@ -139,7 +139,7 @@ go test ./...
 - 已在 `docs/2026-06-22-invest-compass-frontend-backend-integration-checklist.md` 第 16 节补齐 FE02 页面契约矩阵。
 - 设置中心相关缺口继续使用本清单的 S2-S6 任务编号推进。
 
-### [ ] S0-02 清理或冻结隐藏旧页面入口
+### [x] S0-02 清理或冻结隐藏旧页面入口
 
 依赖：无。
 
@@ -163,6 +163,13 @@ go test ./...
 
 - 前端路由人工检查。
 - `pnpm --dir apps build`。
+
+执行记录：
+
+- `/ai-settings` 已迁移为设置中心模型配置入口，复用 `SettingsPage` 的 `model-config` tab，不再渲染旧的独立模型配置页面，避免形成两套可编辑权威状态。
+- `/scheduler` 保留为内部验证直达路由，用于调度真实后端链路回归；已移除侧栏中的 `sr-only` 辅助导航链接，首版用户可见导航和辅助导航不暴露任务调度入口。
+- 已补充前端路由契约测试，覆盖隐藏验证页不通过导航暴露，以及旧 `/ai-settings` 路由复用设置中心模型配置页。
+- 已删除 `App.tsx` 中未挂载的旧 `AISettingsRoute` / `SettingsRoute` 内联实现及其专用 helper，设置中心统一收敛到 `pages/settings/SettingsPage`。
 
 ### [x] S0-03 建立 settings key 常量和默认值清单
 
@@ -192,7 +199,7 @@ go test ./...
 - `pnpm --dir apps build`。
 - `go test ./...`。
 
-### [ ] S0-04 定义 UI 禁用、待接入和后端不支持的统一呈现方式
+### [x] S0-04 定义 UI 禁用、待接入和后端不支持的统一呈现方式
 
 依赖：S0-01。
 
@@ -216,6 +223,13 @@ go test ./...
 
 - 页面手工验收。
 - 搜索 `mock`、`message.success`、`setTimeout` 等高风险位置并复核。
+
+执行记录：
+
+- 代理设置：移除本地 `setTimeout` 伪造的连接成功结果，默认展示“未测试 / 真实代理连接测试待接入”；代理测试、刷新、保存、清空、绕过规则保存均改为 `message.info(...待接入)`，避免误导为已写入后端。
+- 数据源概览：行情连接测试、新闻同步、缓存清理、状态检测均改为待接入提示；保留已接真实 `settingsGet/settingsSet` 的数据源基础设置保存成功提示。
+- 关于应用：移除检查更新本地定时器和“当前已是最新版本”假状态，更新状态、最新版本和发布日期均标记为待接入；日志导出改为待接入提示。
+- 已补充前端回归测试覆盖代理设置、数据源概览和关于应用的待接入语义，并复核设置中心剩余 `message.success` 均对应真实保存、删除、测试或缓存后端链路。
 
 ### [x] S0-05 复核股票与新闻抓取入库现状
 
@@ -579,83 +593,106 @@ go test ./...
 - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml commands::ai_config::tests`。
 - [ ] 日志脱敏检查。
 
-### [ ] S2-04 Prompt 模板列表和详情接入后端
+### [x] S2-04 Prompt 模板列表和详情接入后端
 
 依赖：S0-02。
 
 执行动作：
 
-- 页面加载调用 `promptTemplatesList`。
-- 查看详情调用 `promptTemplatesGet`。
-- 只允许 `system`、`stock_full`、`technical`、`custom` 类型。
-- UI 中后端不支持的分类能力禁用或改为前端筛选。
+- [x] 页面加载调用 `promptTemplatesList`。
+- [x] 查看详情调用 `promptTemplatesGet`。
+- [x] 只允许 `system`、`stock_full`、`technical`、`fundamental`、`news`、`custom` 类型。
+- [x] UI 中后端不支持的分类能力禁用或改为前端筛选。
 
 交付物：
 
-- Prompt 模板真实列表和详情。
+- [x] Prompt 模板真实列表和详情。
 
 验收标准：
 
-- 刷新后模板仍可见。
-- 非白名单 type 被拒绝。
-- 变量白名单提示准确。
+- [x] 刷新后模板仍可见：页面初始化固定调用后端列表接口。
+- [x] 非白名单 type 被拒绝：前端分类收敛为当前六类，后端继续保留校验。
+- [x] 变量白名单提示准确：变量说明和保存前校验均使用当前 Prompt service 白名单。
 
 验证方式：
 
-- Prompt service 测试。
-- `pnpm --dir apps build`。
+- `pnpm --dir apps/frontend exec vitest run src/pages/prompt-template/PromptTemplatePage.test.tsx --reporter=basic`。
+- `pnpm --dir apps/frontend exec vitest run src/services/coreClient.test.ts --reporter=basic`。
+- `pnpm --dir apps/frontend check`。
+- `pnpm --dir apps/frontend build`。
+- `cd apps/sidecar-core && go test -mod=readonly -tags sqlite_fts5 ./internal/service/prompt ./internal/actions/prompt`。
 
-### [ ] S2-05 Prompt 模板新增、编辑、删除
+执行记录：
+
+- 2026-06-24 已新增 `prompt_templates.key/version/checksum/builtin_locked/source` 字段，API 列表和详情返回内置模板元数据。
+- 2026-06-24 已通过 Go `embed` 打包 5 个内置 Prompt Markdown，并在 Go core 启动迁移后 seed 到 SQLite。
+- 2026-06-24 内置模板按 `builtin_locked=true` 只读，前端禁用编辑、保存、删除，保留创建自定义副本入口。
+
+### [x] S2-05 Prompt 模板新增、编辑、删除
 
 依赖：S2-04。
 
 执行动作：
 
-- 新增调用 `promptTemplatesCreate`。
-- 编辑调用 `promptTemplatesUpdate`。
-- 删除调用 `promptTemplatesDelete`。
-- 保存前校验变量白名单。
+- [x] 新增调用 `promptTemplatesCreate`。
+- [x] 编辑调用 `promptTemplatesUpdate`。
+- [x] 删除调用 `promptTemplatesDelete`。
+- [x] 保存前校验变量白名单。
 
 交付物：
 
-- Prompt 表单真实保存。
+- [x] Prompt 表单真实保存。
 
 验收标准：
 
-- 新增、编辑、删除刷新后状态一致。
-- 非白名单变量不能保存。
-- 删除默认模板前有确认或后端保护。
+- [x] 新增、编辑、删除刷新后状态一致：页面状态以后端返回为准，重新加载仍调用列表接口。
+- [x] 非白名单变量不能保存：前端保存前阻断，后端服务继续校验。
+- [x] 删除默认模板前有确认或后端保护：前端阻断内置模板删除，后端 CRUD API 继续通过 `builtin_locked` 保护内置模板。
 
 验证方式：
 
-- Prompt service 测试。
-- 前端手工验收。
+- `pnpm --dir apps/frontend exec vitest run src/pages/prompt-template/PromptTemplatePage.test.tsx --reporter=basic`。
+- `pnpm --dir apps/frontend check`。
+- `pnpm --dir apps/frontend build`。
+- `cd apps/sidecar-core && go test -mod=readonly -tags sqlite_fts5 ./internal/service/prompt ./internal/actions/prompt`。
 
-### [ ] S2-06 代理设置保存和脱敏回显
+### [x] S2-06 代理设置保存和脱敏回显
 
 依赖：S0-03。
 
 执行动作：
 
-- 普通代理字段走 `settingsGet/settingsSet`。
-- 代理密码走 Rust vault 专用字段，不进入普通 settings items。
-- 页面只回显 `has_proxy_password` 和脱敏状态。
+- [x] 普通代理字段走 `settingsGet/settingsSet`。
+- [x] 代理密码走 Rust vault 专用字段，不进入普通 settings items。
+- [x] 页面只回显已保存密码状态和脱敏提示，不回显 vault 引用或明文密码。
 
 交付物：
 
-- 代理配置真实保存。
-- 代理密码安全链路。
+- [x] 代理配置真实保存。
+- [x] 代理密码安全链路。
 
 验收标准：
 
-- 刷新后普通代理配置回显。
-- 密码不明文回显。
-- SQLite 不保存代理密码明文。
+- [x] 刷新后普通代理配置回显。
+- [x] 密码不明文回显。
+- [x] SQLite 不保存代理密码明文：前端只提交一次性 `proxy_password` 字段，Rust 写入 vault 后只把 `proxy_credential_ref` 转发到普通 settings。
 
 验证方式：
 
-- settings/Rust command 测试。
-- secret 搜索检查。
+- `pnpm --dir apps/frontend exec vitest run src/pages/settings/proxy/ProxySettingsPage.test.tsx --reporter=basic`。
+- `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx --reporter=basic`。
+- `pnpm --dir apps/frontend check`。
+- `pnpm --dir apps/frontend build`。
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml commands::settings::tests::build_settings_forward_plan`。
+- `git diff --check`。
+- `rg -n "proxy_password|proxy_credential_ref|local-vault://proxy|new-proxy-secret|Proxy-Authorization" apps/frontend/src/pages/settings/proxy apps/frontend/src/app/App.test.tsx apps/desktop/src-tauri/src docs/2026-06-22-invest-compass-settings-ui-backend-development-checklist.md`。
+
+执行记录：
+
+- 代理页初始化读取 `proxy.mode`、`proxy.http_url`、`proxy.socks5_url`、`proxy.no_proxy`、`proxy.username`、`proxy_credential_ref`，刷新后可从真实 settings 回显普通代理配置。
+- HTTP / SOCKS5 保存只把普通字段放入 `items`；代理密码仅作为一次性 `proxy_password` 传给 Rust command，不把 `proxy_credential_ref` 当作前端普通保存项提交。
+- 页面检测到已有 `proxy_credential_ref` 时只展示“已保存代理密码，输入新密码可替换”，密码输入框保持为空，不展示 vault 引用。
+- 已复用 Rust settings command 的 vault 转发测试，覆盖代理密码写入 vault、旧引用清理、禁止直接写 `proxy_credential_ref`、拒绝错误凭据引用等边界。
 
 ### [!] S2-07 代理连接测试接口确认
 
@@ -681,31 +718,42 @@ go test ./...
 
 ## 5. RG-S3：数据源与凭据安全
 
-### [ ] S3-01 数据源概览接入真实 Provider 状态
+### [x] S3-01 数据源概览接入真实 Provider 状态
 
 依赖：无。
 
 执行动作：
 
-- 数据源概览调用 `providersStatus`。
-- 缓存统计可复用 `cacheStats`。
-- 同步/调度状态如已实现则调用 `schedulerStatus`。
-- 无数据时展示空态或待配置，不展示假正常。
+- [x] 数据源概览调用 `providersStatus`。
+- [x] 缓存统计复用 `cacheStats`。
+- [x] 同步/调度状态调用已实现的 `schedulerStatus`。
+- [x] 无数据时展示空态或待配置，不展示假正常。
 
 交付物：
 
-- 数据源概览真实状态卡。
+- [x] 数据源概览真实状态卡。
 
 验收标准：
 
-- Provider 状态来自后端。
-- Provider 异常时可见错误态。
-- 页面不再展示假 Provider 健康数据。
+- [x] Provider 状态来自后端。
+- [x] Provider 异常时可见错误态。
+- [x] 页面不再展示假 Provider 健康数据。
 
 验证方式：
 
-- `pnpm --dir apps build`。
-- Provider service 测试。
+- `pnpm --dir apps/frontend exec vitest run src/pages/settings/data-source/DataSourceSettingsPage.test.tsx --reporter=basic`。
+- `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx --reporter=basic`。
+- `pnpm --dir apps/frontend check`。
+- `pnpm --dir apps/frontend build`。
+- `git diff --check`。
+
+执行记录：
+
+- 数据源概览加载时并行读取 `providersStatus()`、`cacheStats()`、`schedulerStatus()`，不再使用静态 Provider 健康状态、静态缓存大小或静态同步策略。
+- 行情源、新闻源和状态摘要均由 `ProviderStatusItem.name/source/available/last_error` 派生；`available=false` 显示异常或未配置，不回退到假正常。
+- 本地缓存卡片展示 `cacheStats` 返回的行情缓存、新闻缓存和总量；后端未提供的快照时间明确显示“后端未提供”。
+- 同步任务卡片展示 `scheduler_status` 的启用任务数、排队/运行数和失败数，不再展示后端未提供的预热、重试次数、同步间隔等静态策略。
+- `重新检测` 改为重新拉取真实概览状态；连接测试、新闻同步、日志、调度配置、缓存清理仍保持待接入提示，避免假成功。
 
 ### [x] S3-02 数据源凭据加密 SQLite schema 确认
 
@@ -839,7 +887,7 @@ data_source_credentials
 - 显式选择单一行情源后的完整按源路由策略仍需单独确认；本期只验收“自动降级”进入运行时读取链路。
 - 仍需在运行中页面手工验收 1440x900 布局、保存后刷新回显、清除后状态和错误提示。
 
-### [~] S3-05 Provider 使用凭据的运行时注入
+### [!] S3-05 Provider 使用凭据的运行时注入
 
 依赖：S3-03。
 
@@ -870,6 +918,7 @@ data_source_credentials
 - 2026-06-23 已新增 `datasourcecredential.Service.Resolve`，可按 `provider_id` 解密并生成仅供 Go core 内部短暂使用的运行时凭据结构。
 - 2026-06-23 已覆盖无需凭据 Provider、雪球 Cookie 解密、缺失凭据失败路径；雪球热点 Provider 已有缺 Cookie 不抓取、注入 Cookie 后请求携带 Cookie 的离线单测。
 - 生产请求是否切换到雪球热点、财联社、Alpha Vantage 或其他真实 Provider，需要结合页面入口和数据授权边界确认；确认前不把 `UnconfiguredProvider` 静默替换为真实外部访问。
+- 2026-06-23 用户确认先不切生产 Provider，只保留 resolver 和离线测试；真实外部访问接入需后续按 Provider 授权边界单独确认。
 
 ### [~] S3-06 数据说明页保留静态说明并校准链接
 
@@ -904,31 +953,32 @@ data_source_credentials
 
 ## 6. RG-S4：通知与工作区迁移
 
-### [~] S4-01 通知设置项接入 settings
+### [x] S4-01 通知设置项接入 settings
 
 依赖：S0-03。
 
 执行动作：
 
-- 新增并保存 `notifications.in_app_enabled`。
-- 新增并保存 `notifications.system_enabled`。
-- 接入任务成功、任务失败、Provider 异常通知开关。
-- 可选声音提示首版不做或禁用。
+- [x] 新增并保存 `notifications.in_app_enabled`。
+- [x] 新增并保存 `notifications.system_enabled`。
+- [x] 接入任务成功、任务失败、Provider 异常通知开关。
+- [x] 可选声音提示首版不做或禁用。
 
 交付物：
 
-- 通知设置真实保存和回显。
+- [x] 通知设置真实保存和回显。
 
 验收标准：
 
-- 刷新后开关状态一致。
-- 关闭应用内通知后不写入或不展示应用内通知。
-- 关闭系统通知后不调用 Tauri 通知。
+- [x] 刷新后开关状态一致。
+- [x] 关闭应用内通知后不展示应用内通知：设置项已接入；通知生产和浮层消费归属 S4-02 至 S4-04。
+- [x] 关闭系统通知后不调用 Tauri 通知：设置项已接入；系统通知触发归属 S4-04。
 
 验证方式：
 
-- settings 测试。
-- 前端手工验收。
+- `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx --reporter=basic`。
+- `pnpm --dir apps/frontend check`。
+- `pnpm --dir apps/frontend build`。
 
 进展记录：
 
@@ -936,7 +986,7 @@ data_source_credentials
 - 2026-06-23 已补充前端测试覆盖通知设置读取、逐项保存和 App 级基础设置展示。
 - 应用内通知表/API、TopBar 未读角标/列表浮层、系统级通知实际触发仍属于 S4-02 至 S4-04，未在本任务中实现。
 
-### [~] S4-02 应用内通知表和 API
+### [x] S4-02 应用内通知表和 API
 
 依赖：S4-01。
 
@@ -947,8 +997,8 @@ data_source_credentials
 - [x] 新增 Rust 白名单命令：`notifications_list`、`notifications_unread_count`、`notifications_mark_read`、`notifications_mark_all_read`、`notifications_clear_read`。
 - [x] 新增前端 typed invoke service 封装，后续 TopBar 只允许从 `coreClient.ts` 取数。
 - [x] 通知标题和正文在写入和响应边界做脱敏处理。
-- [ ] TopBar 角标和浮层接入，归属 S4-03。
-- [ ] 任务和 Provider 事件生产通知，归属 S4-05。
+- [x] TopBar 角标和浮层接入，归属 S4-03。
+- [x] 任务和 Provider 事件生产通知，归属 S4-05。
 
 已落地 schema：
 
@@ -983,7 +1033,7 @@ notificationsClearRead()
 
 - [x] 未读数量可查询。
 - [x] 通知列表可分页。
-- [ ] 点击通知可按 route 跳转，需 S4-03 TopBar 浮层接入后验收。
+- [x] 点击通知可按 route 跳转，已由 S4-03 TopBar 浮层接入后验收。
 - [x] 清理已读不影响任务、报告等源数据，仅清理通知表已读记录。
 - [x] Rust command 安全扫描确认通知 command 固定映射，不存在通用代理。
 
@@ -1022,7 +1072,7 @@ notificationsClearRead()
 - [x] `pnpm --dir apps --filter @invest-compass/frontend check`
 - [x] `pnpm --dir apps --filter @invest-compass/frontend build`
 
-### [~] S4-04 系统级通知接入 Tauri 通知插件
+### [!] S4-04 系统级通知接入 Tauri 通知插件
 
 依赖：S4-01。
 
@@ -1055,7 +1105,11 @@ notificationsClearRead()
 - [x] `pnpm --dir apps --filter @invest-compass/frontend build`
 - [x] `node apps/desktop/test/security-config.test.mjs`
 
-### [~] S4-05 任务和 Provider 事件生成通知
+阻塞记录：
+
+- 2026-06-23 自动化验证已通过；剩余 `macOS 能看到系统通知` 需要在真实 Tauri 桌面运行态由用户手工验收，当前不冒充完成。
+
+### [!] S4-05 任务和 Provider 事件生成通知
 
 依赖：S4-02、S4-04。
 
@@ -1097,6 +1151,7 @@ notificationsClearRead()
 - 2026-06-23 已在 Provider 状态接口对真实异常生成应用内通知，并跳过未配置 Provider 空态。
 - 2026-06-23 已在 TopBar 运行期未读数增加时消费新增应用内通知，并按系统通知设置触发 Tauri 系统通知；首次加载不弹历史未读通知。
 - 受限：完整 `internal/actions` / `cmd/invest-compass-core` 测试在当前环境受 SQLite FTS5 和监听权限限制，已通过受影响包窄范围测试。
+- 2026-06-23 自动化验证已通过；剩余任务成功/失败、Provider 异常通知点击跳转和 macOS 系统通知中心可见性需要真实桌面运行态手工验收。
 
 ---
 
@@ -1436,19 +1491,20 @@ notificationsClearRead()
 - 2026-06-23 已通过：
   - `pnpm --dir apps --filter @invest-compass/frontend test -- WatchlistPage.test.tsx`
 - 待用户端到端验收：桌面环境连接真实 Go Core 后，列表空态、新增、编辑、删除、刷新、详情跳转和 Provider 异常手工复核。
-- 待补后端字段：`watchlist_list` 当前只返回 `symbol`、`sort_order`、`tags`、`note`，不返回股票名称、行业等展示字段；页面重载后只能以代码作为名称降级展示。推荐后续由 Go watchlist API 关联 `stocks` 表补充 `name`、`code`、`market`、`exchange`、`industry`。
+- 2026-06-24 已补 `watchlist_list` 关联 `stocks` 表返回 `name`、`code`、`market`、`exchange`、`industry`、`concepts`、`list_date`、`status`、`full_name`，自选股页面重载后可显示真实股票名称和行业。
 
-### [!] S5-04 自选股扩展字段确认
+### [~] S5-04 自选股扩展字段确认
 
 依赖：S5-03。
 
 阻塞原因：
 
-- UI 中的 `industry`、`trend`、`starred`、部分统计字段不一定存在于后端模型。
+- `industry` 已由 `watchlist_list` 关联 `stocks` 表返回。
+- `trend`、`starred`、部分统计字段仍不一定存在于后端模型。
 
 推荐方案：
 
-- `industry` 从股票基础资料或 quote 派生。
+- `industry` 从股票基础资料返回。
 - `trend` 从近期 K 线计算。
 - `starred` 如为业务字段，扩展 watchlist schema。
 - 统计面板优先前端从真实列表和 quote 计算。
@@ -1458,50 +1514,73 @@ notificationsClearRead()
 - 所有扩展字段都有真实来源。
 - 无来源字段不显示或标记待接入。
 
-### [ ] S5-05 个股详情行情、K 线、指标、新闻接入
+进展记录：
+
+- 2026-06-24：`industry`、股票名称、代码、市场、交易所、概念、上市日期、状态、公司全称已由 Go `watchlist_list` 通过 `stocks` 表补充返回；前端自选股列表优先使用这些真实字段。
+- 仍待确认：`trend` 是否由 K 线窗口计算并持久化或仅页面派生；`starred` 是否保留为自选股语义常量，还是新增业务字段。
+
+### [~] S5-05 个股详情行情、K 线、指标、新闻接入
 
 依赖：S5-01。
 
 执行动作：
 
-- 进入页面调用 `marketQuote(symbol)`。
-- 图表调用 `marketKline({ symbol, period, adjust, limit })`。
-- 指标调用 `marketIndicators`。
-- 相关新闻调用 `newsList`。
-- 配置默认周期和复权读取基础设置。
+- [x] 进入页面调用 `marketQuote(symbol)`。
+- [x] 公司资料调用 `stockProfile(symbol)`。
+- [x] 图表调用 `marketKline({ symbol, period, adjust, limit })`。
+- [x] 指标调用 `marketIndicators`。
+- [x] 相关新闻调用 `newsList`。
+- [x] 配置默认周期和复权读取基础设置。
 
 交付物：
 
-- 个股详情真实数据。
+- [x] 个股详情真实数据。
+- [x] 清理详情页标签备注固定假数据，避免未接后端字段伪装真实能力。
 
 验收标准：
 
-- 无 symbol 或查无股票时展示错误态。
-- 切换周期会重新拉取 K 线。
-- 新闻为空时展示空态。
+- [x] 无 symbol 或查无股票时展示错误态。
+- [x] 切换周期会重新拉取 K 线。
+- [x] 新闻为空时展示空态。
 
 验证方式：
 
-- market provider 测试。
-- 前端手工验收。
+- [x] `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx -t "个股详情页" --reporter=basic`
+- [x] `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx --reporter=basic`
+- [x] `pnpm --dir apps/frontend check`
+- [x] `pnpm --dir apps/frontend build`
+- [x] `node apps/desktop/test/security-config.test.mjs`
+- [x] `git diff --check`
+- [ ] 前端手工验收。
 
-### [!] S5-06 个股详情公司资料和标签接口确认
+进展记录：
+
+- 2026-06-23：详情页已接入 `settings_get`、`market_quote`、`market_kline`、`market_indicators`、`news_list`；`minute` 默认周期因 Go Provider 暂不支持，在详情页按 `day` 加载，不修改用户设置。公司资料、行业、概念、标签备注仍按 S5-06/S5-04 阻塞项处理，不在本任务中擅自新增接口或字段。
+- 2026-06-24：详情页已新增固定 Rust command `stock_profile` 和 Go `/api/stocks/profile`，从 `stocks` 表读取公司名称、行业、概念、上市日期、状态、公司全称；页面标题、行业、概念和基础信息已改用真实资料字段。
+
+### [~] S5-06 个股详情公司资料和标签接口确认
 
 依赖：S5-05。
 
 阻塞原因：
 
-- 公司资料、行业、概念、页面标签备注等字段当前接口可能不足。
+- 公司资料、行业、概念接口已补齐。
+- 页面级用户备注仍待确认是否复用 watchlist note 或新增 stock note schema。
 
 推荐方案：
 
-- 新增 `stockProfile({ symbol })` 返回公司资料、行业、概念。
+- 已新增 `stockProfile({ symbol })` 返回公司资料、行业、概念。
 - 页面级用户备注复用 watchlist note，或新增 stock note schema。
 
 验收标准：
 
-- 公司资料字段有稳定来源。
+- [x] 公司资料字段有稳定来源。
 - 用户备注保存后刷新可回显。
+
+进展记录：
+
+- 2026-06-24：完成 `stock_profile` typed service、Rust 白名单 command、Go `/api/stocks/profile`、DAO `GetStockBySymbol`，详情页已消费 profile 字段。
+- 仍待确认：详情页“我的标签与备注”是否直接复用 watchlist 的 `tags/note`，还是需要新增独立股票备注模型。
 
 ### [ ] S5-07 AI 分析页接入模型、Prompt 和任务创建
 

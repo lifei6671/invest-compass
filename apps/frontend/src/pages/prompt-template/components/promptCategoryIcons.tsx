@@ -60,11 +60,10 @@ const iconByType = new Map(promptCategoryIconOptions.map((option) => [option.val
 
 const builtinIconByCategory: Record<BuiltinPromptTemplateCategoryType, PromptCategoryIconType> = {
   system: "setting",
-  stock_analysis: "chart",
-  technical_analysis: "code",
-  financial_analysis: "file",
-  position_analysis: "folder",
-  market_review: "profile",
+  stock_full: "chart",
+  technical: "code",
+  fundamental: "profile",
+  news: "fire",
   custom: "folder",
 };
 

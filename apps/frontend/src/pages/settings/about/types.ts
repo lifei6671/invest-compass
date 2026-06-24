@@ -11,7 +11,7 @@ export type AppInfoItem = {
 export type UpdateInfo = {
   currentVersion: string;
   latestVersion: string;
-  updateStatus: "latest" | "available" | "failed";
+  updateStatus: "unsupported" | "latest" | "available" | "failed";
   releaseDate: string;
 };
 
@@ -66,9 +66,9 @@ export const appInfoItems: AppInfoItem[] = [
 
 export const updateInfo: UpdateInfo = {
   currentVersion: "v0.1.0",
-  latestVersion: "v0.1.0",
-  updateStatus: "latest",
-  releaseDate: "2025-05-18",
+  latestVersion: "待接入",
+  updateStatus: "unsupported",
+  releaseDate: "待接入",
 };
 
 export const licenseInfo: LicenseInfo = {

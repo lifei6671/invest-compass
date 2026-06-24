@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/httpx"
@@ -20,6 +21,11 @@ type Store interface {
 	SaveWatchlist(ctx context.Context, item *model.Watchlist) error
 	ListActiveWatchlists(ctx context.Context) ([]model.Watchlist, error)
 	SoftDeleteWatchlist(ctx context.Context, id int64) error
+}
+
+// StockProfileStore 是自选股列表可选使用的股票资料批量读取边界。
+type StockProfileStore interface {
+	GetStocksBySymbols(ctx context.Context, symbols []string) (map[string]model.Stock, error)
 }
 
 // Config 是 watchlist action 的运行期依赖。
@@ -56,6 +62,15 @@ type itemData struct {
 	SortOrder int      `json:"sort_order"`
 	Tags      []string `json:"tags"`
 	Note      string   `json:"note"`
+	Name      string   `json:"name,omitempty"`
+	Code      string   `json:"code,omitempty"`
+	Market    string   `json:"market,omitempty"`
+	Exchange  string   `json:"exchange,omitempty"`
+	Industry  string   `json:"industry,omitempty"`
+	Concepts  []string `json:"concepts,omitempty"`
+	ListDate  string   `json:"list_date,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	FullName  string   `json:"full_name,omitempty"`
 }
 
 // Routes 返回自选股相关路由定义，不直接注册到 Gin。
@@ -81,7 +96,12 @@ func handleList(config Config) http.HandlerFunc {
 			writeStoreError(response, context, "读取自选股失败", err)
 			return
 		}
-		httpx.WriteOK(response, listData{Items: modelItemsToData(items)}, context)
+		profiles, err := loadStockProfiles(request.Context(), config.Store, items)
+		if err != nil {
+			writeStoreError(response, context, "读取自选股股票资料失败", err)
+			return
+		}
+		httpx.WriteOK(response, listData{Items: modelItemsToData(items, profiles)}, context)
 	}
 }
 
@@ -119,7 +139,7 @@ func handleCreate(config Config) http.HandlerFunc {
 			writeStoreError(response, context, "保存自选股失败", err)
 			return
 		}
-		httpx.WriteOK(response, modelItemToData(modelItem), context)
+		httpx.WriteOK(response, modelItemToData(modelItem, nil), context)
 	}
 }
 
@@ -163,7 +183,7 @@ func handleUpdate(config Config) http.HandlerFunc {
 			writeStoreError(response, context, "更新自选股失败", err)
 			return
 		}
-		httpx.WriteOK(response, modelItemToData(modelItem), context)
+		httpx.WriteOK(response, modelItemToData(modelItem, nil), context)
 	}
 }
 
@@ -224,24 +244,36 @@ func writeStoreError(response http.ResponseWriter, context httpx.RequestContext,
 	httpx.WriteError(response, http.StatusInternalServerError, 50005, "watchlist_store_error", context)
 }
 
-// modelItemsToData 转换数据库模型为 API 响应模型。
-func modelItemsToData(items []model.Watchlist) []itemData {
+// modelItemsToData 转换数据库模型为 API 响应模型，并合并同 symbol 股票资料。
+func modelItemsToData(items []model.Watchlist, profiles map[string]model.Stock) []itemData {
 	result := make([]itemData, 0, len(items))
 	for _, item := range items {
-		result = append(result, modelItemToData(item))
+		result = append(result, modelItemToData(item, profiles))
 	}
 	return result
 }
 
 // modelItemToData 转换单个数据库模型为 API 响应模型。
-func modelItemToData(item model.Watchlist) itemData {
-	return itemData{
+func modelItemToData(item model.Watchlist, profiles map[string]model.Stock) itemData {
+	data := itemData{
 		ID:        item.ID,
 		Symbol:    item.Symbol,
 		SortOrder: item.SortOrder,
 		Tags:      decodeTags(item.Tags),
 		Note:      item.Note,
 	}
+	if stock, ok := profiles[item.Symbol]; ok {
+		data.Name = stock.Name
+		data.Code = stock.Code
+		data.Market = stock.Market
+		data.Exchange = stock.Exchange
+		data.Industry = stock.Industry
+		data.Concepts = decodeConcepts(stock.Concept)
+		data.ListDate = stock.ListDate
+		data.Status = stock.Status
+		data.FullName = stock.FullName
+	}
+	return data
 }
 
 // modelItemsToService 转换数据库模型为 service 模型，用于复用业务规则。
@@ -318,6 +350,41 @@ func decodeTags(raw string) []string {
 		return nil
 	}
 	return tags
+}
+
+// loadStockProfiles 使用同一个 Store 的可选能力批量读取股票资料，未实现时保持列表基础字段可用。
+func loadStockProfiles(ctx context.Context, store Store, items []model.Watchlist) (map[string]model.Stock, error) {
+	profileStore, ok := store.(StockProfileStore)
+	if !ok {
+		return nil, nil
+	}
+	symbols := make([]string, 0, len(items))
+	for _, item := range items {
+		symbols = append(symbols, item.Symbol)
+	}
+	return profileStore.GetStocksBySymbols(ctx, symbols)
+}
+
+// decodeConcepts 兼容 JSON 数组和历史分隔符文本，统一向前端暴露数组。
+func decodeConcepts(raw string) []string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil
+	}
+	var concepts []string
+	if err := json.Unmarshal([]byte(value), &concepts); err == nil {
+		return concepts
+	}
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '，' || r == '、' || r == ';' || r == '；'
+	})
+	result := make([]string, 0, len(fields))
+	for _, item := range fields {
+		if concept := strings.TrimSpace(item); concept != "" {
+			result = append(result, concept)
+		}
+	}
+	return result
 }
 
 // stockFromModel 解析数据库中的标准 symbol。

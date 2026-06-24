@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
+	promptservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/prompt"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/settings"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
 	"gorm.io/gorm"
@@ -57,6 +58,51 @@ func (store *Store) UpsertStocks(ctx context.Context, stocks []model.Stock) erro
 			}),
 		}).
 		Create(&stocks).Error
+}
+
+// GetStockBySymbol 按标准 symbol 读取股票基础资料，供详情页和自选股展示同一份资料源。
+func (store *Store) GetStockBySymbol(ctx context.Context, symbol string) (model.Stock, bool, error) {
+	var stock model.Stock
+	err := store.db.WithContext(ctx).Where("symbol = ?", symbol).First(&stock).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Stock{}, false, nil
+	}
+	if err != nil {
+		return model.Stock{}, false, err
+	}
+	return stock, true, nil
+}
+
+// GetStocksBySymbols 批量读取股票基础资料，自选股列表用它避免逐项查询数据库。
+func (store *Store) GetStocksBySymbols(ctx context.Context, symbols []string) (map[string]model.Stock, error) {
+	if len(symbols) == 0 {
+		return map[string]model.Stock{}, nil
+	}
+	unique := make([]string, 0, len(symbols))
+	seen := make(map[string]struct{}, len(symbols))
+	for _, symbol := range symbols {
+		if symbol == "" {
+			continue
+		}
+		if _, ok := seen[symbol]; ok {
+			continue
+		}
+		seen[symbol] = struct{}{}
+		unique = append(unique, symbol)
+	}
+	if len(unique) == 0 {
+		return map[string]model.Stock{}, nil
+	}
+
+	var stocks []model.Stock
+	if err := store.db.WithContext(ctx).Where("symbol IN ?", unique).Find(&stocks).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[string]model.Stock, len(stocks))
+	for _, stock := range stocks {
+		result[stock.Symbol] = stock
+	}
+	return result, nil
 }
 
 // SaveQuote 按 symbol 保存最新行情快照，避免 quote 缓存表无限追加同一股票记录。
@@ -339,6 +385,35 @@ func (store *Store) SavePromptTemplate(ctx context.Context, template *model.Prom
 	return store.db.WithContext(ctx).Save(template).Error
 }
 
+// GetPromptTemplateByKey 按稳定 key 读取 Prompt 模板，供内置模板 seed 幂等更新。
+func (store *Store) GetPromptTemplateByKey(ctx context.Context, key string) (promptservice.Template, bool, error) {
+	var template model.PromptTemplate
+	result := store.db.WithContext(ctx).
+		Where("key = ? AND deleted_at IS NULL", key).
+		Limit(1).
+		Find(&template)
+	if result.Error != nil {
+		return promptservice.Template{}, false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return promptservice.Template{}, false, nil
+	}
+	serviceTemplate, err := promptTemplateModelToService(template)
+	if err != nil {
+		return promptservice.Template{}, false, err
+	}
+	return serviceTemplate, true, nil
+}
+
+// SaveBuiltinPromptTemplate 保存内置 Prompt 模板，保持 seed 层不直接接触 GORM 模型。
+func (store *Store) SaveBuiltinPromptTemplate(ctx context.Context, template promptservice.Template) error {
+	modelTemplate, err := promptTemplateServiceToModel(template)
+	if err != nil {
+		return err
+	}
+	return store.db.WithContext(ctx).Save(&modelTemplate).Error
+}
+
 // ListPromptTemplates 返回未软删除 Prompt 模板。
 func (store *Store) ListPromptTemplates(ctx context.Context) ([]model.PromptTemplate, error) {
 	var templates []model.PromptTemplate
@@ -362,6 +437,66 @@ func (store *Store) GetPromptTemplate(ctx context.Context, id int64) (model.Prom
 // SoftDeletePromptTemplate 对 Prompt 模板执行软删除。
 func (store *Store) SoftDeletePromptTemplate(ctx context.Context, id int64) error {
 	return store.db.WithContext(ctx).Delete(&model.PromptTemplate{}, id).Error
+}
+
+// promptTemplateModelToService 转换 GORM 模型为 Prompt service 模型，供内置模板 seed 复用。
+func promptTemplateModelToService(template model.PromptTemplate) (promptservice.Template, error) {
+	var rawVariables []string
+	if template.Variables != "" {
+		if err := json.Unmarshal([]byte(template.Variables), &rawVariables); err != nil {
+			return promptservice.Template{}, err
+		}
+	}
+	variables := make([]promptservice.Variable, 0, len(rawVariables))
+	for _, variable := range rawVariables {
+		variables = append(variables, promptservice.Variable(variable))
+	}
+	return promptservice.Template{
+		ID:            template.ID,
+		Key:           template.Key,
+		Name:          template.Name,
+		Type:          promptservice.TemplateType(template.Type),
+		Description:   template.Description,
+		Content:       template.Content,
+		Variables:     variables,
+		IsBuiltin:     template.IsBuiltin,
+		BuiltinLocked: template.BuiltinLocked,
+		Version:       template.Version,
+		Checksum:      template.Checksum,
+		Source:        template.Source,
+		Deleted:       template.DeletedAt.Valid,
+		CreatedAt:     template.CreatedAt,
+		UpdatedAt:     template.UpdatedAt,
+		DeletedAt:     template.DeletedAt.Time,
+	}, nil
+}
+
+// promptTemplateServiceToModel 转换 Prompt service 模型为 GORM 模型，并序列化变量白名单结果。
+func promptTemplateServiceToModel(template promptservice.Template) (model.PromptTemplate, error) {
+	variables := make([]string, 0, len(template.Variables))
+	for _, variable := range template.Variables {
+		variables = append(variables, string(variable))
+	}
+	payload, err := json.Marshal(variables)
+	if err != nil {
+		return model.PromptTemplate{}, err
+	}
+	return model.PromptTemplate{
+		ID:            template.ID,
+		Key:           template.Key,
+		Name:          template.Name,
+		Type:          string(template.Type),
+		Description:   template.Description,
+		Content:       template.Content,
+		Variables:     string(payload),
+		IsBuiltin:     template.IsBuiltin,
+		BuiltinLocked: template.BuiltinLocked,
+		Version:       template.Version,
+		Checksum:      template.Checksum,
+		Source:        template.Source,
+		CreatedAt:     template.CreatedAt,
+		UpdatedAt:     template.UpdatedAt,
+	}, nil
 }
 
 // SaveTask 创建或更新任务记录。

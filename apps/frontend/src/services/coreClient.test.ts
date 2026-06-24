@@ -56,6 +56,7 @@ import {
   searchReports,
   searchStatus,
   searchWatchlistNotes,
+  stockProfile,
   stockSearch,
   settingsGet,
   settingsSet,
@@ -212,21 +213,90 @@ describe("coreClient", () => {
     });
   });
 
-  test("watchlistList 通过固定 Tauri command 读取自选股", async () => {
+  test("watchlistList 通过固定 Tauri command 读取自选股并保留股票资料字段", async () => {
     const calls: Array<{ command: string; payload?: unknown }> = [];
     mockIPC((command, payload) => {
       calls.push({ command, payload });
       return {
         code: 0,
         message: "ok",
-        data: { items: [{ id: 1, symbol: "600000.SH", sort_order: 10, tags: ["银行"], note: "低估值观察" }] },
+        data: {
+          items: [{
+            id: 1,
+            symbol: "600000.SH",
+            sort_order: 10,
+            tags: ["银行"],
+            note: "低估值观察",
+            name: "浦发银行",
+            code: "600000",
+            market: "CN",
+            exchange: "SH",
+            industry: "银行",
+            concepts: ["低估值", "大金融"],
+            list_date: "1999-11-10",
+            status: "active",
+            full_name: "上海浦东发展银行股份有限公司",
+          }],
+        },
       };
     });
 
     await expect(watchlistList()).resolves.toEqual({
-      items: [{ id: 1, symbol: "600000.SH", sort_order: 10, tags: ["银行"], note: "低估值观察" }],
+      items: [{
+        id: 1,
+        symbol: "600000.SH",
+        sort_order: 10,
+        tags: ["银行"],
+        note: "低估值观察",
+        name: "浦发银行",
+        code: "600000",
+        market: "CN",
+        exchange: "SH",
+        industry: "银行",
+        concepts: ["低估值", "大金融"],
+        list_date: "1999-11-10",
+        status: "active",
+        full_name: "上海浦东发展银行股份有限公司",
+      }],
     });
     expect(calls).toEqual([{ command: "watchlist_list", payload: {} }]);
+  });
+
+  test("stockProfile 通过固定 Tauri command 读取个股基础资料", async () => {
+    const calls: Array<{ command: string; payload?: unknown }> = [];
+    mockIPC((command, payload) => {
+      calls.push({ command, payload });
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          symbol: "600000.SH",
+          name: "浦发银行",
+          code: "600000",
+          market: "CN",
+          exchange: "SH",
+          industry: "银行",
+          concepts: ["低估值", "大金融"],
+          list_date: "1999-11-10",
+          status: "active",
+          full_name: "上海浦东发展银行股份有限公司",
+        },
+      };
+    });
+
+    await expect(stockProfile("600000.SH")).resolves.toEqual({
+      symbol: "600000.SH",
+      name: "浦发银行",
+      code: "600000",
+      market: "CN",
+      exchange: "SH",
+      industry: "银行",
+      concepts: ["低估值", "大金融"],
+      list_date: "1999-11-10",
+      status: "active",
+      full_name: "上海浦东发展银行股份有限公司",
+    });
+    expect(calls).toEqual([{ command: "stock_profile", payload: { symbol: "600000.SH" } }]);
   });
 
   test("watchlistCreate/Update/Delete 通过固定 Tauri command 修改自选股", async () => {
@@ -581,12 +651,17 @@ describe("coreClient", () => {
                 type: "technical",
                 description: "技术指标分析",
                 content: "分析 {{stock_name}} 的 {{indicators}}",
-                variables: ["stock_name", "indicators"],
-                is_builtin: false,
-              },
-            ],
-          },
-        };
+              variables: ["stock_name", "indicators"],
+              is_builtin: false,
+              builtin_locked: false,
+              key: "user_technical",
+              version: 1,
+              checksum: "sha256:user",
+              source: "user",
+            },
+          ],
+        },
+      };
       }
       if (command === "prompt_templates_delete") {
         return { code: 0, message: "ok", data: { id: 7 } };
@@ -602,12 +677,28 @@ describe("coreClient", () => {
           content: "分析 {{stock_name}} 的 {{indicators}}",
           variables: ["stock_name", "indicators"],
           is_builtin: false,
+          builtin_locked: false,
+          key: "user_technical",
+          version: 1,
+          checksum: "sha256:user",
+          source: "user",
         },
       };
     });
 
     await expect(promptTemplatesList()).resolves.toMatchObject({
-      items: [{ id: 7, type: "technical", variables: ["stock_name", "indicators"] }],
+      items: [
+        {
+          id: 7,
+          type: "technical",
+          variables: ["stock_name", "indicators"],
+          key: "user_technical",
+          version: 1,
+          checksum: "sha256:user",
+          source: "user",
+          builtin_locked: false,
+        },
+      ],
     });
     await expect(promptTemplatesGet(7)).resolves.toMatchObject({ id: 7, name: "技术面模板" });
     await promptTemplatesCreate({

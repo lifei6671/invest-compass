@@ -1,4 +1,4 @@
-import { CheckCircleFilled, ExportOutlined, UpCircleFilled } from "@ant-design/icons";
+import { ExportOutlined, InfoCircleFilled, UpCircleFilled } from "@ant-design/icons";
 import { Button } from "antd";
 import type { ReactNode } from "react";
 import type { UpdateInfo } from "../types";
@@ -20,8 +20,8 @@ export function CheckUpdateCard(props: CheckUpdateCardProps) {
           label="更新状态"
           value={
             <span className="settings-about-latest-status">
-              <CheckCircleFilled />
-              当前已是最新版本
+              <InfoCircleFilled />
+              检查更新待接入
             </span>
           }
         />

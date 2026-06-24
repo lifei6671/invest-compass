@@ -15,7 +15,7 @@ export function LocalCacheSnapshotCard(props: LocalCacheSnapshotCardProps) {
         <KeyValue label="行情缓存大小" value={props.value.quoteCacheSize} />
         <KeyValue label="新闻缓存大小" value={props.value.newsCacheSize} />
         <KeyValue label="最近快照时间" value={props.value.latestSnapshotTime} />
-        <KeyValue label="快照保留策略" value={props.value.retentionPolicy} />
+        <KeyValue label="缓存总量" value={props.value.retentionPolicy} />
       </div>
       <Button className="settings-basic-outline-button settings-data-source-single-button" icon={<DeleteOutlined />} onClick={props.onCleanCache}>
         清理缓存

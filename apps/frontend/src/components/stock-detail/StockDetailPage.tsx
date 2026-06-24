@@ -1,4 +1,5 @@
 import { SafetyCertificateOutlined, InfoCircleOutlined } from "@ant-design/icons";
+import { Alert, Spin } from "antd";
 import { useLocation, useNavigate } from "react-router-dom";
 import { KlineChartCard } from "./components/KlineChartCard";
 import { ResearchEntryCard } from "./components/ResearchEntryCard";
@@ -7,9 +8,26 @@ import { StockInfoCard } from "./components/StockInfoCard";
 import { StockNewsTabsCard } from "./components/StockNewsTabsCard";
 import { StockTagsNoteCard } from "./components/StockTagsNoteCard";
 import { TechnicalIndicatorCard } from "./components/TechnicalIndicatorCard";
-import type { StockDetail } from "./types";
+import type { BasicInfoItem, KlineItem, StockDetail, StockNewsItem, TechnicalIndicator } from "./types";
 
-const emptyStockDetail: StockDetail = {
+type StockDetailPeriod = "day" | "week" | "month";
+type AdjustType = "none" | "qfq" | "hfq";
+
+type StockDetailPageProps = {
+  stock?: StockDetail;
+  basicInfo?: BasicInfoItem[];
+  klineItems?: KlineItem[];
+  technicalIndicators?: TechnicalIndicator[];
+  newsItems?: StockNewsItem[];
+  loading?: boolean;
+  error?: string | null;
+  period?: StockDetailPeriod;
+  adjust?: AdjustType;
+  onPeriodChange?: (period: StockDetailPeriod) => void;
+  onAdjustChange?: (adjust: AdjustType) => void;
+};
+
+const fallbackStockDetail: StockDetail = {
   name: "未选择股票",
   symbol: "暂无",
   code: "",
@@ -29,7 +47,7 @@ const emptyStockDetail: StockDetail = {
   updateTime: "待加载",
 };
 
-export function StockDetailPage() {
+export function StockDetailPage(props: StockDetailPageProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const routeState = location.state as { from?: string } | null;
@@ -40,15 +58,23 @@ export function StockDetailPage() {
 
   return (
     <section className="flex min-h-[calc(100vh-120px)] min-w-[1140px] flex-col gap-4">
-      <StockHeaderCard stock={emptyStockDetail} onBack={backToSource} />
+      {props.error ? <Alert title="个股详情读取失败" description={props.error} type="error" showIcon /> : null}
+      {props.loading ? <Alert title="正在读取个股详情" description={<Spin size="small" />} type="info" showIcon /> : null}
+      <StockHeaderCard stock={props.stock ?? fallbackStockDetail} onBack={backToSource} />
       <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_360px] gap-4">
         <main className="min-w-0 space-y-4">
-          <KlineChartCard items={[]} />
-          <TechnicalIndicatorCard items={[]} />
-          <StockNewsTabsCard items={[]} />
+          <KlineChartCard
+            items={props.klineItems ?? []}
+            period={props.period ?? "day"}
+            adjust={props.adjust ?? "qfq"}
+            onPeriodChange={props.onPeriodChange}
+            onAdjustChange={props.onAdjustChange}
+          />
+          <TechnicalIndicatorCard items={props.technicalIndicators ?? []} />
+          <StockNewsTabsCard items={props.newsItems ?? []} />
         </main>
         <aside className="min-w-0 space-y-3">
-          <StockInfoCard items={[]} concepts={[]} />
+          <StockInfoCard items={props.basicInfo ?? []} concepts={props.stock?.concepts ?? []} />
           <StockTagsNoteCard tags={[]} />
           <ResearchEntryCard />
         </aside>

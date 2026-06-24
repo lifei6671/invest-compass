@@ -145,16 +145,21 @@ type DataSourceCredential struct {
 
 // PromptTemplate 是 Prompt 模板表，variables 保存首版白名单变量的序列化结果。
 type PromptTemplate struct {
-	ID          int64  `gorm:"primaryKey;autoIncrement"`
-	Name        string `gorm:"not null"`
-	Type        string `gorm:"not null"`
-	Description string
-	Content     string `gorm:"not null"`
-	Variables   string
-	IsBuiltin   bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   gorm.DeletedAt
+	ID            int64  `gorm:"primaryKey;autoIncrement"`
+	Key           string `gorm:"index"`
+	Name          string `gorm:"not null"`
+	Type          string `gorm:"not null"`
+	Description   string
+	Content       string `gorm:"not null"`
+	Variables     string
+	IsBuiltin     bool
+	BuiltinLocked bool `gorm:"not null;default:false"`
+	Version       int  `gorm:"not null;default:1"`
+	Checksum      string
+	Source        string `gorm:"not null;default:user"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     gorm.DeletedAt
 }
 
 // AnalysisReport 是 AI 分析报告表，按 task_id 支撑幂等保存。

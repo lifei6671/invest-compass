@@ -48,6 +48,7 @@ type Config struct {
 	MarketProvider        market.MarketProvider
 	NewsProvider          newsservice.Provider
 	StockStore            searchservice.StockSearchStore
+	StockProfileStore     stocks.ProfileStore
 	StockSearchService    stocks.Service
 	DocumentSearchStore   searchservice.DocumentSearchStore
 	DocumentSearchService searchaction.Service
@@ -107,8 +108,9 @@ func Routes(config Config) []httpx.Route {
 		OnShutdown: config.OnShutdown,
 	})...)
 	routes = append(routes, stocks.Routes(stocks.Config{
-		Security: security,
-		Service:  stockSearchService(config),
+		Security:     security,
+		Service:      stockSearchService(config),
+		ProfileStore: stockProfileStore(config),
 	})...)
 	routes = append(routes, searchaction.Routes(searchaction.Config{
 		Security: security,
@@ -204,6 +206,17 @@ func Routes(config Config) []httpx.Route {
 		Fetcher:     config.UpdateManifestFetcher,
 	})...)
 	return routes
+}
+
+// stockProfileStore 返回股票资料读取依赖；生产默认复用 StockStore，确保资料只有一个数据库来源。
+func stockProfileStore(config Config) stocks.ProfileStore {
+	if config.StockProfileStore != nil {
+		return config.StockProfileStore
+	}
+	if store, ok := config.StockStore.(stocks.ProfileStore); ok {
+		return store
+	}
+	return nil
 }
 
 // stockSearchService 返回股票搜索 service；测试或特殊场景可显式注入，默认用本地 store 和 Provider 构造。

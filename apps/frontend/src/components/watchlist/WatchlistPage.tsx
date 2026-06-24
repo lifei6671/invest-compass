@@ -398,7 +398,7 @@ async function hydrateWatchlistItem(item: CoreWatchlistItem, displayName?: strin
 }
 
 function mapCoreWatchlistItem(item: CoreWatchlistItem, quote: MarketQuote | null, displayName?: string): WatchlistItem {
-  const { code, market } = watchlistDisplaySymbol(item.symbol);
+  const display = watchlistProfileDisplay(item);
   const changePercent = quote?.change_percent;
   const changeAmount = quote?.change_amount;
   return {
@@ -406,21 +406,45 @@ function mapCoreWatchlistItem(item: CoreWatchlistItem, quote: MarketQuote | null
     sourceSymbol: item.symbol,
     sortOrder: item.sort_order,
     starred: true,
-    name: displayName || code,
-    code,
-    market,
+    name: displayName || item.name || display.code,
+    code: display.code,
+    market: display.market,
     price: formatQuoteNumber(quote?.price),
     changeAmount: formatSignedQuoteNumber(changeAmount),
     changePercent: formatQuotePercent(changePercent),
     amount: formatAmount(quote?.amount),
     turnoverRate: formatQuotePercent(quote?.turnover_rate, false),
     pe: formatQuoteNumber(quote?.pe),
-    industry: "未分类",
+    industry: item.industry || "未分类",
     tags: item.tags,
     note: item.note,
     updatedAt: formatWatchlistQuoteTime(quote?.quote_time),
     trend: typeof changePercent === "number" && changePercent < 0 ? "down" : "up",
   };
+}
+
+function watchlistProfileDisplay(item: CoreWatchlistItem): Pick<WatchlistItem, "code" | "market"> {
+  if (item.code) {
+    const suffix = item.exchange ? `.${item.exchange}` : "";
+    return {
+      code: `${item.code}${suffix}`,
+      market: marketLabelFromProfile(item.market, item.exchange),
+    };
+  }
+  return watchlistDisplaySymbol(item.symbol);
+}
+
+function marketLabelFromProfile(market: string | undefined, exchange: string | undefined): WatchlistItem["market"] {
+  if (market === "HK" || exchange === "HK") {
+    return "港股";
+  }
+  if (market === "US" || exchange === "US") {
+    return "美股";
+  }
+  if (exchange === "SZ") {
+    return "深市";
+  }
+  return "沪市";
 }
 
 function parseTagsInput(value: string) {

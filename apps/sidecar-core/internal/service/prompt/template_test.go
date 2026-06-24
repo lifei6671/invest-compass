@@ -13,11 +13,25 @@ func TestValidateTemplateAcceptsSupportedTypesAndVariables(t *testing.T) {
 	template := Template{
 		Name:    "个股综合分析",
 		Type:    TemplateStockFull,
-		Content: "分析 {{stock_name}} {{stock_code}} {{market}} {{quote}} {{kline_summary}} {{indicators}} {{news}}，语言：{{analysis_language}}",
+		Content: "分析 {{stock_name}} {{stock_code}} {{market}} {{quote}} {{kline_summary}} {{indicators}} {{news}} {{data_asof}} {{context_quality}} {{prompt_key}} {{prompt_version}}，语言：{{analysis_language}}",
 	}
 
 	if err := ValidateTemplate(template); err != nil {
 		t.Fatalf("ValidateTemplate returned error: %v", err)
+	}
+}
+
+// TestValidateTemplateAcceptsBuiltinAnalysisTypes 验证内置 Prompt 文档要求的基本面和消息面模板类型已纳入白名单。
+func TestValidateTemplateAcceptsBuiltinAnalysisTypes(t *testing.T) {
+	for _, templateType := range []TemplateType{TemplateFundamental, TemplateNews} {
+		template := Template{
+			Name:    "内置分析模板",
+			Type:    templateType,
+			Content: "分析 {{stock_name}} {{fundamental_summary}} {{market_news}} {{industry_news}} {{prompt_key}} {{prompt_version}}",
+		}
+		if err := ValidateTemplate(template); err != nil {
+			t.Fatalf("ValidateTemplate(%s) returned error: %v", templateType, err)
+		}
 	}
 }
 
@@ -65,8 +79,8 @@ func TestCanDeleteTemplateOnlyAllowsCustomOrNonBuiltin(t *testing.T) {
 		template Template
 		want     bool
 	}{
-		{name: "builtin system cannot delete", template: Template{Type: TemplateSystem, IsBuiltin: true}, want: false},
-		{name: "builtin custom can delete", template: Template{Type: TemplateCustom, IsBuiltin: true}, want: true},
+		{name: "locked builtin system cannot delete", template: Template{Type: TemplateSystem, IsBuiltin: true, BuiltinLocked: true}, want: false},
+		{name: "unlocked legacy builtin custom can delete", template: Template{Type: TemplateCustom, IsBuiltin: true}, want: true},
 		{name: "non builtin stock full can delete", template: Template{Type: TemplateStockFull, IsBuiltin: false}, want: true},
 	}
 
@@ -132,11 +146,12 @@ func TestCreateTemplateValidatesAndExtractsVariables(t *testing.T) {
 // TestUpdateTemplateRejectsBuiltin 验证内置模板只读，不能被更新。
 func TestUpdateTemplateRejectsBuiltin(t *testing.T) {
 	_, err := UpdateTemplate(Template{
-		ID:        1,
-		Name:      "内置系统模板",
-		Type:      TemplateSystem,
-		Content:   "分析 {{stock_name}}",
-		IsBuiltin: true,
+		ID:            1,
+		Name:          "内置系统模板",
+		Type:          TemplateSystem,
+		Content:       "分析 {{stock_name}}",
+		IsBuiltin:     true,
+		BuiltinLocked: true,
 	}, UpdateRequest{
 		Name:    "尝试修改",
 		Type:    TemplateSystem,
@@ -190,11 +205,12 @@ func TestDeleteTemplateSoftDeletesAllowedTemplate(t *testing.T) {
 // TestDeleteTemplateRejectsReadonlyBuiltin 验证只读内置模板不能删除。
 func TestDeleteTemplateRejectsReadonlyBuiltin(t *testing.T) {
 	_, err := DeleteTemplate(Template{
-		ID:        4,
-		Name:      "内置技术模板",
-		Type:      TemplateTechnical,
-		Content:   "分析 {{stock_name}}",
-		IsBuiltin: true,
+		ID:            4,
+		Name:          "内置技术模板",
+		Type:          TemplateTechnical,
+		Content:       "分析 {{stock_name}}",
+		IsBuiltin:     true,
+		BuiltinLocked: true,
 	}, time.Now())
 
 	assertPromptErrorCode(t, err, xerr.PromptBuiltinTemplateReadOnly)

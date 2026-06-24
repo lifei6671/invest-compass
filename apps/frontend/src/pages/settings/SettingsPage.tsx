@@ -9,9 +9,13 @@ import { ModelConfigPage } from "./model-config/ModelConfigPage";
 import { ProxySettingsPage } from "./proxy/ProxySettingsPage";
 import { PromptTemplatePage } from "../prompt-template/PromptTemplatePage";
 
-export function SettingsPage() {
+type SettingsPageProps = {
+  initialActiveTab?: SettingsTabKey;
+};
+
+export function SettingsPage(props: SettingsPageProps = {}) {
   const { message } = AntApp.useApp();
-  const [activeTab, setActiveTab] = useState<SettingsTabKey>("basic");
+  const [activeTab, setActiveTab] = useState<SettingsTabKey>(props.initialActiveTab ?? "basic");
 
   return (
     <section className="settings-basic-page">

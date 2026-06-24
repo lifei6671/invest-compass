@@ -7,6 +7,7 @@ type StockTagsNoteCardProps = {
 
 export function StockTagsNoteCard(props: StockTagsNoteCardProps) {
   const { message } = AntApp.useApp();
+  const hasTags = props.tags.length > 0;
   return (
     <section className="stock-detail-card px-5 py-4">
       <div className="mb-3 flex items-center justify-between">
@@ -20,16 +21,20 @@ export function StockTagsNoteCard(props: StockTagsNoteCardProps) {
           label="标签"
           value={
             <div className="flex flex-wrap gap-2">
-              {props.tags.map((tag) => (
-                <Tag key={tag} className="m-0 rounded-md border-0 bg-[#f3f6fb] px-2.5 py-0.5 text-[12px] text-[#475569]">
-                  {tag}
-                </Tag>
-              ))}
+              {hasTags ? (
+                props.tags.map((tag) => (
+                  <Tag key={tag} className="m-0 rounded-md border-0 bg-[#f3f6fb] px-2.5 py-0.5 text-[12px] text-[#475569]">
+                    {tag}
+                  </Tag>
+                ))
+              ) : (
+                <span className="text-[#8a94a6]">暂无</span>
+              )}
             </div>
           }
         />
-        <InfoRow label="备注" value="关注产品结构升级及上游原材料价格变化。" />
-        <InfoRow label="最近查看" value={<span className="app-number">2025-05-20 15:20:35</span>} />
+        <InfoRow label="备注" value="暂无" />
+        <InfoRow label="最近查看" value={<span className="text-[#8a94a6]">待接入</span>} />
       </div>
     </section>
   );

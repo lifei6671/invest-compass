@@ -106,6 +106,14 @@ export type StockSearchResult = {
   exchange: string;
 };
 
+export type StockProfile = StockSearchResult & {
+  industry?: string;
+  concepts?: string[];
+  list_date?: string;
+  status?: string;
+  full_name?: string;
+};
+
 export type MarketQuote = {
   symbol: string;
   price: number;
@@ -240,16 +248,21 @@ export type AIConfigDeleteResult = {
   deleted_id: number;
 };
 
-export type PromptTemplateType = "system" | "stock_full" | "technical" | "custom";
+export type PromptTemplateType = "system" | "stock_full" | "technical" | "fundamental" | "news" | "custom";
 
 export type PromptTemplate = {
   id: number;
+  key?: string;
   name: string;
   type: PromptTemplateType;
   description: string;
   content: string;
   variables: string[];
   is_builtin: boolean;
+  builtin_locked?: boolean;
+  version?: number;
+  checksum?: string;
+  source?: "builtin" | "user" | string;
   created_at?: string;
   updated_at?: string;
 };
@@ -433,6 +446,15 @@ export type WatchlistItem = {
   sort_order: number;
   tags: string[];
   note: string;
+  name?: string;
+  code?: string;
+  market?: string;
+  exchange?: string;
+  industry?: string;
+  concepts?: string[];
+  list_date?: string;
+  status?: string;
+  full_name?: string;
 };
 
 export type WatchlistList = {
@@ -937,6 +959,12 @@ function normalizeDashboardSummary(summary: DashboardSummary): DashboardSummary 
 /// 通过固定 Rust command 搜索股票，搜索结果来自 Go core Provider，不在前端构造假数据。
 export async function stockSearch(keyword: string): Promise<StockSearchResult[]> {
   const response = await invoke<CoreEnvelope<StockSearchResult[]>>("stock_search", { keyword });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取股票基础资料，详情页和自选股共用 Go core 的 stocks 表数据。
+export async function stockProfile(symbol: string): Promise<StockProfile> {
+  const response = await invoke<CoreEnvelope<StockProfile>>("stock_profile", { symbol });
   return unwrapCoreResponse(response);
 }
 

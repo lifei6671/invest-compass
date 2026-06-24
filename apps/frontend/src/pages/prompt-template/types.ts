@@ -2,11 +2,10 @@ import type { ReactNode } from "react";
 
 export type BuiltinPromptTemplateCategoryType =
   | "system"
-  | "stock_analysis"
-  | "technical_analysis"
-  | "financial_analysis"
-  | "position_analysis"
-  | "market_review"
+  | "stock_full"
+  | "technical"
+  | "fundamental"
+  | "news"
   | "custom";
 
 export type PromptTemplateCategoryType = BuiltinPromptTemplateCategoryType | (string & {});
@@ -35,11 +34,16 @@ export type PromptCategoryIconType =
 
 export type PromptTemplate = {
   id: string;
+  key?: string;
   name: string;
   type: PromptTemplateCategoryType;
   description: string;
   content: string;
   isBuiltin: boolean;
+  builtinLocked: boolean;
+  version?: number;
+  checksum?: string;
+  source?: string;
   updatedAt?: string;
 };
 

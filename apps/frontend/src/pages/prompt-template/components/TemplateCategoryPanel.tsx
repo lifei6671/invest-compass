@@ -22,7 +22,7 @@ export function TemplateCategoryPanel(props: TemplateCategoryPanelProps) {
 
   props.categories.forEach((category) => {
     category.templates?.forEach((template) => {
-      templateById.set(template.id, template);
+      templateById.set(String(template.id), template);
     });
   });
 
@@ -47,7 +47,7 @@ export function TemplateCategoryPanel(props: TemplateCategoryPanelProps) {
       icon: getPromptCategoryIcon(category),
       label,
       children: category.templates.map((template) => ({
-        key: template.id,
+        key: String(template.id),
         label: (
           <span className="prompt-template-menu-label">
             <span>{template.name}</span>

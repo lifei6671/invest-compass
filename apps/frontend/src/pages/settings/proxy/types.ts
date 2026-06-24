@@ -39,6 +39,7 @@ export type HttpProxyConfig = {
   authenticationEnabled: boolean;
   username: string;
   password: string;
+  hasSavedPassword: boolean;
   timeoutSeconds: number;
 };
 
@@ -49,6 +50,7 @@ export type Socks5ProxyConfig = {
   authenticationEnabled: boolean;
   username: string;
   password: string;
+  hasSavedPassword: boolean;
   timeoutSeconds: number;
 };
 
@@ -108,6 +110,7 @@ export const initialHttpProxyConfig: HttpProxyConfig = {
   authenticationEnabled: false,
   username: "",
   password: "",
+  hasSavedPassword: false,
   timeoutSeconds: 10,
 };
 
@@ -118,6 +121,7 @@ export const initialSocks5ProxyConfig: Socks5ProxyConfig = {
   authenticationEnabled: false,
   username: "",
   password: "",
+  hasSavedPassword: false,
   timeoutSeconds: 10,
 };
 
@@ -137,8 +141,6 @@ export const initialProxyState: ProxySettingsState = {
   httpProxyConfig: initialHttpProxyConfig,
   socks5ProxyConfig: initialSocks5ProxyConfig,
   testResult: {
-    status: "success",
-    responseTimeMs: 128,
-    checkedAt: "2025-05-20 15:30:00",
+    status: "untested",
   },
 };

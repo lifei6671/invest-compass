@@ -41,6 +41,7 @@ pub fn run() {
             commands::settings::cache_stats,
             commands::settings::cache_clean,
             commands::market::stock_search,
+            commands::market::stock_profile,
             commands::market::market_quote,
             commands::market::market_kline,
             commands::market::market_indicators,

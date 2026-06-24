@@ -1,64 +1,38 @@
 import { Alert, App as AntApp, Button, ConfigProvider, Spin, Tag, Typography } from "antd";
 import { Component, lazy, Suspense, useEffect, useMemo, useState, type ErrorInfo, type FormEvent, type ReactNode } from "react";
-import { HashRouter, Link, Route, Routes } from "react-router-dom";
+import { HashRouter, Link, Route, Routes, useParams } from "react-router-dom";
 import { KlineChart } from "../components/market/KlineChart";
 import { SchedulerBackfillDialog } from "../components/scheduler/SchedulerBackfillDialog";
 import { SchedulerJobEditor, type SchedulerJobFormState } from "../components/scheduler/SchedulerJobEditor";
 import { SchedulerJobTable } from "../components/scheduler/SchedulerJobTable";
 import { SchedulerRunList } from "../components/scheduler/SchedulerRunList";
 import {
-  aiConfigDelete,
   aiConfigList,
-  aiConfigSave,
-  aiConfigTest,
   appBootStatus,
-  autostartGet,
-  autostartSet,
-  cacheClean,
-  cacheStats,
-  checkUpdate,
-  exportLogs,
   marketIndicators,
   marketKline,
   marketQuote,
   newsList,
   openExternalURL,
-  promptTemplatesCreate,
-  promptTemplatesDelete,
-  promptTemplatesList,
-  promptTemplatesUpdate,
   providersStatus,
-  selectDirectory,
   settingsGet,
-  settingsSet,
+  stockProfile,
   stockSearch,
   watchlistCreate,
   watchlistDelete,
   watchlistList,
   watchlistUpdate,
-  workspaceGet,
-  workspaceSet,
   type AppBootStatus,
-  type AIConfig,
-  type AIConfigSavePayload,
-  type AIConfigTestResult,
-  type AutostartState,
-  type CacheStatsResult,
-  type ExportLogsResult,
   type MarketIndicatorsResult,
   type MarketKlineItem,
   type MarketQuote,
   type NewsItem,
-  type PromptTemplate,
-  type PromptTemplateCreatePayload,
-  type PromptTemplateType,
   type ProviderStatusItem,
-  type SettingItem,
+  type StockProfile,
   type StockSearchResult,
-  type UpdateCheckResult,
   type WatchlistItem,
-  type WorkspaceResult,
 } from "../services/coreClient";
+import type { BasicInfoItem, KlineItem, StockDetail, StockNewsItem, TechnicalIndicator } from "../components/stock-detail/types";
 import {
   schedulerJobsBackfill,
   schedulerJobsDelete,
@@ -223,9 +197,10 @@ type AppProps = {
 const defaultBootStatusPollIntervalMs = 300;
 const defaultMinimumInitializationVisibleMs = 3000;
 const minimumReadyVisibleMs = 800;
+let bootReadyInCurrentRendererSession = false;
 
 export function App(props: AppProps = {}) {
-  const [bootState, setBootState] = useState<AppBootState>(props.initialBootState ?? defaultBootState());
+  const [bootState, setBootState] = useState<AppBootState>(() => resolveInitialBootState(props.initialBootState));
   const [bootStatus, setBootStatus] = useState<AppBootStatus | null>(null);
   const bootStatusPollIntervalMs = props.bootStatusPollIntervalMs ?? defaultBootStatusPollIntervalMs;
   const minimumInitializationVisibleMs = props.minimumInitializationVisibleMs ?? defaultMinimumInitializationVisibleMs;
@@ -245,6 +220,7 @@ export function App(props: AppProps = {}) {
         }
         setBootStatus(nextStatus);
         if (nextStatus.ready) {
+          rememberBootReadyForCurrentSession();
           const remainingVisibleMs = Math.max(minimumReadyVisibleMs, minimumInitializationVisibleMs - (Date.now() - startedAt));
           timer = window.setTimeout(() => {
             if (active) {
@@ -314,7 +290,7 @@ export function App(props: AppProps = {}) {
                     <Route path={APP_ROUTES.reportDetail} element={<ReportDetailPage />} />
                     <Route path={APP_ROUTES.tasks} element={<TaskHistoryPage />} />
                     <Route path={APP_ROUTES.settings} element={<SettingsPage />} />
-                    <Route path={APP_ROUTES.aiSettings} element={<AISettingsRoute />} />
+                    <Route path={APP_ROUTES.aiSettings} element={<SettingsPage initialActiveTab="model-config" />} />
                     <Route path="*" element={<Alert title="页面不存在" type="warning" showIcon />} />
                   </Routes>
                 </Suspense>
@@ -327,9 +303,29 @@ export function App(props: AppProps = {}) {
   );
 }
 
+function resolveInitialBootState(initialBootState?: AppBootState): AppBootState {
+  const requestedState = initialBootState ?? defaultBootState();
+  if (requestedState !== "initializing") {
+    return requestedState;
+  }
+  return hasBootReadyInCurrentSession() ? "ready" : requestedState;
+}
+
 function defaultBootState(): AppBootState {
   const env = (import.meta as unknown as { env?: { MODE?: string } }).env;
   return env?.MODE === "test" ? "ready" : "initializing";
+}
+
+function rememberBootReadyForCurrentSession() {
+  bootReadyInCurrentRendererSession = true;
+}
+
+function hasBootReadyInCurrentSession(): boolean {
+  return bootReadyInCurrentRendererSession;
+}
+
+export function resetBootReadyForTest() {
+  bootReadyInCurrentRendererSession = false;
 }
 
 function buildBootStatusReadFailedState(): AppBootStatus {
@@ -371,57 +367,6 @@ type SchedulerViewState = {
   providers: ProviderStatusItem[];
 };
 
-type AISettingsViewState = {
-  configs: AIConfig[];
-  templates: PromptTemplate[];
-};
-
-type SettingsViewState = {
-  settings: SettingItem[];
-  workspace: WorkspaceResult;
-  cache: CacheStatsResult;
-  providers: ProviderStatusItem[];
-  autostart: AutostartState;
-};
-
-type SettingsFormState = {
-  proxyURL: string;
-  proxyPassword: string;
-  proxyCredentialRef: string;
-  closeToTray: boolean;
-  autoStartEnabled: boolean;
-  taskNotificationsEnabled: boolean;
-  updateManifestURL: string;
-  updateAllowedHosts: string;
-  workspacePath: string;
-};
-
-type AIConfigFormState = {
-  id: number;
-  name: string;
-  provider: string;
-  baseUrl: string;
-  apiKeyRef: string;
-  maskedApiKey: string;
-  hasApiKey: boolean;
-  apiKey: string;
-  modelName: string;
-  temperature: string;
-  maxTokens: string;
-  timeoutSeconds: string;
-  streamEnabled: boolean;
-  isDefault: boolean;
-};
-
-type PromptTemplateFormState = {
-  id: number;
-  name: string;
-  type: PromptTemplateType;
-  description: string;
-  content: string;
-  isBuiltin: boolean;
-};
-
 type WatchlistViewState = {
   items: WatchlistItem[];
   quotes: Record<string, MarketQuote | { error: string }>;
@@ -429,1006 +374,21 @@ type WatchlistViewState = {
 
 type StockDetailViewState = {
   quote: MarketQuote;
+  profile: StockProfile;
   kline: MarketKlineItem[];
   indicators: MarketIndicatorsResult;
   news: NewsItem[];
 };
 
-function AISettingsRoute() {
-  const [state, setState] = useState<AISettingsViewState | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [actionPending, setActionPending] = useState<string | null>(null);
-  const [configForm, setConfigForm] = useState<AIConfigFormState>(() => defaultAIConfigForm());
-  const [templateForm, setTemplateForm] = useState<PromptTemplateFormState>(() => defaultPromptTemplateForm());
+type StockDetailPeriod = "day" | "week" | "month";
+type StockDetailAdjust = "none" | "qfq" | "hfq";
 
-  const load = () =>
-    Promise.all([aiConfigList(), promptTemplatesList()]).then(([configs, templates]) => ({
-      configs: configs.items,
-      templates: templates.items,
-    }));
+type StockDetailSettings = {
+  period: StockDetailPeriod;
+  adjust: StockDetailAdjust;
+};
 
-  useEffect(() => {
-    let active = true;
-    load()
-      .then((nextState) => {
-        if (active) {
-          setState(nextState);
-          setLoadError(null);
-        }
-      })
-      .catch((error: Error) => {
-        if (active) {
-          setLoadError(redactSensitiveText(error.message));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const saveConfig = (event: FormEvent) => {
-    event.preventDefault();
-    const validationError = validateAIConfigForm(configForm);
-    if (validationError) {
-      setActionError(validationError);
-      return;
-    }
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending("save-config");
-    aiConfigSave(aiConfigPayloadFromForm(configForm))
-      .then(({ config }) => {
-        setState((current) => ({
-          configs: upsertByID(current?.configs ?? [], config),
-          templates: current?.templates ?? [],
-        }));
-        setConfigForm(configFormFromConfig(config));
-        setActionMessage("模型配置已保存");
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const editConfig = (config: AIConfig) => {
-    setActionError(null);
-    setActionMessage(null);
-    setConfigForm(configFormFromConfig(config));
-  };
-
-  const deleteConfig = (config: AIConfig) => {
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending(`delete-config-${config.id}`);
-    aiConfigDelete({ id: config.id })
-      .then(() => {
-        setState((current) => ({
-          configs: (current?.configs ?? []).filter((item) => item.id !== config.id),
-          templates: current?.templates ?? [],
-        }));
-        if (configForm.id === config.id) {
-          setConfigForm(defaultAIConfigForm());
-        }
-        setActionMessage(`${config.name || "模型配置"} 已删除`);
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const testConfig = (config: AIConfig) => {
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending(`test-config-${config.id}`);
-    aiConfigTest({ id: config.id, api_key_ref: config.api_key_ref })
-      .then((result: AIConfigTestResult) => {
-        setActionMessage(result.ok ? `${config.name || "模型配置"} 连通性正常` : redactSensitiveText(result.message || "模型连通性测试失败"));
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const saveTemplate = (event: FormEvent) => {
-    event.preventDefault();
-    const validationError = validatePromptTemplateForm(templateForm);
-    if (validationError) {
-      setActionError(validationError);
-      return;
-    }
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending("save-template");
-    const payload = promptTemplatePayloadFromForm(templateForm);
-    const request = templateForm.id > 0 ? promptTemplatesUpdate({ ...payload, id: templateForm.id }) : promptTemplatesCreate(payload);
-    request
-      .then((template) => {
-        setState((current) => ({
-          configs: current?.configs ?? [],
-          templates: upsertByID(current?.templates ?? [], template),
-        }));
-        setTemplateForm(promptTemplateFormFromTemplate(template));
-        setActionMessage("Prompt 模板已保存");
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const editTemplate = (template: PromptTemplate) => {
-    setActionError(null);
-    setActionMessage(null);
-    setTemplateForm(promptTemplateFormFromTemplate(template));
-  };
-
-  const deleteTemplate = (template: PromptTemplate) => {
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending(`delete-template-${template.id}`);
-    promptTemplatesDelete(template.id)
-      .then(() => {
-        setState((current) => ({
-          configs: current?.configs ?? [],
-          templates: (current?.templates ?? []).filter((item) => item.id !== template.id),
-        }));
-        if (templateForm.id === template.id) {
-          setTemplateForm(defaultPromptTemplateForm());
-        }
-        setActionMessage(`${template.name || "Prompt 模板"} 已删除`);
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  if (loadError) {
-    return <Alert title="模型配置读取失败" description={loadError} type="error" showIcon />;
-  }
-  if (!state) {
-    return <Alert title="正在读取模型配置" description={<Spin size="small" />} type="info" showIcon />;
-  }
-
-  return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <Typography.Title level={2} className="m-0">
-          模型配置
-        </Typography.Title>
-        <Typography.Text type="secondary">OpenAI-compatible Provider、一次性 API Key 写入和 Prompt 模板管理。</Typography.Text>
-      </div>
-      {actionError ? <Alert title={actionError} type="error" showIcon /> : null}
-      {actionMessage ? <Alert title={actionMessage} type="success" showIcon /> : null}
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            模型接入
-          </Typography.Title>
-          <Button htmlType="button" onClick={() => setConfigForm(defaultAIConfigForm())}>
-            新建配置
-          </Button>
-        </div>
-        <form className="grid gap-3 px-4 py-4 md:grid-cols-4" onSubmit={saveConfig}>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">配置名称</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              value={configForm.name}
-              onChange={(event) => setConfigForm((current) => ({ ...current, name: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">Provider</span>
-            <select
-              className="h-8 rounded border border-slate-300 px-2"
-              value={configForm.provider}
-              onChange={(event) => setConfigForm((current) => ({ ...current, provider: event.target.value }))}
-            >
-              <option value="openai-compatible">OpenAI-compatible</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm md:col-span-2">
-            <span className="text-xs text-slate-500">接入点</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              value={configForm.baseUrl}
-              onChange={(event) => setConfigForm((current) => ({ ...current, baseUrl: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">模型名称</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              value={configForm.modelName}
-              onChange={(event) => setConfigForm((current) => ({ ...current, modelName: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">API Key</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              type="password"
-              value={configForm.apiKey}
-              onChange={(event) => setConfigForm((current) => ({ ...current, apiKey: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">Temperature</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              inputMode="decimal"
-              value={configForm.temperature}
-              onChange={(event) => setConfigForm((current) => ({ ...current, temperature: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">Max Tokens</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              inputMode="numeric"
-              value={configForm.maxTokens}
-              onChange={(event) => setConfigForm((current) => ({ ...current, maxTokens: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">超时秒数</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              inputMode="numeric"
-              value={configForm.timeoutSeconds}
-              onChange={(event) => setConfigForm((current) => ({ ...current, timeoutSeconds: event.target.value }))}
-            />
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={configForm.streamEnabled}
-              onChange={(event) => setConfigForm((current) => ({ ...current, streamEnabled: event.target.checked }))}
-            />
-            启用流式
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={configForm.isDefault}
-              onChange={(event) => setConfigForm((current) => ({ ...current, isDefault: event.target.checked }))}
-            />
-            默认配置
-          </label>
-          <div className="flex flex-wrap gap-2 md:col-span-4">
-            <Button htmlType="submit" loading={actionPending === "save-config"}>
-              保存模型配置
-            </Button>
-            <Button htmlType="button" onClick={() => setConfigForm(defaultAIConfigForm())}>
-              重置
-            </Button>
-          </div>
-        </form>
-        {state.configs.length === 0 ? (
-          <div className="border-t border-slate-100 px-4 py-8 text-sm text-slate-500">暂无模型配置</div>
-        ) : (
-          <div className="overflow-x-auto border-t border-slate-100">
-            <table className="w-full table-fixed text-left text-sm">
-              <thead className="bg-slate-50 text-slate-500">
-                <tr>
-                  <th className="w-[22%] px-4 py-2 font-medium">名称</th>
-                  <th className="w-[18%] px-4 py-2 font-medium">模型</th>
-                  <th className="w-[28%] px-4 py-2 font-medium">接入点</th>
-                  <th className="w-[14%] px-4 py-2 font-medium">密钥</th>
-                  <th className="w-[18%] px-4 py-2 font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.configs.map((config) => (
-                  <tr key={config.id} className="border-t border-slate-100">
-                    <td className="truncate px-4 py-3">
-                      {config.name || `模型配置 ${config.id}`}
-                      {config.is_default ? <Tag className="ml-2">默认</Tag> : null}
-                    </td>
-                    <td className="truncate px-4 py-3">{config.model_name || "-"}</td>
-                    <td className="truncate px-4 py-3">{config.base_url || "-"}</td>
-                    <td className="truncate px-4 py-3">{config.has_api_key ? config.masked_api_key || "已配置" : "未配置"}</td>
-                    <td className="flex flex-wrap gap-2 px-4 py-3">
-                      <Button size="small" loading={actionPending === `test-config-${config.id}`} onClick={() => testConfig(config)}>
-                        测试 {config.name || `模型配置 ${config.id}`}
-                      </Button>
-                      <Button size="small" onClick={() => editConfig(config)}>
-                        编辑
-                      </Button>
-                      <Button size="small" danger loading={actionPending === `delete-config-${config.id}`} onClick={() => deleteConfig(config)}>
-                        删除
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="flex flex-col gap-2 border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            Prompt 模板
-          </Typography.Title>
-          <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-            {allowedPromptTemplateTypes.map((type) => (
-              <Tag key={type}>{type}</Tag>
-            ))}
-            {allowedPromptVariables.map((variable) => (
-              <Tag key={variable} color="blue">
-                {`{{${variable}}}`}
-              </Tag>
-            ))}
-          </div>
-        </div>
-        <form className="grid gap-3 px-4 py-4 md:grid-cols-4" onSubmit={saveTemplate}>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">模板名称</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              value={templateForm.name}
-              onChange={(event) => setTemplateForm((current) => ({ ...current, name: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">模板类型</span>
-            <select
-              className="h-8 rounded border border-slate-300 px-2"
-              value={templateForm.type}
-              onChange={(event) => setTemplateForm((current) => ({ ...current, type: event.target.value as PromptTemplateType }))}
-            >
-              {allowedPromptTemplateTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm md:col-span-2">
-            <span className="text-xs text-slate-500">模板说明</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              value={templateForm.description}
-              onChange={(event) => setTemplateForm((current) => ({ ...current, description: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm md:col-span-4">
-            <span className="text-xs text-slate-500">模板内容</span>
-            <textarea
-              className="min-h-36 rounded border border-slate-300 px-2 py-2 font-mono text-xs"
-              value={templateForm.content}
-              onChange={(event) => setTemplateForm((current) => ({ ...current, content: event.target.value }))}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2 md:col-span-4">
-            <Button htmlType="submit" loading={actionPending === "save-template"} disabled={templateForm.isBuiltin}>
-              保存 Prompt 模板
-            </Button>
-            <Button htmlType="button" onClick={() => setTemplateForm(defaultPromptTemplateForm())}>
-              重置
-            </Button>
-          </div>
-        </form>
-        {state.templates.length === 0 ? (
-          <div className="border-t border-slate-100 px-4 py-8 text-sm text-slate-500">暂无 Prompt 模板</div>
-        ) : (
-          <div className="grid gap-0 border-t border-slate-100">
-            {state.templates.map((template) => (
-              <div key={template.id} className="grid gap-2 border-t border-slate-100 px-4 py-3 text-sm md:grid-cols-[1fr_auto_auto]">
-                <div className="min-w-0">
-                  <div className="truncate font-medium text-slate-900">
-                    {template.name}
-                    {template.is_builtin ? <Tag className="ml-2">内置</Tag> : null}
-                  </div>
-                  <div className="mt-1 line-clamp-2 text-xs text-slate-500">{template.description || template.content}</div>
-                </div>
-                <div className="flex flex-wrap items-start gap-1">
-                  <Tag>{template.type}</Tag>
-                  {template.variables.map((variable) => (
-                    <Tag key={variable} color={allowedPromptVariableSet.has(variable) ? "blue" : "red"}>
-                      {variable}
-                    </Tag>
-                  ))}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="small" onClick={() => editTemplate(template)}>
-                    编辑
-                  </Button>
-                  <Button
-                    size="small"
-                    danger
-                    disabled={template.is_builtin}
-                    loading={actionPending === `delete-template-${template.id}`}
-                    onClick={() => deleteTemplate(template)}
-                  >
-                    删除
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-    </section>
-  );
-}
-
-function SettingsRoute() {
-  const [state, setState] = useState<SettingsViewState | null>(null);
-  const [form, setForm] = useState<SettingsFormState>(() => defaultSettingsForm());
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [actionPending, setActionPending] = useState<string | null>(null);
-  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
-  const [logTargetDir, setLogTargetDir] = useState("");
-  const [logResult, setLogResult] = useState<ExportLogsResult | null>(null);
-
-  const load = () =>
-    Promise.all([settingsGet(settingsPageKeys), workspaceGet(), cacheStats(), providersStatus(), autostartGet()]).then(([settings, workspace, cache, providers, autostart]) => ({
-      settings: settings.items,
-      workspace,
-      cache,
-      providers: providers.items,
-      autostart,
-    }));
-
-  useEffect(() => {
-    let active = true;
-    load()
-      .then((nextState) => {
-        if (!active) {
-          return;
-        }
-        setState(nextState);
-        setForm(settingsFormFromState(nextState));
-        setLoadError(null);
-      })
-      .catch((error: Error) => {
-        if (active) {
-          setLoadError(redactSensitiveText(error.message));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const saveSettings = (event: FormEvent) => {
-    event.preventDefault();
-    const validationError = validateSettingsForm(form);
-    if (validationError) {
-      setActionError(validationError);
-      return;
-    }
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending("settings");
-    settingsSet(settingsPayloadFromForm(form))
-      .then(() => autostartSet(form.autoStartEnabled))
-      .then(() => {
-        setForm((current) => ({ ...current, proxyPassword: "" }));
-        setActionMessage("设置已保存");
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const saveWorkspace = () => {
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending("workspace");
-    workspaceSet(form.workspacePath)
-      .then((workspace) => {
-        setState((current) => (current ? { ...current, workspace } : current));
-        setActionMessage("工作区已保存");
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const cleanCache = (target: string) => {
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending(`cache-${target}`);
-    cacheClean([target])
-      .then(() => cacheStats())
-      .then((cache) => {
-        setState((current) => (current ? { ...current, cache } : current));
-        setActionMessage(`缓存 ${target} 已清理`);
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const checkForUpdate = () => {
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending("update");
-    checkUpdate()
-      .then((result) => setUpdateResult(result))
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const exportLocalLogs = () => {
-    const targetDir = logTargetDir.trim();
-    setActionError(null);
-    setActionMessage(null);
-    setLogResult(null);
-    if (!targetDir) {
-      setActionError("日志导出目录不能为空");
-      return;
-    }
-    setActionPending("logs");
-    exportLogs(targetDir)
-      .then((result) => {
-        setLogResult(result);
-        setActionMessage("日志已导出");
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  const selectLogExportDirectory = () => {
-    setActionError(null);
-    setActionMessage(null);
-    setActionPending("log-directory");
-    selectDirectory()
-      .then((selectedPath) => {
-        if (selectedPath) {
-          setLogTargetDir(selectedPath);
-        }
-      })
-      .catch((error: Error) => setActionError(redactSensitiveText(error.message)))
-      .finally(() => setActionPending(null));
-  };
-
-  if (loadError) {
-    return <Alert title="设置中心读取失败" description={loadError} type="error" showIcon />;
-  }
-  if (!state) {
-    return <Alert title="正在读取设置中心" description={<Spin size="small" />} type="info" showIcon />;
-  }
-
-  return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <Typography.Title level={2} className="m-0">
-          设置中心
-        </Typography.Title>
-        <Typography.Text type="secondary">工作区、代理、缓存、数据源、更新和本地日志。</Typography.Text>
-      </div>
-      {actionError ? <Alert title={actionError} type="error" showIcon /> : null}
-      {actionMessage ? <Alert title={actionMessage} type="success" showIcon /> : null}
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            基础设置
-          </Typography.Title>
-        </div>
-        <form className="grid gap-3 px-4 py-4 md:grid-cols-3" onSubmit={saveSettings}>
-          <label className="flex flex-col gap-1 text-sm md:col-span-2">
-            <span className="text-xs text-slate-500">代理 URL</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              placeholder="代理地址"
-              value={form.proxyURL}
-              onChange={(event) => setForm((current) => ({ ...current, proxyURL: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">代理密码</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              type="password"
-              value={form.proxyPassword}
-              onChange={(event) => setForm((current) => ({ ...current, proxyPassword: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm md:col-span-2">
-            <span className="text-xs text-slate-500">更新 Manifest URL</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              value={form.updateManifestURL}
-              onChange={(event) => setForm((current) => ({ ...current, updateManifestURL: event.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">更新允许域名</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              value={form.updateAllowedHosts}
-              onChange={(event) => setForm((current) => ({ ...current, updateAllowedHosts: event.target.value }))}
-            />
-          </label>
-          <label className="flex items-center gap-2 text-sm md:col-span-3">
-            <input
-              type="checkbox"
-              checked={form.closeToTray}
-              onChange={(event) => setForm((current) => ({ ...current, closeToTray: event.target.checked }))}
-            />
-            <span>关闭到托盘</span>
-          </label>
-          <label className="flex items-center gap-2 text-sm md:col-span-3">
-            <input
-              type="checkbox"
-              checked={form.autoStartEnabled}
-              onChange={(event) => setForm((current) => ({ ...current, autoStartEnabled: event.target.checked }))}
-            />
-            <span>开机自动启动</span>
-          </label>
-          <label className="flex items-center gap-2 text-sm md:col-span-3">
-            <input
-              type="checkbox"
-              checked={form.taskNotificationsEnabled}
-              onChange={(event) => setForm((current) => ({ ...current, taskNotificationsEnabled: event.target.checked }))}
-            />
-            <span>任务成功/失败通知</span>
-          </label>
-          <div className="flex flex-wrap gap-2 md:col-span-3">
-            <Button htmlType="submit" loading={actionPending === "settings"}>
-              保存设置
-            </Button>
-            <Tag>{form.proxyCredentialRef ? "代理凭据已保存" : "未保存代理凭据"}</Tag>
-          </div>
-        </form>
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            工作区
-          </Typography.Title>
-        </div>
-        <div className="grid gap-3 px-4 py-4 md:grid-cols-[1fr_auto]">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">工作区路径</span>
-            <input
-              className="h-8 rounded border border-slate-300 px-2"
-              value={form.workspacePath}
-              onChange={(event) => setForm((current) => ({ ...current, workspacePath: event.target.value }))}
-            />
-          </label>
-          <Button className="self-end" loading={actionPending === "workspace"} onClick={saveWorkspace}>
-            保存工作区
-          </Button>
-        </div>
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            缓存
-          </Typography.Title>
-          <Typography.Text type="secondary">{formatBytes(state.cache.total_bytes)}</Typography.Text>
-        </div>
-        {state.cache.items.length === 0 ? (
-          <div className="px-4 py-8 text-sm text-slate-500">暂无可清理缓存</div>
-        ) : (
-          <div className="grid gap-0">
-            {state.cache.items.map((item) => (
-              <div key={item.target} className="grid gap-3 border-t border-slate-100 px-4 py-3 text-sm md:grid-cols-[1fr_auto_auto]">
-                <div>
-                  <div className="font-medium text-slate-900">{item.label}</div>
-                  <div className="mt-1 text-xs text-slate-500">{item.target}</div>
-                </div>
-                <span>{formatBytes(item.bytes)}</span>
-                <Button size="small" disabled={!item.cleanable} loading={actionPending === `cache-${item.target}`} onClick={() => cleanCache(item.target)}>
-                  清理 {item.target}
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            数据刷新
-          </Typography.Title>
-          <Link to="/scheduler">进入任务调度</Link>
-        </div>
-        <div className="px-4 py-3 text-sm text-slate-600">管理交易日定时刷新、启动补偿、手动补偿和单股刷新。</div>
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            数据源
-          </Typography.Title>
-        </div>
-        {state.providers.map((provider) => (
-          <div key={`${provider.name}-${provider.source}`} className="grid gap-2 border-t border-slate-100 px-4 py-3 text-sm md:grid-cols-[1fr_auto_auto]">
-            <span className="font-medium text-slate-900">{provider.name}</span>
-            <span>{provider.source}</span>
-            <Tag color={provider.available ? "green" : "red"}>{provider.available ? "可用" : "不可用"}</Tag>
-            {provider.last_error ? <span className="text-xs text-red-600 md:col-span-3">{provider.last_error}</span> : null}
-          </div>
-        ))}
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <Typography.Title level={4} className="m-0">
-            更新和日志
-          </Typography.Title>
-          <Button loading={actionPending === "update"} onClick={checkForUpdate}>
-            检查更新
-          </Button>
-        </div>
-        {updateResult ? (
-          <div className="border-t border-slate-100 px-4 py-3 text-sm">
-            <div>
-              当前版本：<span>{updateResult.current_version}</span>
-            </div>
-            <div>
-              最新版本：<span>{updateResult.latest_version}</span>
-            </div>
-            {updateResult.release_notes ? <div className="mt-1 text-slate-600">{updateResult.release_notes}</div> : null}
-          </div>
-        ) : null}
-        <div className="grid gap-3 border-t border-slate-100 px-4 py-4 md:grid-cols-[1fr_auto_auto]">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-slate-500">日志导出目录</span>
-            <input className="h-8 rounded border border-slate-300 px-2" value={logTargetDir} onChange={(event) => setLogTargetDir(event.target.value)} />
-          </label>
-          <Button className="self-end" loading={actionPending === "log-directory"} onClick={selectLogExportDirectory}>
-            选择目录
-          </Button>
-          <Button className="self-end" loading={actionPending === "logs"} onClick={exportLocalLogs}>
-            导出日志
-          </Button>
-          {logResult ? <div className="text-xs text-slate-500 md:col-span-3">{logResult.file_path}</div> : null}
-        </div>
-      </section>
-      <section className="rounded-md border border-slate-200 bg-white px-4 py-4">
-        <Typography.Title level={4} className="m-0">
-          关于应用
-        </Typography.Title>
-        <div className="mt-3 flex flex-wrap gap-2 text-sm">
-          <Tag>FREE</Tag>
-          <span className="text-slate-600">仅作研究辅助，不构成投资建议。</span>
-        </div>
-      </section>
-    </section>
-  );
-}
-
-const allowedPromptTemplateTypes: PromptTemplateType[] = ["system", "stock_full", "technical", "custom"];
-const allowedPromptVariables = ["stock_name", "stock_code", "market", "quote", "kline_summary", "indicators", "news", "analysis_language"];
-const allowedPromptVariableSet = new Set(allowedPromptVariables);
-const settingsPageKeys = ["proxy_url", "proxy_credential_ref", "window.close_to_tray", "notifications.task_terminal", "update.manifest_url", "update.allowed_hosts"];
-
-function defaultSettingsForm(): SettingsFormState {
-  return {
-    proxyURL: "",
-    proxyPassword: "",
-    proxyCredentialRef: "",
-    closeToTray: false,
-    autoStartEnabled: false,
-    taskNotificationsEnabled: true,
-    updateManifestURL: "",
-    updateAllowedHosts: "",
-    workspacePath: "",
-  };
-}
-
-function settingsFormFromState(state: SettingsViewState): SettingsFormState {
-  return {
-    proxyURL: settingValue(state.settings, "proxy_url"),
-    proxyPassword: "",
-    proxyCredentialRef: settingValue(state.settings, "proxy_credential_ref"),
-    closeToTray: settingValue(state.settings, "window.close_to_tray").trim().toLowerCase() === "true",
-    autoStartEnabled: state.autostart.enabled,
-    taskNotificationsEnabled: taskNotificationsEnabledFromSettings(state.settings),
-    updateManifestURL: settingValue(state.settings, "update.manifest_url"),
-    updateAllowedHosts: settingValue(state.settings, "update.allowed_hosts"),
-    workspacePath: state.workspace.path,
-  };
-}
-
-function settingsPayloadFromForm(form: SettingsFormState) {
-  return {
-    items: [
-      { key: "proxy_url", value: form.proxyURL.trim() },
-      { key: "window.close_to_tray", value: String(form.closeToTray) },
-      { key: "notifications.task_terminal", value: String(form.taskNotificationsEnabled) },
-      { key: "update.manifest_url", value: form.updateManifestURL.trim() },
-      { key: "update.allowed_hosts", value: form.updateAllowedHosts.trim() },
-    ],
-    proxy_password: form.proxyPassword.trim() || undefined,
-    proxy_credential_ref: form.proxyCredentialRef,
-    clear_proxy_credential: false,
-  };
-}
-
-function settingValue(items: SettingItem[], key: string) {
-  return items.find((item) => item.key === key)?.value ?? "";
-}
-
-function taskNotificationsEnabledFromSettings(items: SettingItem[]) {
-  return settingValue(items, "notifications.task_terminal").trim().toLowerCase() !== "false";
-}
-
-function validateSettingsForm(form: SettingsFormState) {
-  const proxyURL = form.proxyURL.trim();
-  if (!proxyURL) {
-    return "";
-  }
-  try {
-    const parsed = new URL(proxyURL);
-    if (parsed.username || parsed.password) {
-      return "代理 URL 不能包含用户名或密码";
-    }
-  } catch {
-    return "代理 URL 格式不正确";
-  }
-  return "";
-}
-
-function formatBytes(value: number) {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  return `${(value / 1024).toFixed(1)} KiB`;
-}
-
-function defaultAIConfigForm(): AIConfigFormState {
-  return {
-    id: 0,
-    name: "",
-    provider: "openai-compatible",
-    baseUrl: "",
-    apiKeyRef: "",
-    maskedApiKey: "",
-    hasApiKey: false,
-    apiKey: "",
-    modelName: "gpt-4.1-mini",
-    temperature: "0.2",
-    maxTokens: "4096",
-    timeoutSeconds: "120",
-    streamEnabled: true,
-    isDefault: true,
-  };
-}
-
-function configFormFromConfig(config: AIConfig): AIConfigFormState {
-  return {
-    id: config.id,
-    name: config.name || "",
-    provider: config.provider || "openai-compatible",
-    baseUrl: config.base_url || "",
-    apiKeyRef: config.api_key_ref || "",
-    maskedApiKey: config.masked_api_key || "",
-    hasApiKey: Boolean(config.has_api_key),
-    apiKey: "",
-    modelName: config.model_name || "",
-    temperature: String(config.temperature ?? 0.2),
-    maxTokens: String(config.max_tokens ?? 4096),
-    timeoutSeconds: String(config.timeout_seconds ?? 120),
-    streamEnabled: Boolean(config.stream_enabled),
-    isDefault: Boolean(config.is_default),
-  };
-}
-
-function aiConfigPayloadFromForm(form: AIConfigFormState): AIConfigSavePayload {
-  const apiKey = form.apiKey.trim();
-  return {
-    id: form.id,
-    name: form.name.trim(),
-    provider: form.provider.trim(),
-    base_url: form.baseUrl.trim(),
-    api_key_ref: form.apiKeyRef,
-    masked_api_key: form.maskedApiKey,
-    has_api_key: form.hasApiKey || apiKey.length > 0,
-    model_name: form.modelName.trim(),
-    temperature: Number(form.temperature),
-    max_tokens: Number(form.maxTokens),
-    timeout_seconds: Number(form.timeoutSeconds),
-    stream_enabled: form.streamEnabled,
-    is_default: form.isDefault,
-    api_key: apiKey || undefined,
-  };
-}
-
-function validateAIConfigForm(form: AIConfigFormState) {
-  if (!form.name.trim()) {
-    return "请填写配置名称";
-  }
-  if (!form.baseUrl.trim()) {
-    return "请填写接入点";
-  }
-  if (!form.modelName.trim()) {
-    return "请填写模型名称";
-  }
-  if (!Number.isFinite(Number(form.temperature))) {
-    return "Temperature 必须是数字";
-  }
-  if (!positiveInteger(form.maxTokens)) {
-    return "Max Tokens 必须是正整数";
-  }
-  if (!positiveInteger(form.timeoutSeconds)) {
-    return "超时秒数必须是正整数";
-  }
-  return "";
-}
-
-function defaultPromptTemplateForm(): PromptTemplateFormState {
-  return {
-    id: 0,
-    name: "",
-    type: "stock_full",
-    description: "",
-    content: "",
-    isBuiltin: false,
-  };
-}
-
-function promptTemplateFormFromTemplate(template: PromptTemplate): PromptTemplateFormState {
-  return {
-    id: template.id,
-    name: template.name || "",
-    type: template.type,
-    description: template.description || "",
-    content: template.content || "",
-    isBuiltin: Boolean(template.is_builtin),
-  };
-}
-
-function promptTemplatePayloadFromForm(form: PromptTemplateFormState): PromptTemplateCreatePayload {
-  return {
-    name: form.name.trim(),
-    type: form.type,
-    description: form.description.trim(),
-    content: form.content,
-  };
-}
-
-function validatePromptTemplateForm(form: PromptTemplateFormState) {
-  if (form.isBuiltin) {
-    return "内置 Prompt 模板不可直接修改";
-  }
-  if (!form.name.trim()) {
-    return "请填写模板名称";
-  }
-  if (!allowedPromptTemplateTypes.includes(form.type)) {
-    return `模板类型 ${form.type} 不在首版白名单`;
-  }
-  if (!form.content.trim()) {
-    return "请填写模板内容";
-  }
-  for (const variable of extractPromptVariables(form.content)) {
-    if (!allowedPromptVariableSet.has(variable)) {
-      return `变量 ${variable} 不在首版白名单`;
-    }
-  }
-  return "";
-}
-
-function extractPromptVariables(content: string) {
-  const variables: string[] = [];
-  const pattern = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
-  let match = pattern.exec(content);
-  while (match) {
-    variables.push(match[1]);
-    match = pattern.exec(content);
-  }
-  return uniqueValues(variables);
-}
-
-function redactSensitiveText(value: string) {
-  return value
-    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[已脱敏]")
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/gi, "Bearer [已脱敏]")
-    .replace(/\bAuthorization:\s*[^\s]+/gi, "Authorization: [已脱敏]");
-}
-
-function upsertByID<T extends { id: number }>(items: T[], item: T) {
-  const exists = items.some((current) => current.id === item.id);
-  if (!exists) {
-    return [...items, item];
-  }
-  return items.map((current) => (current.id === item.id ? item : current));
-}
-
-function positiveInteger(value: string) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0;
-}
+const stockDetailSettingsKeys = ["kline.default_period", "kline.default_adjust"];
 
 function WatchlistRoute() {
   const [state, setState] = useState<WatchlistViewState | null>(null);
@@ -1788,8 +748,9 @@ function normalizeNewsItems(items: NewsItem[]) {
 }
 
 async function loadStockDetailState(normalizedSymbol: string, period: string, adjust: string): Promise<StockDetailViewState> {
-  const [quote, kline, indicators, news] = await Promise.all([
+  const [quote, profile, kline, indicators, news] = await Promise.all([
     marketQuote(normalizedSymbol),
+    stockProfile(normalizedSymbol),
     marketKline({ symbol: normalizedSymbol, period, adjust, limit: 120 }),
     marketIndicators({
       symbol: normalizedSymbol,
@@ -1802,6 +763,7 @@ async function loadStockDetailState(normalizedSymbol: string, period: string, ad
   ]);
   return {
     quote,
+    profile,
     kline: kline.items,
     indicators,
     news: normalizeNewsItems(news.items),
@@ -1809,7 +771,215 @@ async function loadStockDetailState(normalizedSymbol: string, period: string, ad
 }
 
 function StockDetailRoute() {
-  return <StockDetailPage />;
+  const params = useParams();
+  const normalizedSymbol = (params.symbol ?? "").trim();
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [period, setPeriod] = useState<StockDetailPeriod>("day");
+  const [adjust, setAdjust] = useState<StockDetailAdjust>("qfq");
+  const [state, setState] = useState<StockDetailViewState | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSettingsReady(false);
+    setLoadError(null);
+    settingsGet(stockDetailSettingsKeys)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        const values = new Map(result.items.map((item) => [item.key, item.value]));
+        setPeriod(normalizeStockDetailPeriod(values.get("kline.default_period")));
+        setAdjust(normalizeStockDetailAdjust(values.get("kline.default_adjust")));
+        setSettingsReady(true);
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setLoadError(`基础设置读取失败：${error.message}`);
+          setSettingsReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedSymbol]);
+
+  useEffect(() => {
+    if (!settingsReady || !normalizedSymbol) {
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    loadStockDetailState(normalizedSymbol, period, adjust)
+      .then((nextState) => {
+        if (!cancelled) {
+          setState(nextState);
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setLoadError(error.message);
+          setState(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [adjust, normalizedSymbol, period, settingsReady]);
+
+  if (!normalizedSymbol) {
+    return <StockDetailPage error="未选择股票" />;
+  }
+
+  return (
+    <StockDetailPage
+      stock={state ? toStockDetail(normalizedSymbol, state.quote, state.profile) : emptyStockDetailForSymbol(normalizedSymbol)}
+      basicInfo={state ? toBasicInfo(state.quote, state.profile) : []}
+      klineItems={state ? toKlineItems(state.kline) : []}
+      technicalIndicators={state ? toTechnicalIndicators(state.indicators.indicators, period) : []}
+      newsItems={state ? toStockNewsItems(state.news) : []}
+      loading={loading || !settingsReady}
+      error={loadError}
+      period={period}
+      adjust={adjust}
+      onPeriodChange={setPeriod}
+      onAdjustChange={setAdjust}
+    />
+  );
+}
+
+function normalizeStockDetailPeriod(value: string | undefined): StockDetailPeriod {
+  switch (value) {
+    case "week":
+    case "month":
+      return value;
+    case "minute":
+    case "day":
+    default:
+      // Go market provider 当前仅支持 day/week/month，分时设置在详情页按日 K 加载。
+      return "day";
+  }
+}
+
+function normalizeStockDetailAdjust(value: string | undefined): StockDetailAdjust {
+  switch (value) {
+    case "none":
+    case "hfq":
+      return value;
+    case "qfq":
+    default:
+      return "qfq";
+  }
+}
+
+function emptyStockDetailForSymbol(symbol: string): StockDetail {
+  return {
+    name: symbol,
+    symbol,
+    code: stockCodeFromSymbol(symbol),
+    industry: "暂无",
+    subIndustry: "暂无",
+    concepts: [],
+    price: null,
+    changeAmount: null,
+    changePercent: null,
+    open: null,
+    high: null,
+    low: null,
+    previousClose: null,
+    turnoverRate: "暂无",
+    amount: "暂无",
+    volume: "暂无",
+    updateTime: "待加载",
+  };
+}
+
+function toStockDetail(symbol: string, quote: MarketQuote, profile: StockProfile): StockDetail {
+  const resolvedSymbol = quote.symbol || profile.symbol || symbol;
+  return {
+    name: profile.name || resolvedSymbol,
+    symbol: resolvedSymbol,
+    code: profile.code ? `${profile.code}${profile.exchange ? `.${profile.exchange}` : ""}` : stockCodeFromSymbol(resolvedSymbol),
+    industry: profile.industry || "暂无",
+    subIndustry: "暂无",
+    concepts: profile.concepts ?? [],
+    price: quote.price,
+    changeAmount: quote.change_amount ?? null,
+    changePercent: quote.change_percent ?? null,
+    open: quote.open ?? null,
+    high: quote.high ?? null,
+    low: quote.low ?? null,
+    previousClose: quote.pre_close ?? null,
+    turnoverRate: typeof quote.turnover_rate === "number" ? `${formatNumber(quote.turnover_rate)}%` : "暂无",
+    amount: typeof quote.amount === "number" ? formatNumber(quote.amount) : "暂无",
+    volume: typeof quote.volume === "number" ? formatNumber(quote.volume) : "暂无",
+    updateTime: quote.quote_time || "后端未提供",
+  };
+}
+
+function toBasicInfo(quote: MarketQuote, profile: StockProfile): BasicInfoItem[] {
+  return [
+    { label: "股票代码", value: profile.code ? `${profile.code}${profile.exchange ? `.${profile.exchange}` : ""}` : stockCodeFromSymbol(quote.symbol) || quote.symbol },
+    { label: "公司全称", value: profile.full_name || "暂无" },
+    { label: "上市日期", value: profile.list_date || "暂无" },
+    { label: "状态", value: profile.status || "暂无" },
+    { label: "数据源", value: quote.provider || "后端未提供" },
+    { label: "成交量", value: typeof quote.volume === "number" ? formatNumber(quote.volume) : "暂无" },
+    { label: "成交额", value: typeof quote.amount === "number" ? formatNumber(quote.amount) : "暂无" },
+    { label: "市盈率", value: typeof quote.pe === "number" ? formatNumber(quote.pe) : "暂无" },
+    { label: "市净率", value: typeof quote.pb === "number" ? formatNumber(quote.pb) : "暂无" },
+  ];
+}
+
+function toKlineItems(items: MarketKlineItem[]): KlineItem[] {
+  return items.map((item) => ({
+    date: item.trade_date,
+    open: item.open,
+    close: item.close,
+    low: item.low,
+    high: item.high,
+    volume: item.volume ?? 0,
+  }));
+}
+
+function toTechnicalIndicators(indicators: Record<string, unknown>, period: StockDetailPeriod): TechnicalIndicator[] {
+  return indicatorRows(indicators).slice(0, 6).map((item) => ({
+    name: item.name.toUpperCase(),
+    value: item.value,
+    direction: "flat",
+    desc: `${periodLabel(period)}最新值`,
+  }));
+}
+
+function toStockNewsItems(items: NewsItem[]): StockNewsItem[] {
+  return items.map((item) => ({
+    id: String(item.id),
+    title: item.title,
+    source: item.source || "未知来源",
+    publishedAt: item.published_at || "后端未提供",
+  }));
+}
+
+function stockCodeFromSymbol(symbol: string) {
+  const parts = symbol.split(/[.:]/).filter(Boolean);
+  return parts.find((part) => /^\d{5,6}$/.test(part)) ?? "";
+}
+
+function periodLabel(period: StockDetailPeriod) {
+  if (period === "week") {
+    return "周K";
+  }
+  if (period === "month") {
+    return "月K";
+  }
+  return "日K";
 }
 
 function KlinePanel(props: { items: MarketKlineItem[] }) {

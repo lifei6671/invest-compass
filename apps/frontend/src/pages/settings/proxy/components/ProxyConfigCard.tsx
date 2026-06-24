@@ -75,12 +75,15 @@ export function ProxyConfigCard(props: ProxyConfigCardProps) {
             />
           </ManualField>
           <ManualField label="密码">
-            <Input.Password
-              className="settings-proxy-manual-input"
-              value={props.httpConfig.password}
-              visibilityToggle
-              onChange={(event) => props.onHttpConfigChange({ ...props.httpConfig, password: event.target.value })}
-            />
+            <>
+              <Input.Password
+                className="settings-proxy-manual-input"
+                value={props.httpConfig.password}
+                visibilityToggle
+                onChange={(event) => props.onHttpConfigChange({ ...props.httpConfig, password: event.target.value })}
+              />
+              {props.httpConfig.hasSavedPassword ? <p className="settings-proxy-helper-text">已保存代理密码，输入新密码可替换</p> : null}
+            </>
           </ManualField>
           <ManualField label="连接超时">
             <div className="settings-proxy-timeout-control">
@@ -158,12 +161,15 @@ export function ProxyConfigCard(props: ProxyConfigCardProps) {
             />
           </ManualField>
           <ManualField label="密码">
-            <Input.Password
-              className="settings-proxy-manual-input"
-              value={props.socks5Config.password}
-              visibilityToggle
-              onChange={(event) => props.onSocks5ConfigChange({ ...props.socks5Config, password: event.target.value })}
-            />
+            <>
+              <Input.Password
+                className="settings-proxy-manual-input"
+                value={props.socks5Config.password}
+                visibilityToggle
+                onChange={(event) => props.onSocks5ConfigChange({ ...props.socks5Config, password: event.target.value })}
+              />
+              {props.socks5Config.hasSavedPassword ? <p className="settings-proxy-helper-text">已保存代理密码，输入新密码可替换</p> : null}
+            </>
           </ManualField>
           <ManualField label="连接超时">
             <div className="settings-proxy-timeout-control">

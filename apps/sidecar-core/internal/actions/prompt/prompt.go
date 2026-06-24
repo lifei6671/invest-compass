@@ -51,15 +51,20 @@ type updateRequest struct {
 }
 
 type templateData struct {
-	ID          int64    `json:"id"`
-	Name        string   `json:"name"`
-	Type        string   `json:"type"`
-	Description string   `json:"description"`
-	Content     string   `json:"content"`
-	Variables   []string `json:"variables"`
-	IsBuiltin   bool     `json:"is_builtin"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	ID            int64    `json:"id"`
+	Key           string   `json:"key"`
+	Name          string   `json:"name"`
+	Type          string   `json:"type"`
+	Description   string   `json:"description"`
+	Content       string   `json:"content"`
+	Variables     []string `json:"variables"`
+	IsBuiltin     bool     `json:"is_builtin"`
+	BuiltinLocked bool     `json:"builtin_locked"`
+	Version       int      `json:"version"`
+	Checksum      string   `json:"checksum"`
+	Source        string   `json:"source"`
+	CreatedAt     string   `json:"created_at"`
+	UpdatedAt     string   `json:"updated_at"`
 }
 
 // Routes 返回 Prompt 模板相关路由定义，不直接注册到 Gin。
@@ -328,17 +333,22 @@ func modelTemplateToService(modelTemplate model.PromptTemplate) (promptservice.T
 		variables = append(variables, promptservice.Variable(variable))
 	}
 	return promptservice.Template{
-		ID:          modelTemplate.ID,
-		Name:        modelTemplate.Name,
-		Type:        promptservice.TemplateType(modelTemplate.Type),
-		Description: modelTemplate.Description,
-		Content:     modelTemplate.Content,
-		Variables:   variables,
-		IsBuiltin:   modelTemplate.IsBuiltin,
-		Deleted:     modelTemplate.DeletedAt.Valid,
-		CreatedAt:   modelTemplate.CreatedAt,
-		UpdatedAt:   modelTemplate.UpdatedAt,
-		DeletedAt:   modelTemplate.DeletedAt.Time,
+		ID:            modelTemplate.ID,
+		Key:           modelTemplate.Key,
+		Name:          modelTemplate.Name,
+		Type:          promptservice.TemplateType(modelTemplate.Type),
+		Description:   modelTemplate.Description,
+		Content:       modelTemplate.Content,
+		Variables:     variables,
+		IsBuiltin:     modelTemplate.IsBuiltin,
+		BuiltinLocked: modelTemplate.BuiltinLocked,
+		Version:       modelTemplate.Version,
+		Checksum:      modelTemplate.Checksum,
+		Source:        modelTemplate.Source,
+		Deleted:       modelTemplate.DeletedAt.Valid,
+		CreatedAt:     modelTemplate.CreatedAt,
+		UpdatedAt:     modelTemplate.UpdatedAt,
+		DeletedAt:     modelTemplate.DeletedAt.Time,
 	}, nil
 }
 
@@ -350,15 +360,20 @@ func serviceTemplateToModel(template promptservice.Template) (model.PromptTempla
 		return model.PromptTemplate{}, err
 	}
 	return model.PromptTemplate{
-		ID:          template.ID,
-		Name:        template.Name,
-		Type:        string(template.Type),
-		Description: template.Description,
-		Content:     template.Content,
-		Variables:   string(payload),
-		IsBuiltin:   template.IsBuiltin,
-		CreatedAt:   template.CreatedAt,
-		UpdatedAt:   template.UpdatedAt,
+		ID:            template.ID,
+		Key:           template.Key,
+		Name:          template.Name,
+		Type:          string(template.Type),
+		Description:   template.Description,
+		Content:       template.Content,
+		Variables:     string(payload),
+		IsBuiltin:     template.IsBuiltin,
+		BuiltinLocked: template.BuiltinLocked,
+		Version:       template.Version,
+		Checksum:      template.Checksum,
+		Source:        template.Source,
+		CreatedAt:     template.CreatedAt,
+		UpdatedAt:     template.UpdatedAt,
 	}, nil
 }
 
@@ -374,15 +389,20 @@ func serviceTemplatesToData(templates []promptservice.Template) []templateData {
 // serviceTemplateToData 转换单个 service 模型为 API 响应模型。
 func serviceTemplateToData(template promptservice.Template) templateData {
 	return templateData{
-		ID:          template.ID,
-		Name:        template.Name,
-		Type:        string(template.Type),
-		Description: template.Description,
-		Content:     template.Content,
-		Variables:   variablesToStrings(template.Variables),
-		IsBuiltin:   template.IsBuiltin,
-		CreatedAt:   formatTime(template.CreatedAt),
-		UpdatedAt:   formatTime(template.UpdatedAt),
+		ID:            template.ID,
+		Key:           template.Key,
+		Name:          template.Name,
+		Type:          string(template.Type),
+		Description:   template.Description,
+		Content:       template.Content,
+		Variables:     variablesToStrings(template.Variables),
+		IsBuiltin:     template.IsBuiltin,
+		BuiltinLocked: template.BuiltinLocked,
+		Version:       template.Version,
+		Checksum:      template.Checksum,
+		Source:        template.Source,
+		CreatedAt:     formatTime(template.CreatedAt),
+		UpdatedAt:     formatTime(template.UpdatedAt),
 	}
 }
 

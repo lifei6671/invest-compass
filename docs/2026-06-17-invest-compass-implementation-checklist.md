@@ -846,9 +846,9 @@ P7 跨平台桌面能力、打包、发布验收
   - `/api/prompt-templates/delete`
   - 对应 Rust command。
 - 执行动作：
-  - 首版只允许 `system`、`stock_full`、`technical`、`custom`。
-  - 变量只允许 `stock_name`、`stock_code`、`market`、`quote`、`kline_summary`、`indicators`、`news`、`analysis_language`。
-  - 内置模板只读。
+  - 当前允许 `system`、`stock_full`、`technical`、`fundamental`、`news`、`custom`。
+  - 变量只允许 Prompt service 白名单中的行情、K 线、指标、新闻、基本面、上下文质量和模板元数据变量。
+  - 内置模板只读，并按稳定 `key`、`version`、`checksum` 由应用 seed 维护。
 - 验证：
   - 未支持变量保存失败。
   - 删除只对 custom 或非内置模板生效。
@@ -857,8 +857,8 @@ P7 跨平台桌面能力、打包、发布验收
   - Prompt 模板页没有不可执行模板类型。
 - 当前进展：
   - 已新增 `apps/sidecar-core/internal/service/prompt` 纯规则模块，定义首版模板类型和变量白名单。
-  - 已限制模板类型只允许 `system`、`stock_full`、`technical`、`custom`。
-  - 已限制变量只允许 `stock_name`、`stock_code`、`market`、`quote`、`kline_summary`、`indicators`、`news`、`analysis_language`。
+  - 已限制模板类型只允许 `system`、`stock_full`、`technical`、`fundamental`、`news`、`custom`。
+  - 已扩展变量白名单，覆盖基本面、消息面、数据时效、上下文质量、模板 key/version 等内置 Prompt 变量。
   - 已实现内置模板删除规则、软删除过滤和变量提取去重。
   - 已实现 Prompt 模板创建、更新、删除和列表的纯领域规则，创建/更新时统一固化变量列表。
   - 已限制内置模板更新和删除，允许删除的模板只执行软删除，列表默认不返回已软删除模板。
@@ -869,6 +869,8 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增 Rust 白名单 command：`prompt_templates_list`、`prompt_templates_get`、`prompt_templates_create`、`prompt_templates_update`、`prompt_templates_delete`，固定映射到对应 Go API，禁止通用 path 代理。
   - 单测覆盖 CRUD、未支持变量保存失败、内置模板更新/删除拒绝、软删除隐藏、Rust command 固定 path 和非正数模板 ID 早失败。
   - Prompt 模板页面真实交互已由 T34 接入并覆盖未支持变量拒绝保存，不再阻塞本 CRUD/API 基线退出。
+  - 2026-06-24 已新增 5 个内置 Prompt Markdown：`system_common`、`stock_full`、`technical`、`fundamental`、`news`，通过 Go `embed` 在迁移后 seed 到 `prompt_templates`。
+  - 2026-06-24 已新增 `key`、`version`、`checksum`、`builtin_locked`、`source` 字段，API 返回对应元数据，内置模板更新/删除按 `builtin_locked` 阻断。
 
 ### T24 Prompt 构建和合规输出约束
 
@@ -1194,7 +1196,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 执行动作：
   - API Key 输入只在保存时传给 Rust command。
   - 列表只展示 has_api_key、masked_api_key。
-  - Prompt 模板只展示首版支持类型和变量。
+  - Prompt 模板只展示当前支持类型和变量。
 - 验证：
   - 保存后刷新页面不出现真实 Key。
   - 测试连接失败不暴露密钥。
@@ -1206,7 +1208,8 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增 `/ai-settings` 页面，模型配置表单支持一次性 API Key 保存、脱敏字段展示、编辑、删除和连通性测试。
   - API Key 明文只存在保存表单状态和 `ai_config_save` 一次性 payload 中，保存成功后表单会清空明文输入，列表只展示 `masked_api_key` / `has_api_key`。
   - 连通性测试失败消息会在页面层二次脱敏，避免 Provider 错误文本把 Key 展示给用户。
-  - Prompt 模板页面只展示首版类型 `system`、`stock_full`、`technical`、`custom` 和变量白名单，未支持变量会在前端拒绝保存。
+  - Prompt 模板页面展示当前类型 `system`、`stock_full`、`technical`、`fundamental`、`news`、`custom` 和变量白名单，未支持变量会在前端拒绝保存。
+  - 内置模板在 Prompt 页面为只读状态，保存和删除置灰；用户可用“创建自定义副本”生成可编辑用户模板草稿。
   - `apps/frontend/src/services/coreClient.test.ts` 覆盖 AI 配置和 Prompt 模板 command 契约。
   - `apps/frontend/src/app/App.test.tsx` 覆盖 API Key 保存后不回显明文、测试连接失败脱敏和未支持变量拒绝保存。
   - 真实外部 Provider 连通性和跨平台桌面凭据验收仍待 T44 发布验收阶段完成。

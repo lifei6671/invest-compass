@@ -10,6 +10,11 @@ struct StockSearchRequest {
 }
 
 #[derive(Serialize)]
+struct StockProfileRequest {
+    symbol: String,
+}
+
+#[derive(Serialize)]
 struct MarketQuoteRequest {
     symbol: String,
 }
@@ -41,6 +46,19 @@ pub fn stock_search(
     let client = state.client().map_err(|error| error.to_string())?;
     client
         .post_api("/api/stocks/search", &StockSearchRequest { keyword })
+        .map_err(|error| error.to_string())
+}
+
+/// 获取股票基础资料，固定转发到 Go core `/api/stocks/profile`。
+#[tauri::command]
+pub fn stock_profile(
+    state: State<'_, CoreState>,
+    symbol: String,
+) -> Result<serde_json::Value, String> {
+    validate_stock_symbol(&symbol)?;
+    let client = state.client().map_err(|error| error.to_string())?;
+    client
+        .post_api("/api/stocks/profile", &StockProfileRequest { symbol })
         .map_err(|error| error.to_string())
 }
 
@@ -114,6 +132,14 @@ fn validate_stock_search_keyword(keyword: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 校验股票 symbol，避免 Rust command 转发空股票资料请求。
+fn validate_stock_symbol(symbol: &str) -> Result<(), String> {
+    if symbol.trim().is_empty() {
+        return Err("invalid stock symbol".to_string());
+    }
+    Ok(())
+}
+
 /// 校验行情类列表长度，避免 Rust command 转发无界 K 线或指标请求。
 fn validate_market_limit(limit: i32) -> Result<(), String> {
     if limit <= 0 || limit > MARKET_MAX_LIMIT {
@@ -133,6 +159,16 @@ mod tests {
         assert_eq!(
             validate_stock_search_keyword(" \t\n").expect_err("blank keyword should fail"),
             "invalid stock search keyword"
+        );
+    }
+
+    #[test]
+    /// 验证股票资料 command 在 Rust 边界拒绝空 symbol。
+    fn validate_stock_symbol_rejects_blank_text() {
+        assert!(validate_stock_symbol("CN:SH:600000").is_ok());
+        assert_eq!(
+            validate_stock_symbol(" \t\n").expect_err("blank symbol should fail"),
+            "invalid stock symbol"
         );
     }
 

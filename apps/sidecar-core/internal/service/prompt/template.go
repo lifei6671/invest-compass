@@ -19,8 +19,19 @@ const (
 	TemplateStockFull TemplateType = "stock_full"
 	// TemplateTechnical 表示技术面分析模板。
 	TemplateTechnical TemplateType = "technical"
+	// TemplateFundamental 表示基本面分析模板。
+	TemplateFundamental TemplateType = "fundamental"
+	// TemplateNews 表示消息面分析模板。
+	TemplateNews TemplateType = "news"
 	// TemplateCustom 表示用户自定义模板。
 	TemplateCustom TemplateType = "custom"
+)
+
+const (
+	// TemplateSourceBuiltin 表示随应用打包的只读内置模板。
+	TemplateSourceBuiltin = "builtin"
+	// TemplateSourceUser 表示用户创建的可编辑模板。
+	TemplateSourceUser = "user"
 )
 
 // Variable 是首版允许在 Prompt 模板中持久化的变量。
@@ -41,6 +52,32 @@ const (
 	VariableIndicators Variable = "indicators"
 	// VariableNews 表示新闻资讯。
 	VariableNews Variable = "news"
+	// VariableMarketNews 表示市场新闻摘要。
+	VariableMarketNews Variable = "market_news"
+	// VariableIndustryNews 表示行业新闻摘要。
+	VariableIndustryNews Variable = "industry_news"
+	// VariableFundamentalSummary 表示基本面摘要。
+	VariableFundamentalSummary Variable = "fundamental_summary"
+	// VariableFinancialSummary 表示财务摘要。
+	VariableFinancialSummary Variable = "financial_summary"
+	// VariableValuationSummary 表示估值摘要。
+	VariableValuationSummary Variable = "valuation_summary"
+	// VariableForecastSummary 表示预测与一致预期摘要。
+	VariableForecastSummary Variable = "forecast_summary"
+	// VariableIndustrySummary 表示行业与竞争格局摘要。
+	VariableIndustrySummary Variable = "industry_summary"
+	// VariableUserPosition 表示本次分析请求的一次性持仓上下文。
+	VariableUserPosition Variable = "user_position"
+	// VariableDataAsof 表示输入数据截至时间。
+	VariableDataAsof Variable = "data_asof"
+	// VariableContextSources 表示上下文数据来源摘要。
+	VariableContextSources Variable = "context_sources"
+	// VariableContextQuality 表示上下文质量说明。
+	VariableContextQuality Variable = "context_quality"
+	// VariablePromptKey 表示模板稳定 key。
+	VariablePromptKey Variable = "prompt_key"
+	// VariablePromptVersion 表示模板版本号。
+	VariablePromptVersion Variable = "prompt_version"
 	// VariableAnalysisLanguage 表示分析输出语言。
 	VariableAnalysisLanguage Variable = "analysis_language"
 )
@@ -48,36 +85,56 @@ const (
 var (
 	variablePattern        = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 	supportedTemplateTypes = map[TemplateType]struct{}{
-		TemplateSystem:    {},
-		TemplateStockFull: {},
-		TemplateTechnical: {},
-		TemplateCustom:    {},
+		TemplateSystem:      {},
+		TemplateStockFull:   {},
+		TemplateTechnical:   {},
+		TemplateFundamental: {},
+		TemplateNews:        {},
+		TemplateCustom:      {},
 	}
 	supportedVariables = map[Variable]struct{}{
-		VariableStockName:        {},
-		VariableStockCode:        {},
-		VariableMarket:           {},
-		VariableQuote:            {},
-		VariableKlineSummary:     {},
-		VariableIndicators:       {},
-		VariableNews:             {},
-		VariableAnalysisLanguage: {},
+		VariableStockName:          {},
+		VariableStockCode:          {},
+		VariableMarket:             {},
+		VariableQuote:              {},
+		VariableKlineSummary:       {},
+		VariableIndicators:         {},
+		VariableNews:               {},
+		VariableMarketNews:         {},
+		VariableIndustryNews:       {},
+		VariableFundamentalSummary: {},
+		VariableFinancialSummary:   {},
+		VariableValuationSummary:   {},
+		VariableForecastSummary:    {},
+		VariableIndustrySummary:    {},
+		VariableUserPosition:       {},
+		VariableDataAsof:           {},
+		VariableContextSources:     {},
+		VariableContextQuality:     {},
+		VariablePromptKey:          {},
+		VariablePromptVersion:      {},
+		VariableAnalysisLanguage:   {},
 	}
 )
 
 // Template 是 Prompt 模板的领域模型。
 type Template struct {
-	ID          int64
-	Name        string
-	Type        TemplateType
-	Description string
-	Content     string
-	Variables   []Variable
-	IsBuiltin   bool
-	Deleted     bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   time.Time
+	ID            int64
+	Key           string
+	Name          string
+	Type          TemplateType
+	Description   string
+	Content       string
+	Variables     []Variable
+	IsBuiltin     bool
+	BuiltinLocked bool
+	Version       int
+	Checksum      string
+	Source        string
+	Deleted       bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     time.Time
 }
 
 // CreateRequest 是创建 Prompt 模板所需的输入。
@@ -139,6 +196,9 @@ func ExtractVariables(content string) []Variable {
 
 // CanDeleteTemplate 判断模板删除是否符合首版规则：custom 或非内置模板可删除。
 func CanDeleteTemplate(template Template) bool {
+	if template.BuiltinLocked {
+		return false
+	}
 	return template.Type == TemplateCustom || !template.IsBuiltin
 }
 
@@ -164,6 +224,8 @@ func CreateTemplate(request CreateRequest, now time.Time) (Template, error) {
 		Content:     request.Content,
 		Variables:   ExtractVariables(request.Content),
 		IsBuiltin:   request.IsBuiltin,
+		Version:     1,
+		Source:      TemplateSourceUser,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -175,7 +237,7 @@ func CreateTemplate(request CreateRequest, now time.Time) (Template, error) {
 
 // UpdateTemplate 更新非内置模板，并重新校验模板类型与变量白名单。
 func UpdateTemplate(existing Template, request UpdateRequest, now time.Time) (Template, error) {
-	if existing.IsBuiltin {
+	if existing.IsBuiltin || existing.BuiltinLocked {
 		return Template{}, &xerr.Error{Code: xerr.PromptBuiltinTemplateReadOnly}
 	}
 

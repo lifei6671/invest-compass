@@ -158,11 +158,6 @@ export function AppShell(props: { routes: AppRouteMap; navItems: readonly AppNav
                 </Link>
               );
             })}
-            {locked ? null : (
-              <Link to={props.routes.scheduler} className="sr-only">
-                任务调度
-              </Link>
-            )}
           </nav>
           <div className="flex-1" />
           <ShellStatus locked={locked} />

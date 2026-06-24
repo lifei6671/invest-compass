@@ -236,12 +236,18 @@ test("settings 和 cache Rust command 必须固定映射到 Go API", () => {
 test("股票搜索 Rust command 必须固定映射到 Go API", () => {
   const commands = parseTauriCommandNames(commandSources);
   assert.equal(commands.includes("stock_search"), true, "stock_search command 必须显式声明");
+  assert.equal(commands.includes("stock_profile"), true, "stock_profile command 必须显式声明");
 
   const combinedSource = commandSources.join("\n");
   assert.equal(
     combinedSource.includes('"/api/stocks/search"'),
     true,
     "stock_search 必须固定映射到 /api/stocks/search",
+  );
+  assert.equal(
+    combinedSource.includes('"/api/stocks/profile"'),
+    true,
+    "stock_profile 必须固定映射到 /api/stocks/profile",
   );
 });
 

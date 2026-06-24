@@ -1,24 +1,54 @@
 import { App as AntApp, Button, Empty, Segmented } from "antd";
 import { CompressOutlined, EllipsisOutlined, SettingOutlined } from "@ant-design/icons";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { EChartView } from "../../charts/EChartView";
 import { APP_FONT } from "../../../styles/fonts";
 import type { KlineItem } from "../types";
 
 type KlineChartCardProps = {
   items: KlineItem[];
+  period: PeriodValue;
+  adjust: AdjustValue;
+  onPeriodChange?: (period: PeriodValue) => void;
+  onAdjustChange?: (adjust: AdjustValue) => void;
 };
 
 type PeriodKey = "分时" | "日K" | "周K" | "月K";
 type AdjustKey = "不复权" | "前复权" | "后复权";
+type PeriodValue = "day" | "week" | "month";
+type AdjustValue = "none" | "qfq" | "hfq";
 
 const periods: PeriodKey[] = ["分时", "日K", "周K", "月K"];
 const adjusts: AdjustKey[] = ["不复权", "前复权", "后复权"];
 
+const periodValues: Record<Exclude<PeriodKey, "分时">, PeriodValue> = {
+  日K: "day",
+  周K: "week",
+  月K: "month",
+};
+
+const periodLabels: Record<PeriodValue, PeriodKey> = {
+  day: "日K",
+  week: "周K",
+  month: "月K",
+};
+
+const adjustValues: Record<AdjustKey, AdjustValue> = {
+  不复权: "none",
+  前复权: "qfq",
+  后复权: "hfq",
+};
+
+const adjustLabels: Record<AdjustValue, AdjustKey> = {
+  none: "不复权",
+  qfq: "前复权",
+  hfq: "后复权",
+};
+
 export function KlineChartCard(props: KlineChartCardProps) {
   const { message } = AntApp.useApp();
-  const [period, setPeriod] = useState<PeriodKey>("日K");
-  const [adjust, setAdjust] = useState<AdjustKey>("前复权");
+  const period = periodLabels[props.period];
+  const adjust = adjustLabels[props.adjust];
   const option = useMemo(() => buildKlineOption(props.items), [props.items]);
 
   return (
@@ -31,11 +61,11 @@ export function KlineChartCard(props: KlineChartCardProps) {
               <button
                 key={item}
                 type="button"
+                disabled={item === "分时"}
                 className={["relative border-0 bg-transparent px-0 pb-2 text-[14px] font-medium", period === item ? "text-[#1677ff]" : "text-[#64748b]"].join(" ")}
                 onClick={() => {
-                  setPeriod(item);
-                  if (item !== period) {
-                    message.info("K线周期切换待接入");
+                  if (item !== "分时" && item !== period) {
+                    props.onPeriodChange?.(periodValues[item]);
                   }
                 }}
               >
@@ -50,8 +80,7 @@ export function KlineChartCard(props: KlineChartCardProps) {
             className="rounded-md border border-[#d9e2f1] bg-white p-0.5"
             value={adjust}
             onChange={(value) => {
-              setAdjust(value as AdjustKey);
-              message.info("复权设置待接入");
+              props.onAdjustChange?.(adjustValues[value as AdjustKey]);
             }}
             options={adjusts.map((item) => ({
               value: item,

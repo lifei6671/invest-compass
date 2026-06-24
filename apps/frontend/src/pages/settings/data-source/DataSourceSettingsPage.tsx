@@ -1,6 +1,16 @@
 import { App as AntApp } from "antd";
 import { useCallback, useEffect, useState } from "react";
-import { settingsGet, settingsSet, type SettingItem } from "../../../services/coreClient";
+import {
+  cacheStats,
+  providersStatus,
+  schedulerStatus,
+  settingsGet,
+  settingsSet,
+  type CacheStatsResult,
+  type ProviderStatusItem,
+  type SchedulerStatus,
+  type SettingItem,
+} from "../../../services/coreClient";
 import { SettingsRiskNotice } from "../components/SettingsRiskNotice";
 import { DataSourceCredentialPage } from "./credentials/DataSourceCredentialPage";
 import { DataSourceSubTabs, type DataSourceSubTabKey } from "./credentials/components/DataSourceSubTabs";
@@ -13,19 +23,21 @@ import { MarketDataSourceCard } from "./components/MarketDataSourceCard";
 import { NewsSourceCard } from "./components/NewsSourceCard";
 import { SyncStrategyCard } from "./components/SyncStrategyCard";
 import {
-  cacheSnapshot,
-  healthItems,
+  initialCacheSnapshot,
   initialBaseSettings,
-  marketDataSources,
-  newsSources,
-  syncStrategy,
+  initialSyncStrategy,
+  type CacheSnapshot,
   type DataSourceBaseSettings,
+  type HealthStatusItem,
   type KlineRange,
+  type MarketDataSourceItem,
   type MarketScope,
   type MarketSource,
+  type NewsSourceItem,
   type NewsSource,
   type NewsSyncInterval,
   type QuoteRefreshInterval,
+  type SyncStrategy,
 } from "./types";
 
 const dataSourceSettingKeyByField: Record<keyof DataSourceBaseSettings, string> = {
@@ -51,6 +63,7 @@ export function DataSourceSettingsPage() {
   const { message } = AntApp.useApp();
   const [activeSubTab, setActiveSubTab] = useState<DataSourceSubTabKey>("overview");
   const [baseSettings, setBaseSettings] = useState<DataSourceBaseSettings>(initialBaseSettings);
+  const [overview, setOverview] = useState<DataSourceOverviewState>(initialOverviewState);
 
   const loadDataSourceSettings = useCallback(async () => {
     try {
@@ -64,6 +77,29 @@ export function DataSourceSettingsPage() {
   useEffect(() => {
     void loadDataSourceSettings();
   }, [loadDataSourceSettings]);
+
+  const loadOverviewStatus = useCallback(async () => {
+    const [providerResult, cacheResult, schedulerResult] = await Promise.allSettled([
+      providersStatus(),
+      cacheStats(),
+      schedulerStatus(),
+    ]);
+
+    setOverview({
+      providers: providerResult.status === "fulfilled" ? providerResult.value.items : [],
+      providerError: providerResult.status === "rejected" ? errorMessage(providerResult.reason, "Provider 状态读取失败") : "",
+      cacheSnapshot: cacheResult.status === "fulfilled" ? cacheSnapshotFromStats(cacheResult.value) : failedCacheSnapshot(errorMessage(cacheResult.reason, "缓存统计读取失败")),
+      syncStrategy: schedulerResult.status === "fulfilled" ? syncStrategyFromStatus(schedulerResult.value) : failedSyncStrategy(errorMessage(schedulerResult.reason, "调度状态读取失败")),
+      cacheError: cacheResult.status === "rejected" ? errorMessage(cacheResult.reason, "缓存统计读取失败") : "",
+      schedulerError: schedulerResult.status === "rejected" ? errorMessage(schedulerResult.reason, "调度状态读取失败") : "",
+    });
+  }, []);
+
+  useEffect(() => {
+    if (activeSubTab === "overview") {
+      void loadOverviewStatus();
+    }
+  }, [activeSubTab, loadOverviewStatus]);
 
   const changeSubTab = (key: DataSourceSubTabKey) => {
     setActiveSubTab(key);
@@ -106,11 +142,11 @@ export function DataSourceSettingsPage() {
             onChange={handleBaseSettingsChange}
           />
           <div className="settings-basic-card-grid settings-data-source-card-grid">
-            <MarketDataSourceCard items={marketDataSources} onTestConnection={() => message.success("数据源连接测试完成")} onEditConfig={() => message.info("行情数据源配置待接入")} />
-            <NewsSourceCard items={newsSources} onSyncNow={() => message.success("新闻同步任务已提交")} onViewLog={() => message.info("同步日志待接入")} />
-            <SyncStrategyCard value={syncStrategy} onViewScheduler={() => message.info("任务调度配置待接入")} />
-            <LocalCacheSnapshotCard value={cacheSnapshot} onCleanCache={() => message.success("缓存清理完成")} />
-            <DataSourceHealthCard items={healthItems} onRefresh={() => message.success("数据源状态检测完成")} />
+            <MarketDataSourceCard items={marketDataSourcesFromProviders(overview.providers)} onTestConnection={() => message.info("数据源连接测试待接入")} onEditConfig={() => message.info("行情数据源配置待接入")} />
+            <NewsSourceCard items={newsSourcesFromProviders(overview.providers)} onSyncNow={() => message.info("新闻同步待接入")} onViewLog={() => message.info("同步日志待接入")} />
+            <SyncStrategyCard value={overview.syncStrategy} onViewScheduler={() => message.info("任务调度配置待接入")} />
+            <LocalCacheSnapshotCard value={overview.cacheSnapshot} onCleanCache={() => message.info("数据源缓存清理待接入")} />
+            <DataSourceHealthCard items={healthItemsFromOverview(overview)} onRefresh={loadOverviewStatus} />
             <DataComplianceCard onViewDescription={() => setActiveSubTab("description")} />
           </div>
           <SettingsRiskNotice />
@@ -161,4 +197,132 @@ function readBoolean(values: Map<string, string>, key: string): boolean | undefi
 
 function findChangedDataSourceSettingsKey(previousValue: DataSourceBaseSettings, nextValue: DataSourceBaseSettings): keyof DataSourceBaseSettings | undefined {
   return (Object.keys(dataSourceSettingKeyByField) as Array<keyof DataSourceBaseSettings>).find((key) => previousValue[key] !== nextValue[key]);
+}
+
+type DataSourceOverviewState = {
+  providers: ProviderStatusItem[];
+  providerError: string;
+  cacheSnapshot: CacheSnapshot;
+  syncStrategy: SyncStrategy;
+  cacheError: string;
+  schedulerError: string;
+};
+
+const initialOverviewState: DataSourceOverviewState = {
+  providers: [],
+  providerError: "",
+  cacheSnapshot: initialCacheSnapshot,
+  syncStrategy: initialSyncStrategy,
+  cacheError: "",
+  schedulerError: "",
+};
+
+function marketDataSourcesFromProviders(providers: ProviderStatusItem[]): MarketDataSourceItem[] {
+  return providers
+    .filter((provider) => !isNewsProvider(provider))
+    .map((provider) => ({
+      label: provider.name,
+      source: provider.source || "后端未返回",
+      status: providerStatus(provider),
+    }));
+}
+
+function newsSourcesFromProviders(providers: ProviderStatusItem[]): NewsSourceItem[] {
+  return providers
+    .filter(isNewsProvider)
+    .map((provider) => ({
+      label: provider.name,
+      source: provider.source || "后端未返回",
+      status: providerStatus(provider),
+    }));
+}
+
+function healthItemsFromOverview(overview: DataSourceOverviewState): HealthStatusItem[] {
+  const items = overview.providers.map((provider) => ({
+    label: provider.name,
+    statusText: provider.available ? "正常" : provider.last_error || (provider.source === "unconfigured" ? "未配置" : "异常"),
+    status: provider.available ? "normal" as const : provider.source === "unconfigured" ? "disabled" as const : "failed" as const,
+  }));
+  if (overview.providerError) {
+    items.push({ label: "Provider 状态", statusText: overview.providerError, status: "failed" });
+  }
+  if (overview.cacheError) {
+    items.push({ label: "缓存统计", statusText: overview.cacheError, status: "failed" });
+  }
+  if (overview.schedulerError) {
+    items.push({ label: "调度状态", statusText: overview.schedulerError, status: "failed" });
+  }
+  return items.length > 0 ? items : [{ label: "Provider 状态", statusText: "暂无后端状态", status: "disabled" }];
+}
+
+function providerStatus(provider: ProviderStatusItem): MarketDataSourceItem["status"] {
+  if (provider.available) {
+    return "normal";
+  }
+  return provider.source === "unconfigured" ? "disabled" : "failed";
+}
+
+function isNewsProvider(provider: ProviderStatusItem): boolean {
+  const text = `${provider.name} ${provider.source}`.toLowerCase();
+  return text.includes("news") || text.includes("新闻") || text.includes("资讯") || text.includes("cls") || text.includes("财联社");
+}
+
+function cacheSnapshotFromStats(stats: CacheStatsResult): CacheSnapshot {
+  const quoteBytes = bytesForTarget(stats, "quote");
+  const newsBytes = bytesForTarget(stats, "news");
+  return {
+    quoteCacheSize: formatBytes(quoteBytes),
+    newsCacheSize: formatBytes(newsBytes),
+    latestSnapshotTime: "后端未提供",
+    retentionPolicy: formatBytes(stats.total_bytes),
+  };
+}
+
+function failedCacheSnapshot(message: string): CacheSnapshot {
+  return {
+    quoteCacheSize: "读取失败",
+    newsCacheSize: "读取失败",
+    latestSnapshotTime: "后端未提供",
+    retentionPolicy: message,
+  };
+}
+
+function bytesForTarget(stats: CacheStatsResult, target: string): number {
+  return stats.items.find((item) => item.target === target)?.bytes ?? 0;
+}
+
+function syncStrategyFromStatus(status: SchedulerStatus): SyncStrategy {
+  return {
+    enabledJobsText: `${status.jobs_enabled} / ${status.jobs_total}`,
+    activeRunsText: `${status.queued_runs} / ${status.running_runs}`,
+    failedRunsText: String(status.failed_runs),
+    sourceText: "scheduler_status",
+  };
+}
+
+function failedSyncStrategy(message: string): SyncStrategy {
+  return {
+    enabledJobsText: "读取失败",
+    activeRunsText: "读取失败",
+    failedRunsText: "读取失败",
+    sourceText: message,
+  };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${formatNumber(bytes / 1024)} KB`;
+  }
+  return `${formatNumber(bytes / 1024 / 1024)} MB`;
+}
+
+function formatNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }

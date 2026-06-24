@@ -27,9 +27,23 @@ export function ProxyConnectionTestCard(props: ProxyConnectionTestCardProps) {
         />
         <div className="settings-proxy-test-result">
           <div className="settings-proxy-field-label">测试结果</div>
-          <span className="settings-data-source-tag settings-data-source-tag-ok">成功</span>
-          <p>响应时间：{props.result.responseTimeMs ?? 128} ms</p>
-          <p>检查时间：{props.result.checkedAt ?? "2025-05-20 15:30:00"}</p>
+          {props.result.status === "success" ? (
+            <>
+              <span className="settings-data-source-tag settings-data-source-tag-ok">成功</span>
+              <p>响应时间：{props.result.responseTimeMs} ms</p>
+              <p>检查时间：{props.result.checkedAt}</p>
+            </>
+          ) : props.result.status === "failed" ? (
+            <>
+              <span className="settings-data-source-tag settings-data-source-tag-error">失败</span>
+              <p>请检查代理配置后重试</p>
+            </>
+          ) : (
+            <>
+              <span className="settings-data-source-tag settings-data-source-tag-muted">未测试</span>
+              <p>真实代理连接测试待接入</p>
+            </>
+          )}
         </div>
       </div>
       <Button className="settings-basic-outline-button settings-proxy-test-button" icon={<PlayCircleOutlined />} loading={props.testing} onClick={props.onTest}>

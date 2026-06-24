@@ -52,6 +52,7 @@ afterEach(() => {
   notificationIsPermissionGrantedMock.mockReset();
   notificationRequestPermissionMock.mockReset();
   notificationSendMock.mockReset();
+  AppModule.resetBootReadyForTest();
   cleanup();
   window.location.hash = "";
   vi.useRealTimers();
@@ -293,6 +294,50 @@ test("首版主导航和路由范围只包含 MVP 页面", () => {
   ]);
 });
 
+test("隐藏验证页不通过主导航或辅助导航暴露", async () => {
+  window.location.hash = "#/not-found";
+  mockIPC((command) => {
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0", dbStatus: "ok" } };
+      case "providers_status":
+        return { code: 0, message: "ok", data: [{ name: "market", source: "sina", available: true, last_error: "" }] };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+
+  expect(await screen.findByText("页面不存在")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "任务调度" })).not.toBeInTheDocument();
+});
+
+test("旧 ai-settings 路由复用设置中心模型配置页", async () => {
+  window.location.hash = "#/ai-settings";
+  mockIPC((command) => {
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0", dbStatus: "ok" } };
+      case "providers_status":
+        return { code: 0, message: "ok", data: [{ name: "market", source: "sina", available: true, last_error: "" }] };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      case "ai_config_list":
+        return { code: 0, message: "ok", data: { items: [defaultAIConfig] } };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+
+  expect(await screen.findByRole("tab", { name: "模型设置" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("模型配置列表")).toBeInTheDocument();
+});
+
 test("启动初始化期间展示等待页并锁定业务入口", async () => {
   const calls: string[] = [];
   mockIPC((command) => {
@@ -430,6 +475,62 @@ test("初始化等待完成后进入总览页面", async () => {
   vi.useRealTimers();
 
   expect(await screen.findByText("自选股涨跌分布")).toBeInTheDocument();
+});
+
+test("同一桌面会话已完成初始化后重新挂载不再回到初始化页", async () => {
+  vi.useFakeTimers();
+  let bootStatusCallCount = 0;
+  mockIPC((command) => {
+    switch (command) {
+      case "app_boot_status":
+        bootStatusCallCount += 1;
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            ready: true,
+            progress: 100,
+            currentStepId: "ready",
+            steps: [
+              { id: "sidecar", index: 1, title: "启动 Go Core Sidecar", status: "completed", badgeText: "已完成" },
+              { id: "ready", index: 7, title: "完成基础检查并进入工作台", status: "completed", badgeText: "已完成" },
+            ],
+            taskDetail: {
+              taskId: "boot-1",
+              elapsed: "00:00:01",
+              currentStage: "完成基础检查并进入工作台",
+              remaining: "00:00:00",
+            },
+            logs: [{ id: "1", time: "15:29:41", status: "success", message: "initialization completed" }],
+          },
+        };
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0", dbStatus: "ok" } };
+      case "dashboard_summary":
+        return { code: 0, message: "ok", data: emptyDashboardFixture };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  const { unmount } = render(<App initialBootState="initializing" minimumInitializationVisibleMs={0} />);
+  await act(async () => {
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(800);
+  });
+  expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "正在初始化本地数据环境" })).not.toBeInTheDocument();
+  expect(bootStatusCallCount).toBe(1);
+
+  unmount();
+  render(<App initialBootState="initializing" minimumInitializationVisibleMs={0} />);
+
+  expect(screen.queryByRole("heading", { name: "正在初始化本地数据环境" })).not.toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+  expect(bootStatusCallCount).toBe(1);
+  vi.useRealTimers();
 });
 
 test("初始化首次即 ready 时仍保留启动页最短展示时间", async () => {
@@ -686,6 +787,8 @@ test("顶部搜索通过后端股票搜索跳转到首个真实结果", async ()
           message: "ok",
           data: [{ symbol: "600000.SH", name: "浦发银行", code: "600000", market: "CN", exchange: "SH" }],
         };
+      case "settings_get":
+        return { code: 0, message: "ok", data: { items: [] } };
       case "market_kline":
         return { code: 0, message: "ok", data: { items: [] } };
       case "market_indicators":
@@ -713,8 +816,13 @@ test("顶部搜索通过后端股票搜索跳转到首个真实结果", async ()
   expect(calls.map((call) => call.command)).not.toContain("search_global");
   expect(screen.queryByText("查看全部搜索结果")).not.toBeInTheDocument();
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "未选择股票" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "600000.SH" })).toBeInTheDocument();
   });
+  expect(calls).toContainEqual({ command: "settings_get", payload: { keys: ["kline.default_period", "kline.default_adjust"] } });
+  await waitFor(() => {
+    expect(calls).toContainEqual({ command: "market_kline", payload: { symbol: "600000.SH", period: "day", adjust: "qfq", limit: 120 } });
+  });
+  expect(screen.getByText("暂无新闻资讯")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /返回/ }));
   await waitFor(() => {
     expect(window.location.hash).toBe("#/");
@@ -964,61 +1072,285 @@ test("自选股页面可切换表格视图且不暴露交易入口", async () =>
   expect(screen.queryByText("下单")).not.toBeInTheDocument();
 });
 
-test("个股详情页展示空态工作台且不作为左侧菜单入口", async () => {
-  window.location.hash = "#/stocks/CN%3ASH%3A600183";
-  mockIPC((command) => {
-    throw new Error(`unexpected command ${command}`);
+test("自选股页面使用后端返回的股票资料字段展示名称、行业和标签", async () => {
+  window.location.hash = "#/watchlist";
+  const calls: Array<{ command: string; payload?: any }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "watchlist_list":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [{
+              id: 1,
+              symbol: "600000.SH",
+              sort_order: 10,
+              tags: ["自选"],
+              note: "低估值观察",
+              name: "浦发银行",
+              code: "600000",
+              market: "CN",
+              exchange: "SH",
+              industry: "银行",
+              concepts: ["低估值", "大金融"],
+              list_date: "1999-11-10",
+              status: "active",
+              full_name: "上海浦东发展银行股份有限公司",
+            }],
+          },
+        };
+      case "market_quote":
+        const quotePayload = payload as { symbol: string };
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            symbol: quotePayload.symbol,
+            price: 7.12,
+            change_amount: 0.1,
+            change_percent: 1.42,
+            amount: 8780000,
+            turnover_rate: 1.08,
+            pe: 5.6,
+            quote_time: "2026-06-24T10:00:00Z",
+          },
+        };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
   });
 
   render(<App />);
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "未选择股票" })).toBeInTheDocument();
+    expect(screen.getByText("浦发银行")).toBeInTheDocument();
   });
+  expect(screen.getByText("银行")).toBeInTheDocument();
+  expect(screen.getByText("自选")).toBeInTheDocument();
+  expect(screen.queryByText("未分类")).not.toBeInTheDocument();
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([
+    { command: "watchlist_list", payload: {} },
+    { command: "market_quote", payload: { symbol: "600000.SH" } },
+  ]);
+});
+
+test("个股详情页进入后读取真实行情、K线、指标和新闻", async () => {
+  window.location.hash = "#/stocks/600000.SH";
+  const calls: Array<{ command: string; payload?: any }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "settings_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              { key: "kline.default_period", value: "day" },
+              { key: "kline.default_adjust", value: "qfq" },
+            ],
+          },
+        };
+      case "market_quote":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            symbol: "600000.SH",
+            price: 7.12,
+            change_amount: 0.1,
+            change_percent: 1.42,
+            open: 7.01,
+            high: 7.2,
+            low: 6.98,
+            pre_close: 7.02,
+            volume: 1234000,
+            amount: 8780000,
+            turnover_rate: 1.08,
+            quote_time: "2026-06-23T10:00:00Z",
+            provider: "sina",
+          },
+        };
+      case "stock_profile":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            symbol: "600000.SH",
+            name: "浦发银行",
+            code: "600000",
+            market: "CN",
+            exchange: "SH",
+            industry: "银行",
+            concepts: ["低估值", "大金融"],
+            list_date: "1999-11-10",
+            status: "active",
+            full_name: "上海浦东发展银行股份有限公司",
+          },
+        };
+      case "market_kline": {
+        const args = payload as { symbol: string; period: string; adjust: string; limit: number };
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              {
+                symbol: args.symbol,
+                period: args.period,
+                adjust: args.adjust,
+                trade_date: "2026-06-23",
+                open: 7.01,
+                high: 7.2,
+                low: 6.98,
+                close: args.period === "week" ? 7.18 : 7.12,
+                volume: 1234000,
+                provider: "tencent",
+              },
+            ],
+          },
+        };
+      }
+      case "market_indicators": {
+        const args = payload as { symbol: string; period: string; adjust: string; limit: number; indicators: string[] };
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            symbol: args.symbol,
+            period: args.period,
+            adjust: args.adjust,
+            indicators: { ma5: args.period === "week" ? 7.18 : 7.12, macd_dif: 0.12, rsi6: 58.6 },
+          },
+        };
+      }
+      case "news_list":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              {
+                id: 1,
+                source: "财联社",
+                title: "浦发银行发布最新经营动态",
+                url: "https://example.com/news/1",
+                published_at: "2026-06-23T09:30:00Z",
+              },
+            ],
+          },
+        };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(screen.getByText("浦发银行发布最新经营动态")).toBeInTheDocument();
+  });
+  expect(screen.getByRole("heading", { name: "浦发银行" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /600000\.SH/ })).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /个股详情/ })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /返回/ })).toBeInTheDocument();
-  expect(screen.getAllByText("暂无").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("7.12").length).toBeGreaterThan(0);
   expect(screen.getByRole("heading", { name: "K线图" })).toBeInTheDocument();
-  expect(screen.getByText("暂无K线数据")).toBeInTheDocument();
-  expect(screen.getByText("暂无基础信息")).toBeInTheDocument();
-  expect(screen.getByText("暂无技术指标")).toBeInTheDocument();
-  expect(screen.getByText("暂无新闻资讯")).toBeInTheDocument();
+  expect(screen.getByLabelText("K线图")).toBeInTheDocument();
+  expect(screen.getByText("MA5")).toBeInTheDocument();
+  expect(screen.getByText("银行 / 暂无")).toBeInTheDocument();
+  expect(screen.getAllByText("低估值").length).toBeGreaterThan(0);
+  expect(screen.getByText("上海浦东发展银行股份有限公司")).toBeInTheDocument();
   expect(screen.queryByText("生益科技：一季度归母净利润同比增长18.35% 产品结构持续优化")).not.toBeInTheDocument();
   expect(screen.queryByText("买入")).not.toBeInTheDocument();
   expect(screen.queryByText("卖出")).not.toBeInTheDocument();
   expect(screen.queryByText("下单")).not.toBeInTheDocument();
   expect(screen.queryByText("券商账户")).not.toBeInTheDocument();
+  expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([
+    { command: "settings_get", payload: { keys: ["kline.default_period", "kline.default_adjust"] } },
+    { command: "market_quote", payload: { symbol: "600000.SH" } },
+    { command: "stock_profile", payload: { symbol: "600000.SH" } },
+    { command: "market_kline", payload: { symbol: "600000.SH", period: "day", adjust: "qfq", limit: 120 } },
+    { command: "market_indicators", payload: { symbol: "600000.SH", period: "day", adjust: "qfq", limit: 120, indicators: ["ma", "rsi", "macd"] } },
+    { command: "news_list", payload: { symbol: "600000.SH", limit: 20 } },
+  ]);
 });
 
-test("个股详情页本地交互只展示占位提示状态", async () => {
-  window.location.hash = "#/stocks/CN%3ASH%3A600183";
-  mockIPC((command) => {
-    throw new Error(`unexpected command ${command}`);
+test("个股详情页切换周期会按真实周期重新读取K线和指标", async () => {
+  window.location.hash = "#/stocks/600000.SH";
+  const calls: Array<{ command: string; payload?: any }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "settings_get":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "market_quote":
+        return { code: 0, message: "ok", data: { symbol: "600000.SH", price: 7.12 } };
+      case "market_kline": {
+        const args = payload as { symbol: string; period: string; adjust: string; limit: number };
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              {
+                symbol: args.symbol,
+                period: args.period,
+                adjust: args.adjust,
+                trade_date: "2026-06-23",
+                open: 7.01,
+                high: 7.2,
+                low: 6.98,
+                close: args.period === "week" ? 7.18 : 7.12,
+                volume: 1234000,
+              },
+            ],
+          },
+        };
+      }
+      case "market_indicators": {
+        const args = payload as { symbol: string; period: string; adjust: string; limit: number; indicators: string[] };
+        return { code: 0, message: "ok", data: { symbol: args.symbol, period: args.period, adjust: args.adjust, indicators: { ma5: args.period === "week" ? 7.18 : 7.12 } } };
+      }
+      case "news_list":
+        return { code: 0, message: "ok", data: { items: [] } };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
   });
 
   render(<App />);
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "未选择股票" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "600000.SH" })).toBeInTheDocument();
   });
   fireEvent.click(screen.getByRole("button", { name: "周K" }));
-  expect(screen.getByRole("button", { name: "周K" })).toHaveClass("text-[#1677ff]");
+  await waitFor(() => {
+    expect(calls).toContainEqual({ command: "market_kline", payload: { symbol: "600000.SH", period: "week", adjust: "qfq", limit: 120 } });
+  });
+  expect(calls).toContainEqual({ command: "market_indicators", payload: { symbol: "600000.SH", period: "week", adjust: "qfq", limit: 120, indicators: ["ma", "rsi", "macd"] } });
   fireEvent.click(screen.getByText("MACD"));
   expect(screen.getByText("MACD")).toHaveClass("text-[#1677ff]");
   fireEvent.click(screen.getByText("AI分析摘要"));
   expect(screen.getAllByText("内容待接入").length).toBeGreaterThan(0);
 });
 
-test("模型配置页保存 API Key 后只展示脱敏字段并清空明文输入", async () => {
+test("旧 ai-settings 路由保存 API Key 后只展示脱敏字段并清空明文输入", async () => {
   window.location.hash = "#/ai-settings";
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {
     const args = payload as any;
     calls.push({ command, payload });
     switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0", dbStatus: "ok" } };
+      case "providers_status":
+        return { code: 0, message: "ok", data: [{ name: "market", source: "sina", available: true, last_error: "" }] };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
       case "ai_config_list":
-        return { code: 0, message: "ok", data: { items: [] } };
-      case "prompt_templates_list":
         return { code: 0, message: "ok", data: { items: [] } };
       case "ai_config_save":
         return {
@@ -1043,13 +1375,14 @@ test("模型配置页保存 API Key 后只展示脱敏字段并清空明文输�
   render(<App />);
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "模型配置" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "模型设置" })).toHaveAttribute("aria-selected", "true");
   });
+  fireEvent.click(screen.getByRole("button", { name: "+ 新建配置" }));
   fireEvent.change(screen.getByLabelText("配置名称"), { target: { value: "自定义接入点" } });
-  fireEvent.change(screen.getByLabelText("接入点"), { target: { value: "https://llm.example.com" } });
-  fireEvent.change(screen.getByLabelText("模型名称"), { target: { value: "gpt-4.1-mini" } });
+  fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://llm.example.com" } });
+  fireEvent.change(screen.getByLabelText("模型名"), { target: { value: "gpt-4.1-mini" } });
   fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-live-secret" } });
-  fireEvent.click(screen.getByRole("button", { name: "保存模型配置" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
   await waitFor(() => {
     expect(screen.getByText("sk-...cret")).toBeInTheDocument();
@@ -1063,6 +1396,12 @@ test("模型连通性测试失败时不把密钥文本展示到页面", async ()
   window.location.hash = "#/ai-settings";
   mockIPC((command) => {
     switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0", dbStatus: "ok" } };
+      case "providers_status":
+        return { code: 0, message: "ok", data: [{ name: "market", source: "sina", available: true, last_error: "" }] };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
       case "ai_config_list":
         return {
           code: 0,
@@ -1087,8 +1426,6 @@ test("模型连通性测试失败时不把密钥文本展示到页面", async ()
             ],
           },
         };
-      case "prompt_templates_list":
-        return { code: 0, message: "ok", data: { items: [] } };
       case "ai_config_test":
         return { code: 50201, message: "upstream failed sk-live-secret", data: null };
       default:
@@ -1101,22 +1438,26 @@ test("模型连通性测试失败时不把密钥文本展示到页面", async ()
   await waitFor(() => {
     expect(screen.getByText("OpenAI 主配置")).toBeInTheDocument();
   });
-  fireEvent.click(screen.getByRole("button", { name: "测试 OpenAI 主配置" }));
+  fireEvent.click(screen.getByRole("button", { name: "测试连接 OpenAI 主配置" }));
 
   await waitFor(() => {
-    expect(screen.getByText(/upstream failed/)).toBeInTheDocument();
+    expect(screen.getByText("连接失败")).toBeInTheDocument();
   });
   expect(screen.queryByText("sk-live-secret")).not.toBeInTheDocument();
 });
 
 test("Prompt 模板页拒绝未支持变量且不会提交创建 command", async () => {
-  window.location.hash = "#/ai-settings";
+  window.location.hash = "#/settings";
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
     switch (command) {
-      case "ai_config_list":
-        return { code: 0, message: "ok", data: { items: [] } };
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0", dbStatus: "ok" } };
+      case "providers_status":
+        return { code: 0, message: "ok", data: [{ name: "market", source: "sina", available: true, last_error: "" }] };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
       case "prompt_templates_list":
         return { code: 0, message: "ok", data: { items: [] } };
       default:
@@ -1126,12 +1467,13 @@ test("Prompt 模板页拒绝未支持变量且不会提交创建 command", async
 
   render(<App />);
 
+  fireEvent.click(await screen.findByRole("tab", { name: "Prompt 配置" }));
   await waitFor(() => {
     expect(screen.getByRole("heading", { name: "Prompt 模板" })).toBeInTheDocument();
   });
   fireEvent.change(screen.getByLabelText("模板名称"), { target: { value: "非法变量模板" } });
-  fireEvent.change(screen.getByLabelText("模板内容"), { target: { value: "分析 {{unsupported_var}}" } });
-  fireEvent.click(screen.getByRole("button", { name: "保存 Prompt 模板" }));
+  fireEvent.change(screen.getByLabelText("Prompt 内容"), { target: { value: "分析 {{unsupported_var}}" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
   await waitFor(() => {
     expect(screen.getByText("变量 unsupported_var 不在首版白名单")).toBeInTheDocument();
@@ -1709,6 +2051,21 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
     if (command === "ai_config_list") {
       return { code: 0, message: "ok", data: { items: [defaultAIConfig] } };
     }
+    if (command === "prompt_templates_list") {
+      return { code: 0, message: "ok", data: { items: [] } };
+    }
+    if (command === "prompt_templates_create") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          id: 11,
+          ...(payload as any).payload,
+          variables: ["stock_code"],
+          is_builtin: false,
+        },
+      };
+    }
     if (command === "cache_stats") {
       return {
         code: 0,
@@ -1720,6 +2077,13 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
             { target: "task_logs", bytes: 524_288, label: "任务日志", cleanable: true },
           ],
         },
+      };
+    }
+    if (command === "scheduler_status") {
+      return {
+        code: 0,
+        message: "ok",
+        data: { jobs_total: 5, jobs_enabled: 3, queued_runs: 1, running_runs: 0, failed_runs: 0 },
       };
     }
     if (command === "cache_clean") {
@@ -1827,29 +2191,29 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.getByText("输出预览")).toBeInTheDocument();
   expect(screen.getAllByText("暂无预览内容").length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole("button", { name: "新增分类" }));
-  let dialog = screen.getByText("新建分类").closest(".ant-modal") as HTMLElement;
-  expect(dialog).toBeTruthy();
-  fireEvent.change(within(dialog).getByPlaceholderText("请输入分类名称"), { target: { value: "策略模板" } });
-  fireEvent.mouseDown(within(dialog).getByText("文件夹"));
-  fireEvent.click(screen.getByRole("option", { name: "file" }));
-  fireEvent.click(within(dialog).getByRole("button", { name: "创建分类" }));
-  await waitFor(() => {
-    expect(screen.getByText("策略模板")).toBeInTheDocument();
-  });
+  expect(screen.queryByText("新建分类")).not.toBeInTheDocument();
+  expect(screen.queryByText("策略模板")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /新建模板/ }));
-  dialog = screen
-    .getAllByText("新建模板")
-    .find((element) => element.classList.contains("ant-modal-title"))
-    ?.closest(".ant-modal") as HTMLElement;
-  expect(dialog).toBeTruthy();
-  fireEvent.change(within(dialog).getByPlaceholderText("请输入模板名称"), { target: { value: "技术突破模板" } });
-  fireEvent.click(within(dialog).getByRole("button", { name: "创建模板" }));
-  await waitFor(() => {
-    expect(screen.getByText("技术突破模板")).toBeInTheDocument();
-    expect(screen.getAllByDisplayValue("技术突破模板").length).toBeGreaterThan(0);
-  });
+  fireEvent.change(screen.getByLabelText("模板名称"), { target: { value: "技术突破模板" } });
   fireEvent.change(screen.getByLabelText("Prompt 内容"), { target: { value: "# 测试模板\n{{stock_code}}" } });
   fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+  await waitFor(() => {
+    expect(calls.some((call) => call.command === "prompt_templates_create")).toBe(true);
+  });
+  expect(calls).toContainEqual({
+    command: "prompt_templates_create",
+    payload: {
+      payload: {
+        name: "技术突破模板",
+        type: "stock_full",
+        description: "",
+        content: "# 测试模板\n{{stock_code}}",
+      },
+    },
+  });
+  await waitFor(() => {
+    expect(screen.getAllByDisplayValue("技术突破模板").length).toBeGreaterThan(0);
+  });
   fireEvent.click(screen.getByRole("button", { name: /复制/ }));
   await waitFor(() => {
     expect(writeText).toHaveBeenCalledWith("# 测试模板\n{{stock_code}}");
@@ -1887,14 +2251,14 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.getByText("本地缓存与快照")).toBeInTheDocument();
   expect(screen.getByText("数据源状态摘要")).toBeInTheDocument();
   expect(screen.getByText("数据合规与说明")).toBeInTheDocument();
-  expect(screen.getAllByText("EastMoney").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("新浪财经").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("腾讯财经").length).toBeGreaterThan(0);
-  expect(screen.getByText("Alpha Vantage")).toBeInTheDocument();
-  expect(screen.getByText("186.4 MB")).toBeInTheDocument();
-  expect(screen.getByText("2025-05-20 15:28:41")).toBeInTheDocument();
-  expect(screen.getByText("Go Core 数据适配层")).toBeInTheDocument();
-  expect(screen.getByText("扩展海外源")).toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.getAllByText("market").length).toBeGreaterThan(0);
+  });
+  expect(screen.getAllByText("sina").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("1 MB").length).toBeGreaterThan(0);
+  expect(screen.getByText("后端未提供")).toBeInTheDocument();
+  expect(screen.getByText("已启用任务")).toBeInTheDocument();
+  expect(screen.getByText("3 / 5")).toBeInTheDocument();
   expect(screen.getByText("数据仅用于本地研究与分析展示")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /测试连接/ }));
   fireEvent.click(screen.getByRole("button", { name: /编辑配置/ }));
@@ -1923,7 +2287,9 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.getAllByText("2025-05-20 15:30:00").length).toBeGreaterThan(0);
   expect(screen.getByText("连接测试")).toBeInTheDocument();
   expect(screen.getByText("测试目标")).toBeInTheDocument();
-  expect(screen.getByText("响应时间：128 ms")).toBeInTheDocument();
+  expect(screen.getByText("未测试")).toBeInTheDocument();
+  expect(screen.getByText("真实代理连接测试待接入")).toBeInTheDocument();
+  expect(screen.queryByText("响应时间：128 ms")).not.toBeInTheDocument();
   expect(screen.getByText("绕过代理设置（可选）")).toBeInTheDocument();
   expect(screen.getByPlaceholderText("例如：localhost;127.0.0.1;*.local")).toBeInTheDocument();
   expect(screen.getByText("代理配置仅影响应用访问外部网络的行为，不会修改系统或其他应用的网络设置。")).toBeInTheDocument();
@@ -1976,8 +2342,9 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
   expect(screen.getByText("C:\\Users\\InvestCompass\\Documents\\InvestCompass")).toBeInTheDocument();
   expect(screen.getByText("C:\\Users\\InvestCompass\\AppData\\Local\\InvestCompass\\logs")).toBeInTheDocument();
   expect(screen.getAllByText("检查更新").length).toBeGreaterThan(0);
-  expect(screen.getByText("当前已是最新版本")).toBeInTheDocument();
-  expect(screen.getByText("2025-05-18")).toBeInTheDocument();
+  expect(screen.getByText("检查更新待接入")).toBeInTheDocument();
+  expect(screen.queryByText("当前已是最新版本")).not.toBeInTheDocument();
+  expect(screen.queryByText("2025-05-18")).not.toBeInTheDocument();
   expect(screen.getByText("授权状态")).toBeInTheDocument();
   expect(screen.getByText("FREE")).toBeInTheDocument();
   expect(screen.getByText("首版仅展示授权状态，不提供激活流程与功能限制。")).toBeInTheDocument();
@@ -2008,8 +2375,84 @@ test("设置中心基础设置页展示真实空态并支持基础交互", async
     { command: "cache_clean", payload: { payload: { targets: ["quote", "task_logs"] } } },
     { command: "cache_stats", payload: {} },
     { command: "ai_config_list", payload: {} },
+    { command: "prompt_templates_list", payload: {} },
+    {
+      command: "prompt_templates_create",
+      payload: {
+        payload: {
+          name: "技术突破模板",
+          type: "stock_full",
+          description: "",
+          content: "# 测试模板\n{{stock_code}}",
+        },
+      },
+    },
     { command: "settings_get", payload: dataSourceSettingsGetPayload },
+    { command: "cache_stats", payload: {} },
+    { command: "scheduler_status", payload: {} },
     { command: "settings_set", payload: { payload: { items: [{ key: "data_source.default_market_source", value: "akshare-eastmoney" }] } } },
+    { command: "cache_stats", payload: {} },
+    { command: "scheduler_status", payload: {} },
+    {
+      command: "settings_get",
+      payload: { keys: ["proxy.mode", "proxy.http_url", "proxy.socks5_url", "proxy.no_proxy", "proxy.username", "proxy_credential_ref"] },
+    },
+    { command: "settings_set", payload: { payload: { items: [{ key: "proxy.mode", value: "http" }] } } },
+    {
+      command: "settings_set",
+      payload: {
+        payload: {
+          items: [
+            { key: "proxy.mode", value: "http" },
+            { key: "proxy.http_url", value: "http://127.0.0.1:7890" },
+            { key: "proxy.no_proxy", value: "" },
+            { key: "proxy.username", value: "" },
+          ],
+        },
+      },
+    },
+    {
+      command: "settings_set",
+      payload: {
+        payload: {
+          items: [
+            { key: "proxy.mode", value: "system" },
+            { key: "proxy.http_url", value: "" },
+            { key: "proxy.username", value: "" },
+          ],
+          clear_proxy_credential: true,
+        },
+      },
+    },
+    { command: "settings_set", payload: { payload: { items: [{ key: "proxy.mode", value: "socks5" }] } } },
+    {
+      command: "settings_set",
+      payload: {
+        payload: {
+          items: [
+            { key: "proxy.mode", value: "socks5" },
+            { key: "proxy.socks5_url", value: "socks5://127.0.0.1:1080" },
+            { key: "proxy.no_proxy", value: "" },
+            { key: "proxy.username", value: "" },
+          ],
+        },
+      },
+    },
+    {
+      command: "settings_set",
+      payload: {
+        payload: {
+          items: [
+            { key: "proxy.mode", value: "system" },
+            { key: "proxy.socks5_url", value: "" },
+            { key: "proxy.username", value: "" },
+          ],
+          clear_proxy_credential: true,
+        },
+      },
+    },
+    { command: "settings_set", payload: { payload: { items: [{ key: "proxy.mode", value: "system" }] } } },
+    { command: "settings_set", payload: { payload: { items: [{ key: "proxy.no_proxy", value: "localhost;127.0.0.1;*.local" }] } } },
   ]);
 }, 10_000);
 
@@ -2032,6 +2475,9 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
     }
     if (command === "cache_stats") {
       return { code: 0, message: "ok", data: { total_bytes: 0, items: [] } };
+    }
+    if (command === "scheduler_status") {
+      return { code: 0, message: "ok", data: { jobs_total: 0, jobs_enabled: 0, queued_runs: 0, running_runs: 0, failed_runs: 0 } };
     }
     if (command === "search_status") {
       return {
@@ -2132,10 +2578,14 @@ test("数据源设置凭据管理页展示脱敏凭据并仅使用本地交互",
     "autostart_get",
     "settings_get",
     "settings_get",
+    "cache_stats",
+    "scheduler_status",
     "data_source_credentials_list",
     "data_source_credentials_save",
     "data_source_credentials_test",
     "data_source_credentials_clear",
+    "cache_stats",
+    "scheduler_status",
   ]);
   expect(calls).toContainEqual({ command: "settings_get", payload: basicSettingsGetPayload });
   expect(calls).toContainEqual({ command: "settings_get", payload: notificationSettingsGetPayload });
@@ -2162,6 +2612,9 @@ test("数据源设置数据说明页展示说明模块并仅使用本地交互",
     }
     if (command === "cache_stats") {
       return { code: 0, message: "ok", data: { total_bytes: 0, items: [] } };
+    }
+    if (command === "scheduler_status") {
+      return { code: 0, message: "ok", data: { jobs_total: 0, jobs_enabled: 0, queued_runs: 0, running_runs: 0, failed_runs: 0 } };
     }
     if (command === "search_status") {
       return {
@@ -2297,11 +2750,18 @@ test("数据源设置数据说明页展示说明模块并仅使用本地交互",
     { command: "autostart_get", payload: {} },
     { command: "settings_get", payload: { keys: ["window.close_to_tray"] } },
     { command: "settings_get", payload: dataSourceSettingsGetPayload },
+    { command: "cache_stats", payload: {} },
+    { command: "scheduler_status", payload: {} },
+    { command: "cache_stats", payload: {} },
+    { command: "scheduler_status", payload: {} },
+    { command: "cache_stats", payload: {} },
+    { command: "scheduler_status", payload: {} },
     { command: "data_source_credentials_list", payload: {} },
   ]);
 }, 10_000);
 
 test("任务调度页面读取真实调度接口并支持立即执行", async () => {
+  window.location.hash = "#/scheduler";
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-06-19T09:00:00+08:00"));
   const calls: Array<{ command: string; payload?: unknown }> = [];
@@ -2423,7 +2883,6 @@ test("任务调度页面读取真实调度接口并支持立即执行", async ()
   });
 
   render(<App />);
-  fireEvent.click(screen.getByRole("link", { name: "任务调度" }));
 
   await waitFor(() => {
     expect(screen.getByRole("heading", { name: "任务调度" })).toBeInTheDocument();
@@ -2483,6 +2942,7 @@ test("任务调度页面读取真实调度接口并支持立即执行", async ()
 });
 
 test("任务调度页面支持按执行状态和触发类型过滤运行记录", async () => {
+  window.location.hash = "#/scheduler";
   mockIPC((command) => {
     switch (command) {
       case "core_health":
@@ -2542,7 +3002,6 @@ test("任务调度页面支持按执行状态和触发类型过滤运行记录",
   });
 
   render(<App />);
-  fireEvent.click(screen.getByRole("link", { name: "任务调度" }));
 
   await waitFor(() => {
     expect(screen.getByText("run-failed")).toBeInTheDocument();
@@ -2558,6 +3017,7 @@ test("任务调度页面支持按执行状态和触发类型过滤运行记录",
 });
 
 test("任务调度页面补偿日期超范围时不保留旧成功提示", async () => {
+  window.location.hash = "#/scheduler";
   const calls: Array<{ command: string; payload?: unknown }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
@@ -2616,7 +3076,6 @@ test("任务调度页面补偿日期超范围时不保留旧成功提示", async
   });
 
   render(<App />);
-  fireEvent.click(screen.getByRole("link", { name: "任务调度" }));
 
   await waitFor(() => {
     expect(screen.getByRole("heading", { name: "任务调度" })).toBeInTheDocument();
@@ -2639,6 +3098,7 @@ test("任务调度页面补偿日期超范围时不保留旧成功提示", async
 });
 
 test("任务调度页面读取执行详情失败时清理旧详情并展示错误", async () => {
+  window.location.hash = "#/scheduler";
   let detailCalls = 0;
   mockIPC((command, payload) => {
     switch (command) {
@@ -2716,7 +3176,6 @@ test("任务调度页面读取执行详情失败时清理旧详情并展示错�
   });
 
   render(<App />);
-  fireEvent.click(screen.getByRole("link", { name: "任务调度" }));
 
   await waitFor(() => {
     expect(screen.getByText("run-ok")).toBeInTheDocument();
@@ -2737,6 +3196,7 @@ test("任务调度页面读取执行详情失败时清理旧详情并展示错�
 });
 
 test("任务调度页面展示 Provider 不可用状态并禁用立即执行", async () => {
+  window.location.hash = "#/scheduler";
   const calls: Array<{ command: string; payload?: unknown }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
@@ -2795,7 +3255,6 @@ test("任务调度页面展示 Provider 不可用状态并禁用立即执行", a
   });
 
   render(<App />);
-  fireEvent.click(screen.getByRole("link", { name: "任务调度" }));
 
   await waitFor(() => {
     expect(screen.getByRole("heading", { name: "任务调度" })).toBeInTheDocument();

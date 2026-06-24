@@ -29,6 +29,7 @@ import (
 	marketservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
 	notificationservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/notification"
+	promptservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/prompt"
 	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
 	searchservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/search"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/sidecar"
@@ -105,6 +106,10 @@ func main() {
 	store, err := dao.NewStore(db)
 	if err != nil {
 		slog.Error("初始化本地数据仓库失败", "error", err)
+		os.Exit(1)
+	}
+	if err := seedBuiltinPromptTemplates(dbCtx, store); err != nil {
+		slog.Error("初始化内置 Prompt 模板失败", "error", err)
 		os.Exit(1)
 	}
 	if err := recoverRunningTasksOnStartup(dbCtx, store); err != nil {
@@ -203,6 +208,29 @@ func main() {
 		os.Exit(1)
 	}
 	lifecycleDiagnostic("serve_result", "error", "nil")
+}
+
+type builtinPromptStoreAdapter struct {
+	store *dao.Store
+}
+
+// GetPromptTemplateByKey 按稳定 key 读取当前库中的模板，供内置模板 seed 判断是否需要更新。
+func (adapter builtinPromptStoreAdapter) GetPromptTemplateByKey(ctx context.Context, key string) (promptservice.Template, bool, error) {
+	return adapter.store.GetPromptTemplateByKey(ctx, key)
+}
+
+// SavePromptTemplate 只服务内置模板 seed，将 service 模型转换为 DAO 写入。
+func (adapter builtinPromptStoreAdapter) SavePromptTemplate(ctx context.Context, template promptservice.Template) error {
+	return adapter.store.SaveBuiltinPromptTemplate(ctx, template)
+}
+
+// seedBuiltinPromptTemplates 将打包模板写入 SQLite；内置模板只按 key/checksum 由应用升级维护。
+func seedBuiltinPromptTemplates(ctx context.Context, store *dao.Store) error {
+	templates, err := promptservice.LoadPackagedBuiltinPromptTemplates()
+	if err != nil {
+		return err
+	}
+	return promptservice.SeedBuiltinPromptTemplates(ctx, builtinPromptStoreAdapter{store: store}, templates)
 }
 
 // serveCoreHTTP 在后台启动本地 HTTP server；调用方必须在 ready 前启动它，避免 Rust 收到 ready 后立刻请求时连接被拒绝。
