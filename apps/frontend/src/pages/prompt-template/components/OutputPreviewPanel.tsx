@@ -1,15 +1,23 @@
 import { FullscreenOutlined } from "@ant-design/icons";
-import { Button, Empty, Select } from "antd";
+import { Button, Empty, Modal, Select } from "antd";
+import { useState } from "react";
 import type { PromptEditorState } from "../types";
 
 type OutputPreviewPanelProps = {
   content: string;
   format: PromptEditorState["previewFormat"];
   onFormatChange: (format: PromptEditorState["previewFormat"]) => void;
-  onFullscreen: () => void;
 };
 
 export function OutputPreviewPanel(props: OutputPreviewPanelProps) {
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  const renderPreviewContent = () =>
+    props.format === "Markdown" ? (
+      <MarkdownPreview markdown={props.content} />
+    ) : (
+      <PlainTextPreview text={plainTextFromMarkdown(props.content)} />
+    );
+
   return (
     <section className="prompt-card prompt-preview-panel">
       <div className="prompt-card-header prompt-compact-header">
@@ -24,12 +32,30 @@ export function OutputPreviewPanel(props: OutputPreviewPanelProps) {
             ]}
             onChange={props.onFormatChange}
           />
-          <Button aria-label="全屏预览" className="prompt-editor-icon-only" icon={<FullscreenOutlined />} onClick={props.onFullscreen} />
+          <Button
+            aria-label="全屏预览"
+            className="prompt-editor-icon-only"
+            icon={<FullscreenOutlined />}
+            onClick={() => setFullscreenOpen(true)}
+          />
         </div>
       </div>
-      <div className="prompt-preview-body">
-        {props.format === "Markdown" ? <MarkdownPreview markdown={props.content} /> : <PlainTextPreview text={plainTextFromMarkdown(props.content)} />}
+      <div className="prompt-preview-body prompt-preview-scroll" aria-label="Prompt 输出预览内容">
+        {renderPreviewContent()}
       </div>
+      <Modal
+        centered
+        className="prompt-preview-fullscreen-modal"
+        footer={null}
+        open={fullscreenOpen}
+        title="输出预览"
+        width={960}
+        onCancel={() => setFullscreenOpen(false)}
+      >
+        <div className="prompt-preview-fullscreen-scroll" aria-label="全屏 Prompt 输出预览内容">
+          {renderPreviewContent()}
+        </div>
+      </Modal>
     </section>
   );
 }
@@ -50,7 +76,7 @@ function MarkdownPreview({ markdown }: { markdown: string }) {
         }
         if (line.startsWith("- ")) {
           return (
-            <p key={line + index} className="prompt-md-bullet">
+            <p key={line + index} className="prompt-md-bullet prompt-md-wrap-line">
               {line.slice(2)}
             </p>
           );
@@ -58,7 +84,11 @@ function MarkdownPreview({ markdown }: { markdown: string }) {
         if (!line.trim()) {
           return <div key={`gap-${index}`} className="prompt-md-gap" />;
         }
-        return <p key={line + index}>{line}</p>;
+        return (
+          <p key={line + index} className="prompt-md-wrap-line">
+            {line}
+          </p>
+        );
       })}
     </div>
   );
