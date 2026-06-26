@@ -33,6 +33,7 @@ pub fn run() {
             commands::autostart::autostart_set,
             commands::settings::settings_get,
             commands::settings::settings_set,
+            commands::settings::proxy_connection_test,
             commands::settings::workspace_get,
             commands::settings::workspace_set,
             commands::settings::workspace_open,
@@ -47,6 +48,8 @@ pub fn run() {
             commands::market::market_indicators,
             commands::news::news_list,
             commands::news::news_market,
+            commands::news::news_stats,
+            commands::news::news_hot_topics,
             commands::notifications::notifications_clear_read,
             commands::notifications::notifications_list,
             commands::notifications::notifications_mark_all_read,
@@ -83,6 +86,10 @@ pub fn run() {
             commands::reports::report_list,
             commands::reports::report_get,
             commands::reports::report_delete,
+            commands::reports::report_batch_delete,
+            commands::reports::report_update,
+            commands::reports::report_export,
+            commands::reports::report_stats,
             commands::search::search_reports,
             commands::search::search_news,
             commands::search::search_watchlist_notes,
@@ -107,7 +114,8 @@ pub fn run() {
             commands::watchlist::watchlist_list,
             commands::watchlist::watchlist_create,
             commands::watchlist::watchlist_update,
-            commands::watchlist::watchlist_delete
+            commands::watchlist::watchlist_delete,
+            commands::watchlist::watchlist_refresh
         ])
         .build(tauri::generate_context!())
         .expect("failed to build Invest Compass desktop shell");

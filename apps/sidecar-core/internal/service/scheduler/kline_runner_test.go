@@ -85,6 +85,46 @@ func TestKlineRefreshRunnerReadsActiveWatchlistWhenScopeIsMarket(t *testing.T) {
 	}
 }
 
+// TestKlineRefreshRunnerAcceptsLongCyclePeriods 验证 K 线任务支持月线以上长周期缓存刷新。
+func TestKlineRefreshRunnerAcceptsLongCyclePeriods(t *testing.T) {
+	tests := []marketservice.Period{
+		marketservice.PeriodMonth,
+		marketservice.PeriodQuarter,
+		marketservice.PeriodYear,
+	}
+
+	for _, period := range tests {
+		provider := &klineProvider{
+			bars: []marketservice.KlineBar{
+				{Symbol: mustParseSymbol(t, "CN:SH:600519"), Period: period, Adjust: marketservice.AdjustNone, TradeDate: "2026-06-19", Close: 101, Provider: "test-provider"},
+			},
+		}
+		store := &klineStore{}
+		runner := KlineRefreshRunner{Provider: provider, Store: store}
+
+		result, err := runner.Run(context.Background(), model.SchedulerRun{
+			CronType:   CronTypeCNAShareKlineRefresh,
+			DataType:   "kline",
+			Period:     string(period),
+			ScopeKey:   "CN:SH:600519",
+			ParamsJSON: `{"period":"` + string(period) + `","adjust":"none","limit":120}`,
+			TargetDate: "2026-06-19",
+		})
+		if err != nil {
+			t.Fatalf("run kline refresh for %q: %v", period, err)
+		}
+		if result.FetchedCount != 1 || result.WrittenCount != 1 {
+			t.Fatalf("unexpected kline refresh result for %q: %+v", period, result)
+		}
+		if provider.request.Period != period {
+			t.Fatalf("expected provider period %q, got %+v", period, provider.request)
+		}
+		if len(store.watermarks) != 1 || store.watermarks[0].Period != string(period) {
+			t.Fatalf("unexpected watermark for %q: %+v", period, store.watermarks)
+		}
+	}
+}
+
 // TestKlineRefreshRunnerFailsOnEmptyBars 验证 Provider 返回空 K 线时不会写入水位，避免把空数据误认为刷新成功。
 func TestKlineRefreshRunnerFailsOnEmptyBars(t *testing.T) {
 	runner := KlineRefreshRunner{Provider: &klineProvider{}, Store: &klineStore{}}
@@ -110,9 +150,9 @@ func TestKlineRefreshRunnerRejectsInvalidPeriod(t *testing.T) {
 	_, err := runner.Run(context.Background(), model.SchedulerRun{
 		CronType:   CronTypeCNAShareKlineRefresh,
 		DataType:   "kline",
-		Period:     "minute",
+		Period:     "halfyear",
 		ScopeKey:   "CN:SH:600519",
-		ParamsJSON: `{"period":"minute","adjust":"none","limit":120}`,
+		ParamsJSON: `{"period":"halfyear","adjust":"none","limit":120}`,
 		TargetDate: "2026-06-19",
 	})
 	if err == nil || !strings.Contains(err.Error(), "kline period is invalid") {

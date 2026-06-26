@@ -5,9 +5,11 @@ export type ReportDetail = {
   symbol: string;
   displayCode: string;
   analysisType: string;
+  analysisTypeValue: string;
   model: string;
   generatedAt: string;
   taskId: string;
+  promptTemplateId: number;
   dataUpdatedAt: string;
   favorite: boolean;
   markdown: string;

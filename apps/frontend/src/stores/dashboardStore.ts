@@ -36,32 +36,64 @@ type DashboardStoreState = {
   loading: boolean;
   error: string | null;
   lastLoadedAt: string | null;
-  load: () => Promise<void>;
+  load: (options?: DashboardLoadOptions) => Promise<void>;
+};
+
+type DashboardLoadOptions = {
+  forceRefresh?: boolean;
 };
 
 const overviewIndexSymbols = ["000001.SH", "399001.SZ", "399006.SZ", "000300.SH"];
+const intradayTrendKlinePayload = { period: "minute", adjust: "none", limit: 242 } as const;
+let dashboardLoadSequence = 0;
 
 // 首页总览 store 统一编排真实 command，避免组件里散落多份异步状态。
-export const useDashboardStore = create<DashboardStoreState>((set) => ({
+export const useDashboardStore = create<DashboardStoreState>((set, get) => ({
   state: null,
   loading: false,
   error: null,
   lastLoadedAt: null,
-  load: async () => {
-    set({ state: null, loading: true, error: null });
+  load: async (options) => {
+    dashboardLoadSequence += 1;
+    const loadSequence = dashboardLoadSequence;
+    set((current) => ({ state: current.state, loading: true, error: null }));
     try {
-      const [health, summary, watchlist, indexQuotes, indexTrends] = await Promise.all([
+      const [health, summary, watchlist] = await Promise.all([
         coreHealth(),
         dashboardSummary(),
         watchlistList(),
-        loadQuoteStates(overviewIndexSymbols),
-        loadIndexTrends(overviewIndexSymbols),
       ]);
-      const watchlistRows = await loadWatchlistRows(watchlist.items);
+      if (loadSequence !== dashboardLoadSequence) {
+        return;
+      }
+
+      const previousState = get().state;
+      const baseState: DashboardViewState = {
+        health,
+        summary,
+        indexQuotes: previousState?.indexQuotes.length ? normalizeIndexQuotes(previousState.indexQuotes) : emptyIndexQuotes(),
+        indexTrends: previousState?.indexTrends ?? {},
+        watchlistRows: preserveWatchlistRows(watchlist.items, previousState?.watchlistRows ?? []),
+      };
+      set({
+        state: baseState,
+        loading: false,
+        error: null,
+        lastLoadedAt: new Date().toISOString(),
+      });
+
+      const [indexQuotes, indexTrends, watchlistRows] = await Promise.all([
+        loadQuoteStates(overviewIndexSymbols, options),
+        loadIndexTrends(overviewIndexSymbols),
+        loadWatchlistRows(watchlist.items, options),
+      ]);
+      const latestState = get().state;
+      if (!latestState || loadSequence !== dashboardLoadSequence) {
+        return;
+      }
       set({
         state: {
-          health,
-          summary,
+          ...latestState,
           indexQuotes,
           indexTrends,
           watchlistRows,
@@ -71,6 +103,9 @@ export const useDashboardStore = create<DashboardStoreState>((set) => ({
         lastLoadedAt: new Date().toISOString(),
       });
     } catch (cause) {
+      if (loadSequence !== dashboardLoadSequence) {
+        return;
+      }
       set({
         loading: false,
         error: cause instanceof Error ? cause.message : "本地核心服务连接失败",
@@ -79,11 +114,28 @@ export const useDashboardStore = create<DashboardStoreState>((set) => ({
   },
 }));
 
-async function loadQuoteStates(symbols: string[]): Promise<DashboardQuoteState[]> {
+function emptyIndexQuotes(): DashboardQuoteState[] {
+  return overviewIndexSymbols.map((symbol) => ({ symbol, quote: null, error: null }));
+}
+
+function normalizeIndexQuotes(items: DashboardQuoteState[]): DashboardQuoteState[] {
+  const bySymbol = new Map(items.map((item) => [item.symbol, item]));
+  return overviewIndexSymbols.map((symbol) => bySymbol.get(symbol) ?? { symbol, quote: null, error: null });
+}
+
+function preserveWatchlistRows(items: WatchlistItem[], previousRows: DashboardWatchlistRow[]): DashboardWatchlistRow[] {
+  const bySymbol = new Map(previousRows.map((row) => [row.symbol, row]));
+  return items.map((item) => {
+    const previous = bySymbol.get(item.symbol);
+    return { ...item, quote: item.quote ?? previous?.quote ?? null, error: previous?.error ?? null };
+  });
+}
+
+async function loadQuoteStates(symbols: string[], options?: DashboardLoadOptions): Promise<DashboardQuoteState[]> {
   return Promise.all(
     symbols.map(async (symbol) => {
       try {
-        return { symbol, quote: await marketQuote(symbol), error: null };
+        return { symbol, quote: await marketQuote(symbol, { forceRefresh: Boolean(options?.forceRefresh) }), error: null };
       } catch (cause) {
         return { symbol, quote: null, error: cause instanceof Error ? cause.message : "行情读取失败" };
       }
@@ -95,7 +147,7 @@ async function loadIndexTrends(symbols: string[]): Promise<Record<string, Market
   const entries = await Promise.all(
     symbols.map(async (symbol) => {
       try {
-        const result = await marketKline({ symbol, period: "day", adjust: "qfq", limit: 40 });
+        const result = await marketKline({ symbol, ...intradayTrendKlinePayload });
         return [symbol, result.items] as const;
       } catch {
         // 迷你走势是总览增强信息，失败时只降级为空态，不阻断核心总览读取。
@@ -106,11 +158,14 @@ async function loadIndexTrends(symbols: string[]): Promise<Record<string, Market
   return Object.fromEntries(entries);
 }
 
-async function loadWatchlistRows(items: WatchlistItem[]): Promise<DashboardWatchlistRow[]> {
+async function loadWatchlistRows(items: WatchlistItem[], options?: DashboardLoadOptions): Promise<DashboardWatchlistRow[]> {
+  if (!options?.forceRefresh) {
+    return items.map((item) => ({ ...item, quote: item.quote ?? null, error: null }));
+  }
   return Promise.all(
     items.map(async (item) => {
       try {
-        return { ...item, quote: await marketQuote(item.symbol), error: null };
+        return { ...item, quote: await marketQuote(item.symbol, { forceRefresh: Boolean(options?.forceRefresh) }), error: null };
       } catch (cause) {
         return { ...item, quote: null, error: cause instanceof Error ? cause.message : "行情读取失败" };
       }

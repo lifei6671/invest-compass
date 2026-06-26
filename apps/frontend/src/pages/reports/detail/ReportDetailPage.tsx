@@ -2,7 +2,7 @@ import { InfoCircleFilled, SafetyCertificateOutlined } from "@ant-design/icons";
 import { App as AntApp, Button, Empty } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { reportGet, type AnalysisReport } from "../../../services/coreClient";
+import { aiConfigList, analysisTaskCreate, reportDelete, reportExport, reportGet, reportUpdate, type AnalysisReport } from "../../../services/coreClient";
 import { ReportDetailHeader } from "./components/ReportDetailHeader";
 import { ReportMarkdownContent } from "./components/ReportMarkdownContent";
 import { ReportSnapshotPanel } from "./components/ReportSnapshotPanel";
@@ -17,6 +17,7 @@ export function ReportDetailPage() {
   const [inputSnapshot] = useState<InputSnapshot | null>(null);
   const [activeSection, setActiveSection] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [tocCollapsed, setTocCollapsed] = useState(false);
 
   useEffect(() => {
     const reportID = reportIDFromRoute(params.reportId);
@@ -57,7 +58,99 @@ export function ReportDetailPage() {
     const request = writer ? writer.call(navigator.clipboard, report.markdown) : Promise.resolve();
     request
       .then(() => message.success("Markdown 已复制"))
-      .catch(() => message.success("Markdown 已复制"));
+      .catch(() => message.error("Markdown 复制失败"));
+  };
+
+  const deleteReport = async () => {
+    if (!report) {
+      return;
+    }
+    const reportID = Number(report.id);
+    if (!Number.isInteger(reportID) || reportID <= 0) {
+      message.error("无法识别报告 ID，删除失败");
+      return;
+    }
+    try {
+      await reportDelete(reportID);
+      message.success("报告已删除");
+      navigate("/reports");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "报告删除失败");
+    }
+  };
+
+  const exportReport = async () => {
+    if (!report) {
+      return;
+    }
+    const reportID = Number(report.id);
+    if (!Number.isInteger(reportID) || reportID <= 0) {
+      message.error("无法识别报告 ID，导出失败");
+      return;
+    }
+    try {
+      const result = await reportExport(reportID);
+      if (!result.saved) {
+        message.info("已取消导出");
+        return;
+      }
+      message.success(`报告已导出：${result.file_name}`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "报告导出失败");
+    }
+  };
+
+  const toggleFavorite = async () => {
+    if (!report) {
+      return;
+    }
+    const reportID = Number(report.id);
+    if (!Number.isInteger(reportID) || reportID <= 0) {
+      message.error("无法识别报告 ID，收藏失败");
+      return;
+    }
+    const nextFavorite = !report.favorite;
+    try {
+      await reportUpdate(reportID, nextFavorite);
+      setReport({ ...report, favorite: nextFavorite });
+      message.success(nextFavorite ? "已收藏报告" : "已取消收藏");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "收藏状态更新失败");
+    }
+  };
+
+  const reanalyzeReport = async () => {
+    if (!report) {
+      return;
+    }
+    if (!report.promptTemplateId) {
+      message.error("当前报告缺少 Prompt 模板引用，无法重新分析");
+      return;
+    }
+    const analysisType = supportedReanalysisType(report.analysisTypeValue);
+    if (!analysisType) {
+      message.error("当前报告类型暂不支持重新分析");
+      return;
+    }
+    try {
+      const configs = await aiConfigList();
+      const model = configs.items.find((item) => item.is_default && item.has_api_key) ?? configs.items.find((item) => item.has_api_key);
+      if (!model) {
+        message.error("请先配置可用 AI 模型");
+        return;
+      }
+      const result = await analysisTaskCreate({
+        symbol: report.symbol,
+        analysis_type: analysisType,
+        ai_config_id: model.id,
+        api_key_ref: model.api_key_ref,
+        prompt_template_id: report.promptTemplateId,
+        user_position: null,
+      });
+      navigate(`/analysis/running?taskId=${encodeURIComponent(result.task_id)}`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "重新分析任务创建失败");
+    }
   };
 
   const handleSectionClick = (section: ReportSection) => {
@@ -66,6 +159,17 @@ export function ReportDetailPage() {
     if (typeof sectionElement?.scrollIntoView === "function") {
       sectionElement.scrollIntoView({ block: "start", behavior: "smooth" });
     }
+  };
+
+  const copyInputSnapshot = () => {
+    if (!inputSnapshot) {
+      return;
+    }
+    const writer = navigator.clipboard?.writeText;
+    const request = writer ? writer.call(navigator.clipboard, JSON.stringify(inputSnapshot, null, 2)) : Promise.resolve();
+    request
+      .then(() => message.success("输入快照已复制"))
+      .catch(() => message.error("输入快照复制失败"));
   };
 
   const renderEmptyReport = () => (
@@ -84,13 +188,10 @@ export function ReportDetailPage() {
           report={report}
           onBack={() => navigate("/reports")}
           onCopy={copyMarkdown}
-          onExport={() => message.info("导出 Markdown 待接入")}
-          onReanalyze={() => message.info("重新分析待接入")}
-          onDelete={() => message.warning("删除报告待接入")}
-          onFavoriteToggle={() => {
-            setReport((current) => (current ? { ...current, favorite: !current.favorite } : current));
-            message.success("收藏状态已更新");
-          }}
+          onExport={() => void exportReport()}
+          onReanalyze={() => void reanalyzeReport()}
+          onDelete={() => void deleteReport()}
+          onFavoriteToggle={() => void toggleFavorite()}
         />
       ) : (
         <header className="report-detail-header">
@@ -113,10 +214,11 @@ export function ReportDetailPage() {
           sections={reportSections}
           activeSection={activeSection}
           onSectionClick={handleSectionClick}
-          onCollapse={() => message.info("目录折叠待接入")}
+          collapsed={tocCollapsed}
+          onToggleCollapse={() => setTocCollapsed((current) => !current)}
         />
         {report ? <ReportMarkdownContent markdown={report.markdown} /> : renderEmptyReport()}
-        <ReportSnapshotPanel snapshot={inputSnapshot} onCopySnapshot={() => message.info("复制输入快照待接入")} />
+        <ReportSnapshotPanel snapshot={inputSnapshot} onCopySnapshot={copyInputSnapshot} />
       </div>
 
       <ReportDetailRiskNotice />
@@ -137,14 +239,23 @@ function reportDetailFromAnalysisReport(report: AnalysisReport): ReportDetail {
     symbol: report.symbol || "—",
     displayCode: displayCodeFromSymbol(report.symbol),
     analysisType: analysisTypeLabel(report.analysis_type),
+    analysisTypeValue: report.analysis_type || "stock_full",
     model: report.model_name || "—",
     generatedAt: formatReportTime(report.created_at),
     taskId: report.task_id || "—",
+    promptTemplateId: report.prompt_template_id || 0,
     dataUpdatedAt: formatReportTime(report.updated_at),
-    favorite: false,
+    favorite: Boolean(report.favorite),
     markdown: report.content_markdown || "",
     riskSummary: report.risk_summary || "—",
   };
+}
+
+function supportedReanalysisType(value: string | undefined): "stock_full" | "technical" | null {
+  if (value === "stock_full" || value === "technical") {
+    return value;
+  }
+  return null;
 }
 
 function analysisTypeLabel(value: string | undefined): string {

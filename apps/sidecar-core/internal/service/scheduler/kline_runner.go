@@ -125,7 +125,7 @@ func parseKlineParams(raw string) (klineParams, error) {
 	period := marketservice.Period(strings.TrimSpace(params.Period))
 	adjust := marketservice.Adjust(strings.TrimSpace(params.Adjust))
 	switch period {
-	case marketservice.PeriodDay, marketservice.PeriodWeek, marketservice.PeriodMonth:
+	case marketservice.PeriodMinute, marketservice.PeriodDay, marketservice.PeriodWeek, marketservice.PeriodMonth, marketservice.PeriodQuarter, marketservice.PeriodYear:
 	default:
 		return klineParams{}, fmt.Errorf("kline period is invalid")
 	}

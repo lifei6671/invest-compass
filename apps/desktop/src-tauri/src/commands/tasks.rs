@@ -32,6 +32,7 @@ pub struct AnalysisTaskCreatePayload {
     ai_config_id: i64,
     api_key_ref: String,
     prompt_template_id: i64,
+    retry_of_task_id: Option<String>,
     user_position: Option<UserPositionPayload>,
 }
 
@@ -48,6 +49,7 @@ struct AnalysisTaskCreateRequest {
     analysis_type: String,
     ai_config_id: i64,
     prompt_template_id: i64,
+    retry_of_task_id: Option<String>,
     user_position: Option<UserPositionPayload>,
     resolved_api_key: String,
 }
@@ -60,6 +62,7 @@ struct AnalysisTaskCancelRequest {
 #[derive(Debug, Serialize)]
 pub struct TaskStreamEvent {
     id: i64,
+    task_id: String,
     event: String,
     data: serde_json::Value,
 }
@@ -112,6 +115,7 @@ pub fn analysis_task_subscribe(
     validate_after_event_id(after_event_id)?;
     let client = state.client().map_err(|error| error.to_string())?;
     let mut last_event_id = after_event_id;
+    let task_id_for_event = task_id.clone();
     let emitted = client
         .post_sse(
             "/api/tasks/events/stream",
@@ -120,8 +124,8 @@ pub fn analysis_task_subscribe(
                 after_event_id,
             },
             |frame| {
-                let event =
-                    parse_task_stream_event(frame).map_err(SidecarError::SseFrameHandler)?;
+                let event = parse_task_stream_event(frame, &task_id_for_event)
+                    .map_err(SidecarError::SseFrameHandler)?;
                 last_event_id = event.id;
                 window
                     .emit(ANALYSIS_TASK_EVENT, &event)
@@ -191,6 +195,7 @@ fn build_analysis_task_create_request(
         analysis_type: payload.analysis_type,
         ai_config_id: payload.ai_config_id,
         prompt_template_id: payload.prompt_template_id,
+        retry_of_task_id: payload.retry_of_task_id,
         user_position: payload.user_position,
         resolved_api_key,
     })
@@ -245,7 +250,7 @@ fn validate_after_event_id(after_event_id: i64) -> Result<(), String> {
 
 /// 解析 Go core 返回的 SSE 帧文本，转为 Tauri event payload。
 #[cfg(test)]
-fn parse_task_stream_events(text: &str) -> Result<Vec<TaskStreamEvent>, String> {
+fn parse_task_stream_events(text: &str, task_id: &str) -> Result<Vec<TaskStreamEvent>, String> {
     // SSE 协议允许不同 HTTP 栈使用 CRLF；Rust 转发层先统一行结束符，再按空行分帧。
     let normalized_text = text.replace("\r\n", "\n").replace('\r', "\n");
     let mut events = Vec::new();
@@ -253,13 +258,13 @@ fn parse_task_stream_events(text: &str) -> Result<Vec<TaskStreamEvent>, String> 
         if frame.trim().is_empty() {
             continue;
         }
-        events.push(parse_task_stream_event(frame)?);
+        events.push(parse_task_stream_event(frame, task_id)?);
     }
     Ok(events)
 }
 
 /// 解析单个 SSE 事件帧，严格要求 id、event 和 JSON data。
-fn parse_task_stream_event(frame: &str) -> Result<TaskStreamEvent, String> {
+fn parse_task_stream_event(frame: &str, task_id: &str) -> Result<TaskStreamEvent, String> {
     let mut id = None;
     let mut event = None;
     let mut data_lines = Vec::new();
@@ -291,6 +296,7 @@ fn parse_task_stream_event(frame: &str) -> Result<TaskStreamEvent, String> {
         .map_err(|error| format!("invalid sse data json: {error}"))?;
     Ok(TaskStreamEvent {
         id: id.ok_or_else(|| "missing sse id".to_string())?,
+        task_id: task_id.to_string(),
         event: event.ok_or_else(|| "missing sse event".to_string())?,
         data,
     })
@@ -310,6 +316,7 @@ mod tests {
                 ai_config_id: 7,
                 api_key_ref: "local-vault://ai-config/openai-compatible-7".to_string(),
                 prompt_template_id: 9,
+                retry_of_task_id: Some("analysis-old".to_string()),
                 user_position: Some(UserPositionPayload {
                     cost_price: 123.45,
                     shares: 10.0,
@@ -322,6 +329,7 @@ mod tests {
         let encoded = serde_json::to_string(&request).expect("request should serialize");
 
         assert!(encoded.contains("\"resolved_api_key\":\"sk-runtime-secret\""));
+        assert!(encoded.contains("\"retry_of_task_id\":\"analysis-old\""));
         assert!(!encoded.contains("api_key_ref"));
         assert!(!encoded.contains("local-vault://"));
     }
@@ -371,6 +379,7 @@ mod tests {
             ai_config_id: 7,
             api_key_ref: "local-vault://ai-config/openai-compatible-7".to_string(),
             prompt_template_id: 9,
+            retry_of_task_id: None,
             user_position: None,
         };
 
@@ -399,6 +408,7 @@ mod tests {
             ai_config_id: 7,
             api_key_ref: "local-vault://ai-config/openai-compatible-7".to_string(),
             prompt_template_id: 9,
+            retry_of_task_id: None,
             user_position: None,
         };
 
@@ -434,6 +444,7 @@ mod tests {
             ai_config_id: 7,
             api_key_ref: "local-vault://ai-config/openai-compatible-7".to_string(),
             prompt_template_id: 9,
+            retry_of_task_id: None,
             user_position: None,
         };
 
@@ -456,14 +467,17 @@ mod tests {
     fn parse_task_stream_events_decodes_sse_frames() {
         let events = parse_task_stream_events(
             "id: 2\nevent: TASK_CHUNK\ndata: {\"content\":\"第一行\\n第二行\"}\n\nid: 3\nevent: TASK_SUCCESS\ndata: {\ndata: \"progress\":100\ndata: }\n\n",
+            "analysis-1",
         )
         .expect("sse frames should parse");
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].id, 2);
+        assert_eq!(events[0].task_id, "analysis-1");
         assert_eq!(events[0].event, "TASK_CHUNK");
         assert_eq!(events[0].data["content"], "第一行\n第二行");
         assert_eq!(events[1].id, 3);
+        assert_eq!(events[1].task_id, "analysis-1");
         assert_eq!(events[1].data["progress"], 100);
     }
 
@@ -472,14 +486,17 @@ mod tests {
     fn parse_task_stream_events_accepts_crlf_frame_boundaries() {
         let events = parse_task_stream_events(
             "id: 8\r\nevent: TASK_LOG\r\ndata: {\"message\":\"ready\"}\r\n\r\nid: 9\r\nevent: TASK_SUCCESS\r\ndata: {\"progress\":100}\r\n\r\n",
+            "analysis-crlf",
         )
         .expect("crlf sse frames should parse");
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].id, 8);
+        assert_eq!(events[0].task_id, "analysis-crlf");
         assert_eq!(events[0].event, "TASK_LOG");
         assert_eq!(events[0].data["message"], "ready");
         assert_eq!(events[1].id, 9);
+        assert_eq!(events[1].task_id, "analysis-crlf");
         assert_eq!(events[1].event, "TASK_SUCCESS");
         assert_eq!(events[1].data["progress"], 100);
     }

@@ -102,6 +102,8 @@ const (
 	DataSourceMarketSourceTencent = "tencent"
 	// DataSourceMarketSourceEastMoney 表示东方财富行情渠道。
 	DataSourceMarketSourceEastMoney = "eastmoney"
+	// DataSourceMarketSourceTdx 表示通达信 K 线行情渠道。
+	DataSourceMarketSourceTdx = "tdx"
 	// DataSourceMarketSourceAkShareEastMoney 表示 AkShare / EastMoney 聚合渠道。
 	DataSourceMarketSourceAkShareEastMoney = "akshare-eastmoney"
 	// DataSourceMarketSourceCustom 表示自定义行情渠道。
@@ -263,6 +265,7 @@ func validateKnownSettingValue(key string, value string) error {
 			DataSourceMarketSourceSina,
 			DataSourceMarketSourceTencent,
 			DataSourceMarketSourceEastMoney,
+			DataSourceMarketSourceTdx,
 			DataSourceMarketSourceAkShareEastMoney,
 			DataSourceMarketSourceCustom,
 		)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/http"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ type TaskNotifier interface {
 type Executor struct {
 	Store         ExecutionStore
 	NewChatClient ChatClientFactory
+	HTTPClient    *http.Client
 	Now           func() time.Time
 	TaskLogWriter tasklogservice.StageWriter
 	TaskNotifier  TaskNotifier
@@ -365,6 +367,7 @@ func (executor Executor) chatClient(config aiservice.Config, resolvedAPIKey stri
 		BaseURL: config.BaseURL,
 		APIKey:  resolvedAPIKey,
 		Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
+		Client:  executor.HTTPClient,
 	})
 }
 

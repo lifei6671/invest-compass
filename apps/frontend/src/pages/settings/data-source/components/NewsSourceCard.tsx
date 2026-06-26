@@ -4,7 +4,7 @@ import type { NewsSourceItem, SourceStatus } from "../types";
 
 type NewsSourceCardProps = {
   items: NewsSourceItem[];
-  onSyncNow: () => void;
+  onSyncNow?: () => void;
   onViewLog: () => void;
 };
 
@@ -26,7 +26,7 @@ export function NewsSourceCard(props: NewsSourceCardProps) {
         )}
       </div>
       <div className="settings-basic-button-row settings-data-source-button-row">
-        <Button className="settings-basic-outline-button" icon={<ReloadOutlined />} onClick={props.onSyncNow}>
+        <Button className="settings-basic-outline-button" icon={<ReloadOutlined />} disabled={!props.onSyncNow} onClick={props.onSyncNow}>
           立即同步
         </Button>
         <Button className="settings-basic-outline-button" icon={<FileTextOutlined />} onClick={props.onViewLog}>

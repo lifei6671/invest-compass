@@ -89,7 +89,7 @@ pub fn data_source_credentials_clear(
     )
 }
 
-/// 执行数据源凭据本地预检，固定转发到 Go core `/api/data-source/credentials/test`。
+/// 执行数据源凭据真实连接测试，固定转发到 Go core `/api/data-source/credentials/test`。
 #[tauri::command]
 pub fn data_source_credentials_test(
     app_handle: AppHandle,

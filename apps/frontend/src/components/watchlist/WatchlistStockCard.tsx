@@ -1,4 +1,4 @@
-import { App as AntApp, Button, Tag } from "antd";
+import { Button, Tag } from "antd";
 import { DeleteOutlined, EditOutlined, EyeOutlined, RobotOutlined, StarOutlined } from "@ant-design/icons";
 import type React from "react";
 import { MiniTrendChart } from "./MiniTrendChart";
@@ -9,6 +9,7 @@ type WatchlistStockCardProps = {
   onDelete: (item: WatchlistItem) => void;
   onEdit: (item: WatchlistItem) => void;
   onView: (item: WatchlistItem) => void;
+  onAnalyze: (item: WatchlistItem) => void;
 };
 
 const tagStyleByName: Record<string, React.CSSProperties> = {
@@ -23,11 +24,10 @@ const tagStyleByName: Record<string, React.CSSProperties> = {
 };
 
 export function WatchlistStockCard(props: WatchlistStockCardProps) {
-  const { message } = AntApp.useApp();
   const toneClass = props.item.trend === "up" ? "text-[#ff4d4f]" : "text-[#16a34a]";
 
   return (
-    <article className="group relative z-0 flex h-[280px] w-[256px] shrink-0 flex-col overflow-hidden rounded-xl border border-[#e5eaf3] bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition duration-150 ease-out hover:z-10 hover:border-[#9fc5ff] hover:shadow-[0_8px_22px_rgba(22,119,255,0.08)]">
+    <article className="group relative z-0 flex h-[286px] w-[280px] shrink-0 flex-col overflow-hidden rounded-xl border border-[#e5eaf3] bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition duration-150 ease-out hover:z-10 hover:border-[#9fc5ff] hover:shadow-[0_8px_22px_rgba(22,119,255,0.08)]">
       <div className="flex items-start gap-2">
         <StarOutlined className="mt-0.5 text-[14px] text-slate-400" />
         <div className="min-w-0 flex-1 text-left">
@@ -39,7 +39,7 @@ export function WatchlistStockCard(props: WatchlistStockCardProps) {
         <span>{props.item.market}</span>
       </div>
 
-      <div className="mt-2 flex items-center justify-between gap-2">
+      <div className="mt-2 grid grid-cols-[minmax(92px,1fr)_116px] items-center gap-3">
         <div className="min-w-0">
           <div className={["app-number text-[19px] font-bold leading-6", toneClass].join(" ")}>{props.item.price}</div>
           <div className={["app-number mt-0.5 flex items-center gap-2 text-[12px] font-medium", toneClass].join(" ")}>
@@ -47,10 +47,10 @@ export function WatchlistStockCard(props: WatchlistStockCardProps) {
             <span>{props.item.changePercent}</span>
           </div>
         </div>
-        <MiniTrendChart trend={props.item.trend} />
+        <MiniTrendChart trend={props.item.trend} points={props.item.trendPoints} />
       </div>
 
-      <div className="mt-2 grid grid-cols-3 gap-2">
+      <div className="mt-2 grid grid-cols-3 gap-3">
         <Metric label="成交额" value={props.item.amount} />
         <Metric label="换手率" value={props.item.turnoverRate} />
         <Metric label="市盈率(PE)" value={props.item.pe} />
@@ -78,7 +78,7 @@ export function WatchlistStockCard(props: WatchlistStockCardProps) {
 
       <div className="mx-1 mt-auto grid h-11 shrink-0 grid-cols-4 items-center gap-1 border-t border-[#edf1f7] pt-2 pb-3">
         <ActionButton icon={<EyeOutlined />} label="详情" className="text-[#475569]" onClick={() => props.onView(props.item)} />
-        <ActionButton icon={<RobotOutlined />} label="AI分析" className="text-[#1677ff]" onClick={() => message.info("进入 AI 分析待接入")} />
+        <ActionButton icon={<RobotOutlined />} label="AI分析" className="text-[#1677ff]" onClick={() => props.onAnalyze(props.item)} />
         <ActionButton icon={<EditOutlined />} label="编辑" className="text-[#475569]" onClick={() => props.onEdit(props.item)} />
         <ActionButton icon={<DeleteOutlined />} label="删除" className="text-[#ff4d4f]" onClick={() => props.onDelete(props.item)} />
       </div>
@@ -90,7 +90,9 @@ function Metric(props: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <div className="truncate text-[11px] leading-4 text-[#8a94a6]">{props.label}</div>
-      <div className="app-number truncate text-[12px] font-semibold leading-5 text-[#1f2937]">{props.value}</div>
+      <div className="app-number truncate text-[12px] font-semibold leading-5 text-[#1f2937]" title={props.value}>
+        {props.value}
+      </div>
     </div>
   );
 }

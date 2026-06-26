@@ -1,26 +1,31 @@
 import { App as AntApp, Button, Input, Modal, Segmented, Tag } from "antd";
 import { InfoCircleOutlined, SafetyCertificateOutlined, TableOutlined, AppstoreOutlined } from "@ant-design/icons";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AddWatchlistModal } from "./AddWatchlistModal";
-import { SummaryPanel } from "./SummaryPanel";
 import { WatchlistCardGrid } from "./WatchlistCardGrid";
 import { WatchlistTableCard } from "./WatchlistTableCard";
 import type { WatchlistItem } from "./types";
+import { useAutoRefresh } from "../../hooks/useAutoRefresh";
 import {
-  marketQuote,
   searchWatchlistNotes,
   watchlistCreate,
   watchlistDelete,
   watchlistList,
+  watchlistRefresh,
   watchlistUpdate,
   type DocumentSearchItem,
   type MarketQuote,
   type StockSearchResult,
   type WatchlistItem as CoreWatchlistItem,
 } from "../../services/coreClient";
+import { DEFAULT_PAGE_SIZE } from "../../lib/pagination";
 
 type ViewMode = "table" | "card";
+const WATCHLIST_REFRESH_EVENT = "invest-compass:watchlist-refresh";
+const WATCHLIST_REFRESH_POLL_DELAY_MS = 500;
+const WATCHLIST_REFRESH_POLL_INTERVAL_MS = 1_000;
+const WATCHLIST_REFRESH_POLL_COUNT = 8;
 
 export function WatchlistPage() {
   const { message } = AntApp.useApp();
@@ -40,26 +45,46 @@ export function WatchlistPage() {
   const [editTags, setEditTags] = useState("");
   const [editNote, setEditNote] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isRefreshingQuotes, setIsRefreshingQuotes] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const loadSequenceRef = useRef(0);
+  const refreshSequenceRef = useRef(0);
+  const refreshPollTimerRef = useRef<number | null>(null);
 
   const loadItems = useCallback(
-    async (options?: { notify?: boolean }) => {
+    async (options?: { notify?: boolean; quiet?: boolean }) => {
+      const sequence = loadSequenceRef.current + 1;
+      loadSequenceRef.current = sequence;
       try {
-        setIsLoadingList(true);
-        setListError(null);
+        if (!options?.quiet) {
+          setIsLoadingList(true);
+          setListError(null);
+        }
         const list = await watchlistList();
-        const rows = await hydrateWatchlistItems(list.items);
-        setItems(rows);
+        const sortedItems = sortCoreWatchlistItems(list.items);
+        if (loadSequenceRef.current !== sequence) {
+          return;
+        }
+        setItems(sortedItems.map((item) => mapCoreWatchlistItem(item)));
         if (options?.notify) {
-          message.success("自选股已刷新");
+          message.success("自选股列表已刷新");
         }
       } catch (error) {
+        if (loadSequenceRef.current !== sequence) {
+          return;
+        }
         const text = error instanceof Error ? error.message : "自选股读取失败";
-        setListError(text);
+        if (!options?.quiet) {
+          setListError(text);
+        }
         if (options?.notify) {
           message.error(text);
         }
       } finally {
-        setIsLoadingList(false);
+        if (loadSequenceRef.current === sequence && !options?.quiet) {
+          setIsLoadingList(false);
+        }
       }
     },
     [message],
@@ -89,6 +114,10 @@ export function WatchlistPage() {
     });
   }, [items, keyword, marketFilter, remoteSearchMode, searchItems, tagFilter]);
   const totalCount = filteredItems.length;
+  const pagedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredItems.slice(start, start + pageSize);
+  }, [currentPage, filteredItems, pageSize]);
   const marketOptions = useMemo(
     () => [
       { value: "all", label: "全部市场" },
@@ -104,11 +133,85 @@ export function WatchlistPage() {
     [items],
   );
 
+  const clearRefreshPoll = useCallback(() => {
+    if (refreshPollTimerRef.current !== null) {
+      window.clearTimeout(refreshPollTimerRef.current);
+      refreshPollTimerRef.current = null;
+    }
+  }, []);
+
+  const startRefreshPoll = useCallback(() => {
+    clearRefreshPoll();
+    let remaining = WATCHLIST_REFRESH_POLL_COUNT;
+    const tick = () => {
+      void loadItems({ quiet: true });
+      remaining -= 1;
+      if (remaining > 0) {
+        refreshPollTimerRef.current = window.setTimeout(tick, WATCHLIST_REFRESH_POLL_INTERVAL_MS);
+      } else {
+        refreshPollTimerRef.current = null;
+      }
+    };
+    refreshPollTimerRef.current = window.setTimeout(tick, WATCHLIST_REFRESH_POLL_DELAY_MS);
+  }, [clearRefreshPoll, loadItems]);
+
+  useEffect(() => clearRefreshPoll, [clearRefreshPoll]);
+
+  const refreshVisibleQuotes = useCallback(
+    async (options?: { notify?: boolean }) => {
+      if (remoteSearchMode || pagedItems.length === 0) {
+        return;
+      }
+      const sequence = refreshSequenceRef.current + 1;
+      refreshSequenceRef.current = sequence;
+      try {
+        setIsRefreshingQuotes(true);
+        await watchlistRefresh({ symbols: pagedItems.map((item) => detailSymbolFromWatchlist(item)) });
+        if (refreshSequenceRef.current !== sequence) {
+          return;
+        }
+        startRefreshPoll();
+        if (options?.notify) {
+          message.success("已提交自选股行情刷新");
+        }
+      } catch (error) {
+        if (options?.notify) {
+          message.error(error instanceof Error ? error.message : "自选股行情刷新失败");
+        }
+      } finally {
+        if (refreshSequenceRef.current === sequence) {
+          setIsRefreshingQuotes(false);
+        }
+      }
+    },
+    [message, pagedItems, remoteSearchMode, startRefreshPoll],
+  );
+
+  useAutoRefresh(() => refreshVisibleQuotes());
+
+  useEffect(() => {
+    const handler = () => {
+      void refreshVisibleQuotes({ notify: true });
+    };
+    window.addEventListener(WATCHLIST_REFRESH_EVENT, handler);
+    return () => {
+      window.removeEventListener(WATCHLIST_REFRESH_EVENT, handler);
+    };
+  }, [refreshVisibleQuotes]);
+
   const handleKeywordChange = (value: string) => {
     setKeyword(value);
     setRemoteSearchMode(false);
     setSearchItems([]);
+    setCurrentPage(1);
   };
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(totalCount / pageSize));
+    if (currentPage > maxPage) {
+      setCurrentPage(maxPage);
+    }
+  }, [currentPage, pageSize, totalCount]);
 
   const removeItem = async (item: WatchlistItem) => {
     try {
@@ -131,7 +234,7 @@ export function WatchlistPage() {
       tags: payload.tags,
       note: payload.note,
     });
-    const row = await hydrateWatchlistItem(saved, payload.stock.name);
+    const row = mapCoreWatchlistItem(saved, payload.stock.name);
     setItems((current) => [row, ...current.filter((item) => item.id !== row.id)]);
     setRemoteSearchMode(false);
     setSearchItems([]);
@@ -157,7 +260,7 @@ export function WatchlistPage() {
         tags: parseTagsInput(editTags),
         note: editNote,
       });
-      const row = await hydrateWatchlistItem(updated, editingItem.name);
+      const row = mapCoreWatchlistItem(updated, editingItem.name);
       setItems((current) => current.map((item) => (item.id === row.id ? row : item)));
       setEditingItem(null);
       message.success("自选股备注已更新");
@@ -170,6 +273,10 @@ export function WatchlistPage() {
 
   const viewDetail = (item: WatchlistItem) => {
     navigate(`/stocks/${encodeURIComponent(detailSymbolFromWatchlist(item))}`, { state: { from: "/watchlist" } });
+  };
+
+  const analyzeItem = (item: WatchlistItem) => {
+    navigate(`/analysis?symbol=${encodeURIComponent(detailSymbolFromWatchlist(item))}`, { state: { from: "/watchlist" } });
   };
 
   const searchNotes = async () => {
@@ -191,12 +298,28 @@ export function WatchlistPage() {
       });
       setSearchItems(results.filter((item) => item.doc_type === "watchlist_note").map(mapWatchlistNoteSearchItem));
       setRemoteSearchMode(true);
+      setCurrentPage(1);
       message.success("自选备注搜索已更新");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "自选备注搜索失败");
     } finally {
       setIsSearching(false);
     }
+  };
+
+  const handlePageChange = (page: number, nextPageSize: number) => {
+    setPageSize(nextPageSize);
+    setCurrentPage(nextPageSize === pageSize ? page : 1);
+  };
+
+  const handleMarketFilterChange = (value: string) => {
+    setMarketFilter(value);
+    setCurrentPage(1);
+  };
+
+  const handleTagFilterChange = (value: string) => {
+    setTagFilter(value);
+    setCurrentPage(1);
   };
 
   return (
@@ -236,51 +359,58 @@ export function WatchlistPage() {
         />
       </div>
       {listError ? <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-[14px] text-red-600">自选股读取失败：{listError}</div> : null}
-      <div className="flex min-h-0 flex-1 gap-4">
+      <div className="min-h-0 flex-1">
         {viewMode === "table" ? (
           <WatchlistTableCard
-            items={filteredItems}
+            items={pagedItems}
             keyword={keyword}
             onKeywordChange={handleKeywordChange}
             onAdd={() => setAddOpen(true)}
             onDelete={removeItem}
             onEdit={openEdit}
             onView={viewDetail}
-            onRefresh={() => void loadItems({ notify: true })}
+            onAnalyze={analyzeItem}
+            onRefresh={() => void refreshVisibleQuotes({ notify: true })}
             onSearch={searchNotes}
-            isSearching={isSearching || isLoadingList}
+            isSearching={isSearching || isLoadingList || isRefreshingQuotes}
             emptyDescription={remoteSearchMode ? "仅搜索自选备注和标签，暂无匹配自选项" : undefined}
             totalCount={totalCount}
+            currentPage={currentPage}
+            pageSize={pageSize}
+            onPageChange={handlePageChange}
             marketFilter={marketFilter}
             tagFilter={tagFilter}
             marketOptions={marketOptions}
             tagOptions={tagOptions}
-            onMarketFilterChange={setMarketFilter}
-            onTagFilterChange={setTagFilter}
+            onMarketFilterChange={handleMarketFilterChange}
+            onTagFilterChange={handleTagFilterChange}
           />
         ) : (
           <WatchlistCardGrid
-            items={filteredItems}
+            items={pagedItems}
             keyword={keyword}
             onKeywordChange={handleKeywordChange}
             onAdd={() => setAddOpen(true)}
             onDelete={removeItem}
             onEdit={openEdit}
             onView={viewDetail}
-            onRefresh={() => void loadItems({ notify: true })}
+            onAnalyze={analyzeItem}
+            onRefresh={() => void refreshVisibleQuotes({ notify: true })}
             onSearch={searchNotes}
-            isSearching={isSearching || isLoadingList}
+            isSearching={isSearching || isLoadingList || isRefreshingQuotes}
             emptyDescription={remoteSearchMode ? "仅搜索自选备注和标签，暂无匹配自选项" : undefined}
             totalCount={totalCount}
+            currentPage={currentPage}
+            pageSize={pageSize}
+            onPageChange={handlePageChange}
             marketFilter={marketFilter}
             tagFilter={tagFilter}
             marketOptions={marketOptions}
             tagOptions={tagOptions}
-            onMarketFilterChange={setMarketFilter}
-            onTagFilterChange={setTagFilter}
+            onMarketFilterChange={handleMarketFilterChange}
+            onTagFilterChange={handleTagFilterChange}
           />
         )}
-        <SummaryPanel />
       </div>
       <AddWatchlistModal open={addOpen} onClose={() => setAddOpen(false)} onConfirm={addItem} />
       <Modal
@@ -385,20 +515,10 @@ function detailSymbolFromWatchlist(item: WatchlistItem) {
   return item.code;
 }
 
-async function hydrateWatchlistItems(items: CoreWatchlistItem[]) {
-  return Promise.all(items.map((item) => hydrateWatchlistItem(item)));
-}
-
-async function hydrateWatchlistItem(item: CoreWatchlistItem, displayName?: string): Promise<WatchlistItem> {
-  try {
-    return mapCoreWatchlistItem(item, await marketQuote(item.symbol), displayName);
-  } catch {
-    return mapCoreWatchlistItem(item, null, displayName);
-  }
-}
-
-function mapCoreWatchlistItem(item: CoreWatchlistItem, quote: MarketQuote | null, displayName?: string): WatchlistItem {
+function mapCoreWatchlistItem(item: CoreWatchlistItem, displayName?: string): WatchlistItem {
   const display = watchlistProfileDisplay(item);
+  const quote = normalizeCoreQuote(item.quote);
+  const trendPoints = normalizeTrendPoints(item.trend_points);
   const changePercent = quote?.change_percent;
   const changeAmount = quote?.change_amount;
   return {
@@ -413,14 +533,56 @@ function mapCoreWatchlistItem(item: CoreWatchlistItem, quote: MarketQuote | null
     changeAmount: formatSignedQuoteNumber(changeAmount),
     changePercent: formatQuotePercent(changePercent),
     amount: formatAmount(quote?.amount),
-    turnoverRate: formatQuotePercent(quote?.turnover_rate, false),
-    pe: formatQuoteNumber(quote?.pe),
+    turnoverRate: formatOptionalQuotePercent(quote?.turnover_rate),
+    pe: formatOptionalQuoteNumber(quote?.pe),
     industry: item.industry || "未分类",
-    tags: item.tags,
-    note: item.note,
+    tags: normalizeCoreWatchlistTags(item.tags),
+    note: typeof item.note === "string" ? item.note : "",
+    createdAt: item.created_at,
     updatedAt: formatWatchlistQuoteTime(quote?.quote_time),
     trend: typeof changePercent === "number" && changePercent < 0 ? "down" : "up",
+    trendPoints,
   };
+}
+
+function sortCoreWatchlistItems(items: CoreWatchlistItem[]) {
+  return [...items].sort((left, right) => {
+    const leftTime = parseWatchlistCreatedAt(left.created_at);
+    const rightTime = parseWatchlistCreatedAt(right.created_at);
+    if (leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
+    if (left.id !== right.id) {
+      return right.id - left.id;
+    }
+    return right.sort_order - left.sort_order;
+  });
+}
+
+function parseWatchlistCreatedAt(value: string | undefined) {
+  if (!value) {
+    return 0;
+  }
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function normalizeCoreQuote(quote: CoreWatchlistItem["quote"]): MarketQuote | null {
+  return quote && typeof quote === "object" ? quote : null;
+}
+
+function normalizeTrendPoints(points: CoreWatchlistItem["trend_points"]) {
+  if (!Array.isArray(points)) {
+    return [];
+  }
+  return points.filter((point): point is number => typeof point === "number" && Number.isFinite(point));
+}
+
+function normalizeCoreWatchlistTags(tags: CoreWatchlistItem["tags"]) {
+  if (!Array.isArray(tags)) {
+    return [];
+  }
+  return Array.from(new Set(tags.filter((tag): tag is string => typeof tag === "string").map((tag) => tag.trim()).filter(Boolean)));
 }
 
 function watchlistProfileDisplay(item: CoreWatchlistItem): Pick<WatchlistItem, "code" | "market"> {
@@ -470,6 +632,20 @@ function formatQuotePercent(value: number | undefined, signed = true) {
     return "--";
   }
   return `${signed && value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function formatOptionalQuoteNumber(value: number | undefined) {
+  if (typeof value !== "number" || value === 0) {
+    return "--";
+  }
+  return formatQuoteNumber(value);
+}
+
+function formatOptionalQuotePercent(value: number | undefined) {
+  if (typeof value !== "number" || value === 0) {
+    return "--";
+  }
+  return formatQuotePercent(value, false);
 }
 
 function formatAmount(value: number | undefined) {

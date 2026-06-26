@@ -14,7 +14,7 @@ export function ReportSnapshotPanel({ snapshot, onCopySnapshot }: ReportSnapshot
       <section className="report-detail-card report-snapshot-card">
         <div className="report-detail-card-title">
           <h2>输入快照</h2>
-          <Button size="small" type="text" aria-label="复制输入快照" icon={<CopyOutlined />} disabled={!snapshot} onClick={onCopySnapshot} />
+          {snapshot ? <Button size="small" type="text" aria-label="复制输入快照" icon={<CopyOutlined />} onClick={onCopySnapshot} /> : null}
         </div>
 
         {snapshot ? (

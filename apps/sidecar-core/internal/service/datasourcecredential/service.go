@@ -27,15 +27,26 @@ var ErrCredentialNotConfigured = errors.New("data source credential not configur
 
 var providerCatalog = []Config{
 	{
+		ProviderID:         "tdx",
+		ProviderName:       "通达信",
+		Capability:         "K线 / 分钟级K线（MAC链路）",
+		AuthType:           AuthTypeNone,
+		BaseURL:            "https://www.tdx.com.cn",
+		CredentialStatus:   StatusNormal,
+		TimeoutSeconds:     8,
+		RateLimitPerMinute: 60,
+		MaskedCredential:   "无需凭据（TCP 行情链路）",
+	},
+	{
 		ProviderID:         "eastmoney",
 		ProviderName:       "EastMoney",
-		Capability:         "行情 / K线",
+		Capability:         "基础证券列表可访问 / K线受限",
 		AuthType:           AuthTypeNone,
 		BaseURL:            "https://quote.eastmoney.com",
-		CredentialStatus:   StatusNormal,
+		CredentialStatus:   StatusLimited,
 		TimeoutSeconds:     15,
 		RateLimitPerMinute: 60,
-		MaskedCredential:   "无需凭据",
+		MaskedCredential:   "无需凭据，K线接口受限",
 	},
 	{
 		ProviderID:         "sina",
@@ -103,20 +114,10 @@ var providerCatalog = []Config{
 		RateLimitPerMinute: 20,
 		MaskedCredential:   "Cookie=****",
 	},
-	{
-		ProviderID:         "custom-http",
-		ProviderName:       "Custom HTTP",
-		Capability:         "自定义接口",
-		AuthType:           AuthTypeBearerToken,
-		BaseURL:            "https://api.example.com",
-		CredentialStatus:   StatusNotConfigured,
-		TimeoutSeconds:     15,
-		RateLimitPerMinute: 30,
-		MaskedCredential:   "Bearer ****",
-	},
 }
 
 var providerIconTypes = map[string]string{
+	"tdx":           "tdx",
 	"eastmoney":     "eastmoney",
 	"sina":          "sina",
 	"tencent":       "tencent",
@@ -124,7 +125,6 @@ var providerIconTypes = map[string]string{
 	"alpha-vantage": "alpha",
 	"cls":           "cls",
 	"xueqiu":        "xueqiu",
-	"custom-http":   "custom",
 }
 
 // Store 是凭据 service 依赖的 DAO 边界。
@@ -160,6 +160,9 @@ func (service Service) List(ctx context.Context) (ListView, error) {
 	configs := catalogConfigMap()
 	storedByProvider := make(map[string]model.DataSourceCredential, len(stored))
 	for _, item := range stored {
+		if _, ok := configs[item.ProviderID]; !ok {
+			continue
+		}
 		storedByProvider[item.ProviderID] = item
 		configs[item.ProviderID] = modelToConfig(item, configs[item.ProviderID])
 	}
@@ -209,7 +212,7 @@ func (service Service) Save(ctx context.Context, request SaveRequest) (Config, e
 		modelCredential.CredentialStatus = string(StatusNormal)
 	} else if config.AuthType == AuthTypeNone {
 		modelCredential.MaskedCredential = "无需凭据"
-		modelCredential.CredentialStatus = string(StatusNormal)
+		modelCredential.CredentialStatus = string(config.CredentialStatus)
 	} else if exists {
 		modelCredential.EncryptedCredential = existing.EncryptedCredential
 		modelCredential.CredentialNonce = existing.CredentialNonce
@@ -264,7 +267,24 @@ func (service Service) Test(ctx context.Context, request TestRequest) (TestResul
 		config = modelToConfig(credential, catalogConfig)
 	}
 	if catalogConfig.AuthType == AuthTypeNone {
-		return service.runHTTPPreflight(ctx, config, RuntimeCredential{ProviderID: providerID, AuthType: AuthTypeNone}, nil, request.Target)
+		if !exists {
+			credential = configToModel(config)
+		}
+		if providerID == "tdx" {
+			result := TestResult{
+				Status:   string(StatusLimited),
+				TestedAt: formatDisplayTime(service.now()),
+				Messages: []string{
+					"TDX 使用本地 TCP/MAC 行情链路，凭据管理页不执行 HTTP 预检",
+					"请通过行情 Provider smoke 或 K 线页面验证实际通达信链路",
+				},
+			}
+			if err := service.saveTestResult(ctx, credential, result); err != nil {
+				return TestResult{}, err
+			}
+			return result, nil
+		}
+		return service.runHTTPPreflight(ctx, config, RuntimeCredential{ProviderID: providerID, AuthType: AuthTypeNone}, &credential, request.Target)
 	}
 	if !exists || strings.TrimSpace(credential.EncryptedCredential) == "" || strings.TrimSpace(credential.CredentialNonce) == "" {
 		return TestResult{
@@ -300,6 +320,7 @@ func (service Service) runHTTPPreflight(ctx context.Context, config Config, cred
 		return TestResult{}, err
 	}
 	applyCredentialHeaders(httpRequest, credential)
+	applyProviderPreflightHeaders(httpRequest, config.ProviderID)
 	httpRequest.Header.Set("Accept", "application/json,text/plain,*/*")
 	httpRequest.Header.Set("User-Agent", "Invest Compass/0.1 data-source-preflight")
 
@@ -349,9 +370,16 @@ func preflightURL(config Config, target string) (string, error) {
 	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
 		return "", fmt.Errorf("base url is invalid")
 	}
-	targetURL, err := url.Parse(preflightTargetPath(config.ProviderID, target))
+	targetPath := preflightTargetPath(config.ProviderID, target)
+	if strings.TrimSpace(targetPath) == "" {
+		return baseURL.String(), nil
+	}
+	targetURL, err := url.Parse(targetPath)
 	if err != nil {
 		return "", fmt.Errorf("test target is invalid")
+	}
+	if targetURL.Scheme != "" && targetURL.Host != "" {
+		return targetURL.String(), nil
 	}
 	baseURL.Path = joinURLPath(baseURL.Path, targetURL.Path)
 	baseURL.RawQuery = targetURL.RawQuery
@@ -360,11 +388,24 @@ func preflightURL(config Config, target string) (string, error) {
 
 // preflightTargetPath 返回 Provider 对应的真实 HTTP 预检路径。
 func preflightTargetPath(providerID string, target string) string {
+	trimmedProviderID := strings.TrimSpace(providerID)
+	if trimmedProviderID == "eastmoney" {
+		return "https://datacenter-web.eastmoney.com/api/data/v1/get?sortColumns=SECURITY_CODE&sortTypes=1&pageSize=1&pageNumber=1&reportName=RPT_VALUEANALYSIS_DET&columns=SECURITY_CODE,SECURITY_NAME_ABBR"
+	}
 	if providerID == "sina" {
 		return "/list=sh000001"
 	}
 	if providerID == "tencent" {
 		return "/appstock/app/fqkline/get?param=sh000001,day,,,2,qfq"
+	}
+	if trimmedProviderID == "alpha-vantage" {
+		return "/query?function=GLOBAL_QUOTE&symbol=IBM"
+	}
+	if trimmedProviderID == "xueqiu" {
+		return "https://stock.xueqiu.com/v5/stock/hot_stock/list.json?page=1&size=1&_type=10&type=10"
+	}
+	if trimmedProviderID == "akshare" {
+		return ""
 	}
 	if providerID == "cls" && strings.TrimSpace(target) == "flash" {
 		return "/api/cache?app=CailianpressWeb&name=telegraph&os=web&sv=8.7.9"
@@ -401,6 +442,12 @@ func applyCredentialHeaders(request *http.Request, credential RuntimeCredential)
 		}
 	case AuthTypeAPIKey:
 		if strings.TrimSpace(credential.APIKey) != "" {
+			if credential.ProviderID == "alpha-vantage" {
+				query := request.URL.Query()
+				query.Set("apikey", credential.APIKey)
+				request.URL.RawQuery = query.Encode()
+				return
+			}
 			request.Header.Set("X-API-Key", credential.APIKey)
 		}
 	case AuthTypeBearerToken:
@@ -415,6 +462,21 @@ func applyCredentialHeaders(request *http.Request, credential RuntimeCredential)
 			}
 			request.Header.Set(headerName, credential.HeaderValue)
 		}
+	}
+}
+
+// applyProviderPreflightHeaders 补充真实 Provider 连通性测试所需的来源头。
+func applyProviderPreflightHeaders(request *http.Request, providerID string) {
+	switch strings.TrimSpace(providerID) {
+	case "sina":
+		request.Header.Set("Referer", "https://finance.sina.com.cn/")
+	case "eastmoney":
+		request.Header.Set("Referer", "https://quote.eastmoney.com/")
+	case "cls":
+		request.Header.Set("Referer", "https://www.cls.cn/")
+	case "xueqiu":
+		request.Header.Set("Origin", "https://xueqiu.com")
+		request.Header.Set("Referer", "https://xueqiu.com/")
 	}
 }
 
@@ -491,7 +553,7 @@ func (service Service) now() time.Time {
 	return time.Now().UTC()
 }
 
-// saveTestResult 将最近一次本地预检状态写回 SQLite。
+// saveTestResult 将最近一次真实连接测试状态写回 SQLite。
 func (service Service) saveTestResult(ctx context.Context, credential model.DataSourceCredential, result TestResult) error {
 	messages, err := json.Marshal(result.Messages)
 	if err != nil {
@@ -555,6 +617,10 @@ func normalizeConfig(input Config) (Config, error) {
 	if input.Capability == "" {
 		input.Capability = catalogConfig.Capability
 	}
+	if catalogConfig.CredentialStatus == StatusLimited {
+		input.Capability = catalogConfig.Capability
+		input.CredentialStatus = StatusLimited
+	}
 	if input.TimeoutSeconds <= 0 {
 		input.TimeoutSeconds = catalogConfig.TimeoutSeconds
 	}
@@ -614,7 +680,7 @@ func defaultSelectedProvider(configs map[string]Config) string {
 	return ""
 }
 
-// defaultTestTargets 返回首版凭据本地预检目标。
+// defaultTestTargets 返回首版凭据真实连接测试目标。
 func defaultTestTargets() []TestTarget {
 	return []TestTarget{
 		{Label: "快讯接口（/api/flash）", Value: "flash"},
@@ -632,7 +698,7 @@ func defaultTestResult(configs map[string]Config, storedByProvider map[string]mo
 	}
 	selected := configs[selectedProvider]
 	if selected.CredentialStatus == StatusNormal {
-		return TestResult{Status: testStatusUntested, Messages: []string{"尚未执行本地预检"}}
+		return TestResult{Status: testStatusUntested, Messages: []string{"尚未执行真实连接测试"}}
 	}
 	return TestResult{Status: testStatusUntested, Messages: []string{"当前 Provider 尚未配置凭据"}}
 }
@@ -646,7 +712,7 @@ func testResultFromModel(item model.DataSourceCredential) TestResult {
 	result := TestResult{
 		Status:         status,
 		ResponseTimeMS: item.LastTestResponseTime,
-		Messages:       []string{"尚未执行本地预检"},
+		Messages:       []string{"尚未执行真实连接测试"},
 	}
 	if item.LastTestedAt != nil {
 		result.TestedAt = formatDisplayTime(*item.LastTestedAt)
@@ -741,17 +807,25 @@ func modelToConfig(item model.DataSourceCredential, fallback Config) Config {
 	if item.ExpiresAt != nil {
 		expiresAt = formatDisplayTime(*item.ExpiresAt)
 	}
+	capability := nonEmpty(item.Capability, fallback.Capability)
+	credentialStatus := Status(nonEmpty(item.CredentialStatus, string(fallback.CredentialStatus)))
+	maskedCredential := nonEmpty(item.MaskedCredential, fallback.MaskedCredential)
+	if fallback.CredentialStatus == StatusLimited {
+		capability = fallback.Capability
+		credentialStatus = StatusLimited
+		maskedCredential = fallback.MaskedCredential
+	}
 	return Config{
 		ProviderID:         nonEmpty(item.ProviderID, fallback.ProviderID),
 		ProviderName:       nonEmpty(item.ProviderName, fallback.ProviderName),
-		Capability:         nonEmpty(item.Capability, fallback.Capability),
+		Capability:         capability,
 		AuthType:           AuthType(nonEmpty(item.AuthType, string(fallback.AuthType))),
 		BaseURL:            nonEmpty(item.BaseURL, fallback.BaseURL),
-		CredentialStatus:   Status(nonEmpty(item.CredentialStatus, string(fallback.CredentialStatus))),
+		CredentialStatus:   credentialStatus,
 		ExpiresAt:          expiresAt,
 		TimeoutSeconds:     nonZero(item.TimeoutSeconds, fallback.TimeoutSeconds),
 		RateLimitPerMinute: nonZero(item.RateLimitPerMinute, fallback.RateLimitPerMinute),
-		MaskedCredential:   nonEmpty(item.MaskedCredential, fallback.MaskedCredential),
+		MaskedCredential:   maskedCredential,
 		Note:               item.Note,
 		LastTestResult:     nonEmptyTestResult(testResultFromModel(item), fallback.LastTestResult),
 	}

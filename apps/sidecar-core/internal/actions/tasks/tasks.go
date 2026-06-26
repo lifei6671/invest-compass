@@ -24,6 +24,7 @@ type Store interface {
 	ListTasks(ctx context.Context, limit int) ([]model.Task, error)
 	GetTask(ctx context.Context, taskID string) (model.Task, bool, error)
 	ListTaskEventsAfter(ctx context.Context, taskID string, afterID int64) ([]model.TaskEvent, error)
+	GetAnalysisReportByTaskID(ctx context.Context, taskID string) (model.AnalysisReport, bool, error)
 }
 
 // Config 是任务历史 action 的运行期依赖。
@@ -64,6 +65,7 @@ type taskData struct {
 	FinishedAt   string `json:"finished_at"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
+	ReportID     int64  `json:"report_id,omitempty"`
 }
 
 type eventData struct {
@@ -104,7 +106,7 @@ func handleList(config Config) http.HandlerFunc {
 			writeStoreError(response, context, "读取任务历史失败", err)
 			return
 		}
-		httpx.WriteOK(response, listData{Items: tasksToData(tasks)}, context)
+		httpx.WriteOK(response, listData{Items: tasksToData(request.Context(), config.Store, tasks)}, context)
 	}
 }
 
@@ -129,7 +131,7 @@ func handleGet(config Config) http.HandlerFunc {
 			httpx.WriteError(response, http.StatusNotFound, 40403, "task_not_found", context)
 			return
 		}
-		httpx.WriteOK(response, taskToData(task), context)
+		httpx.WriteOK(response, taskToData(request.Context(), config.Store, task), context)
 	}
 }
 
@@ -346,16 +348,16 @@ func validateAfterEventID(response http.ResponseWriter, afterEventID int64, cont
 }
 
 // tasksToData 转换数据库任务列表为 API 响应模型。
-func tasksToData(tasks []model.Task) []taskData {
+func tasksToData(ctx context.Context, store Store, tasks []model.Task) []taskData {
 	items := make([]taskData, 0, len(tasks))
 	for _, task := range tasks {
-		items = append(items, taskToData(task))
+		items = append(items, taskToData(ctx, store, task))
 	}
 	return items
 }
 
 // taskToData 转换单个数据库任务为 API 响应模型。
-func taskToData(task model.Task) taskData {
+func taskToData(ctx context.Context, store Store, task model.Task) taskData {
 	return taskData{
 		ID:           task.ID,
 		Type:         task.Type,
@@ -367,7 +369,17 @@ func taskToData(task model.Task) taskData {
 		FinishedAt:   formatTime(task.FinishedAt),
 		CreatedAt:    formatTime(task.CreatedAt),
 		UpdatedAt:    formatTime(task.UpdatedAt),
+		ReportID:     taskReportID(ctx, store, task.ID),
 	}
+}
+
+// taskReportID 只从已保存报告反查任务报告 ID，缺失或读取失败时保持为空，不伪造跳转目标。
+func taskReportID(ctx context.Context, store Store, taskID string) int64 {
+	report, ok, err := store.GetAnalysisReportByTaskID(ctx, taskID)
+	if err != nil || !ok {
+		return 0
+	}
+	return report.ID
 }
 
 // eventsToData 转换数据库事件列表为 API 响应模型，并在输出前再次脱敏。

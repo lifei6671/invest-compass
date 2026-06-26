@@ -4,6 +4,8 @@ export type TaskLogDrawerProps = {
   open: boolean;
   task: TaskItem | null;
   onClose: () => void;
+  onRetryTask?: (task: TaskItem) => void;
+  onOpenProxySettings?: () => void;
 };
 
 export type TaskLogLevel = "INFO" | "WARN" | "ERROR";

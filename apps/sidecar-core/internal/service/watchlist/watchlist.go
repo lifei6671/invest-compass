@@ -75,7 +75,7 @@ func DeleteItem(item Item, now time.Time) Item {
 	return item
 }
 
-// ListActive 返回未软删除自选股，并按 sort_order、id 稳定排序。
+// ListActive 返回未软删除自选股，并按添加时间倒序稳定排序。
 func ListActive(items []Item) []Item {
 	listed := make([]Item, 0, len(items))
 	for _, item := range items {
@@ -84,10 +84,10 @@ func ListActive(items []Item) []Item {
 		}
 	}
 	sort.SliceStable(listed, func(left int, right int) bool {
-		if listed[left].SortOrder == listed[right].SortOrder {
-			return listed[left].ID < listed[right].ID
+		if listed[left].CreatedAt.Equal(listed[right].CreatedAt) {
+			return listed[left].ID > listed[right].ID
 		}
-		return listed[left].SortOrder < listed[right].SortOrder
+		return listed[left].CreatedAt.After(listed[right].CreatedAt)
 	})
 	return listed
 }

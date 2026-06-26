@@ -17,11 +17,13 @@ func TestQuoteRefreshRunnerFetchesAndPersistsQuotes(t *testing.T) {
 	provider := &quoteProvider{
 		quotes: map[string]marketservice.Quote{
 			"CN:SH:600519": {
-				Symbol:        mustParseSymbol(t, "CN:SH:600519"),
-				Price:         1688.5,
-				ChangePercent: 0.73,
-				QuoteTime:     time.Date(2026, 6, 19, 10, 0, 0, 0, time.Local),
-				Provider:      "test-provider",
+				Symbol:         mustParseSymbol(t, "CN:SH:600519"),
+				Price:          1688.5,
+				ChangePercent:  0.73,
+				TotalMarketCap: 123456789000,
+				FloatMarketCap: 98765432100,
+				QuoteTime:      time.Date(2026, 6, 19, 10, 0, 0, 0, time.Local),
+				Provider:       "test-provider",
 			},
 		},
 	}
@@ -42,6 +44,9 @@ func TestQuoteRefreshRunnerFetchesAndPersistsQuotes(t *testing.T) {
 	}
 	if len(store.quotes) != 1 || store.quotes[0].Symbol != "CN:SH:600519" || store.quotes[0].Provider != "test-provider" {
 		t.Fatalf("unexpected saved quotes: %+v", store.quotes)
+	}
+	if store.quotes[0].TotalMarketCap != 123456789000 || store.quotes[0].FloatMarketCap != 98765432100 {
+		t.Fatalf("saved quote lost market caps: %+v", store.quotes[0])
 	}
 	if len(store.watermarks) != 1 || store.watermarks[0].DataType != "quote" || store.watermarks[0].LastTradeDate != "2026-06-19" {
 		t.Fatalf("unexpected watermarks: %+v", store.watermarks)

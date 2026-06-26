@@ -8,6 +8,7 @@ type DataContextPreviewProps = {
 
 export function DataContextPreview(props: DataContextPreviewProps) {
   const { value } = props;
+  const quoteTone = metricTone(value.quote.changePercent);
   return (
     <section className="analysis-card analysis-context-preview">
       <h2 className="analysis-card-title">数据上下文预览</h2>
@@ -24,12 +25,12 @@ export function DataContextPreview(props: DataContextPreviewProps) {
       <div className="analysis-context-module">
         <ModuleHeader icon={<FundOutlined />} title="最新行情摘要" meta={value.quote.updateTime} tone="green" />
         <div className="analysis-metric-grid analysis-quote-grid">
-          <Metric label="现价" value={value.quote.price} tone="up" />
-          <Metric label="涨跌额" value={value.quote.changeAmount} tone="up" />
-          <Metric label="涨跌幅" value={value.quote.changePercent} tone="up" />
-          <Metric label="开盘" value={value.quote.open} tone="down" />
-          <Metric label="最高" value={value.quote.high} tone="up" />
-          <Metric label="最低" value={value.quote.low} tone="down" />
+          <Metric label="现价" value={value.quote.price} tone={quoteTone} />
+          <Metric label="涨跌额" value={value.quote.changeAmount} tone={metricTone(value.quote.changeAmount)} />
+          <Metric label="涨跌幅" value={value.quote.changePercent} tone={quoteTone} />
+          <Metric label="开盘" value={value.quote.open} />
+          <Metric label="最高" value={value.quote.high} />
+          <Metric label="最低" value={value.quote.low} />
           <Metric label="成交额" value={value.quote.amount} />
           <Metric label="成交量" value={value.quote.volume} />
           <Metric label="换手率" value={value.quote.turnoverRate} />
@@ -38,9 +39,9 @@ export function DataContextPreview(props: DataContextPreviewProps) {
       <div className="analysis-context-module">
         <ModuleHeader icon={<LineChartOutlined />} title="K线概况（日K）" tone="orange" />
         <div className="analysis-metric-grid">
-          <Metric label="近20日涨跌幅" value={value.kline.change20d} tone="up" />
-          <Metric label="60日涨跌幅" value={value.kline.change60d} tone="up" />
-          <Metric label="年初至今" value={value.kline.ytdChange} tone="up" />
+          <Metric label="近20日涨跌幅" value={value.kline.change20d} tone={metricTone(value.kline.change20d)} />
+          <Metric label="60日涨跌幅" value={value.kline.change60d} tone={metricTone(value.kline.change60d)} />
+          <Metric label="年初至今" value={value.kline.ytdChange} tone={metricTone(value.kline.ytdChange)} />
           <Metric label="20日均线" value={value.kline.ma20} />
           <Metric label="60日均线" value={value.kline.ma60} />
           <Metric label="120日均线" value={value.kline.ma120} />
@@ -100,4 +101,12 @@ function Metric(props: { label: string; value: string; tone?: "up" | "down" }) {
       <strong className={props.tone ? `analysis-${props.tone}` : undefined}>{props.value}</strong>
     </div>
   );
+}
+
+function metricTone(value: string): "up" | "down" | undefined {
+  const numericValue = Number.parseFloat(value.replace("%", ""));
+  if (!Number.isFinite(numericValue) || numericValue === 0) {
+    return undefined;
+  }
+  return numericValue > 0 ? "up" : "down";
 }

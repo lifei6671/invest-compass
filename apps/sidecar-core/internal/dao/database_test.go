@@ -82,6 +82,7 @@ func TestMigrateCreatesInitialSchema(t *testing.T) {
 		assertColumns(t, db, table, "deleted_at")
 	}
 	assertColumns(t, db, "ai_configs", "api_key_ref", "masked_api_key", "has_api_key")
+	assertColumns(t, db, "analysis_reports", "favorite")
 	assertColumns(t, db, "task_log_entries", "task_id", "request_id", "trace_id", "ts", "level", "module", "stage", "payload_json")
 	assertColumns(t, db, "task_error_diagnoses", "task_id", "error_code", "error_stage", "summary", "causes_json", "suggestions_json")
 	assertColumns(t, db, "scheduler_jobs", "cron_type", "catchup_enabled", "catchup_max_days", "deleted_at")

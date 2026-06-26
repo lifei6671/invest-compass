@@ -45,6 +45,7 @@ type createRequest struct {
 	AnalysisType     string               `json:"analysis_type"`
 	AIConfigID       int64                `json:"ai_config_id"`
 	PromptTemplateID int64                `json:"prompt_template_id"`
+	RetryOfTaskID    string               `json:"retry_of_task_id"`
 	UserPosition     *userPositionRequest `json:"user_position"`
 	ResolvedAPIKey   string               `json:"resolved_api_key"`
 }
@@ -102,6 +103,7 @@ func handleCreate(config Config) http.HandlerFunc {
 			AnalysisType:     analysisservice.AnalysisType(payload.AnalysisType),
 			AIConfigID:       payload.AIConfigID,
 			PromptTemplateID: payload.PromptTemplateID,
+			RetryOfTaskID:    strings.TrimSpace(payload.RetryOfTaskID),
 			UserPosition:     userPositionToService(payload.UserPosition),
 		})
 		if err != nil {

@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"time"
 
@@ -10,10 +11,11 @@ import (
 
 // TestResult 是模型连通性测试的安全结果，不包含真实 API Key 或请求头。
 type TestResult struct {
-	OK       bool   `json:"ok"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-	Message  string `json:"message"`
+	OK         bool   `json:"ok"`
+	Provider   string `json:"provider"`
+	Model      string `json:"model"`
+	Message    string `json:"message"`
+	DurationMS int64  `json:"duration_ms"`
 }
 
 // ConfigTester 定义 AI 配置连通性测试边界，便于 action 单测替换外部网络。
@@ -22,7 +24,9 @@ type ConfigTester interface {
 }
 
 // OpenAIConfigTester 使用 OpenAI-compatible chat completions 执行真实连通性测试。
-type OpenAIConfigTester struct{}
+type OpenAIConfigTester struct {
+	HTTPClient *http.Client
+}
 
 // TestAIConfig 根据配置和运行期密钥测试模型是否可访问。
 func (tester OpenAIConfigTester) TestAIConfig(ctx context.Context, config Config, resolvedAPIKey string) (TestResult, error) {
@@ -38,7 +42,9 @@ func (tester OpenAIConfigTester) TestAIConfig(ctx context.Context, config Config
 		BaseURL: config.BaseURL,
 		APIKey:  resolvedAPIKey,
 		Timeout: timeout,
+		Client:  tester.HTTPClient,
 	})
+	startedAt := time.Now()
 	response, err := client.Chat(ctx, ChatRequest{
 		Model:       config.ModelName,
 		Temperature: config.Temperature,
@@ -52,10 +58,11 @@ func (tester OpenAIConfigTester) TestAIConfig(ctx context.Context, config Config
 		return TestResult{}, err
 	}
 	return TestResult{
-		OK:       true,
-		Provider: config.Provider,
-		Model:    config.ModelName,
-		Message:  strings.TrimSpace(response.Content),
+		OK:         true,
+		Provider:   config.Provider,
+		Model:      config.ModelName,
+		Message:    strings.TrimSpace(response.Content),
+		DurationMS: time.Since(startedAt).Milliseconds(),
 	}, nil
 }
 

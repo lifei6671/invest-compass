@@ -1,6 +1,7 @@
 import { Button, ConfigProvider, Empty, Input, Pagination, Select } from "antd";
 import { FilterOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { appAntdLocale } from "../../lib/antdLocale";
+import { PAGE_SIZE_OPTIONS } from "../../lib/pagination";
 import { WatchlistStockCard } from "./WatchlistStockCard";
 import type { WatchlistItem } from "./types";
 
@@ -17,11 +18,15 @@ type WatchlistCardGridProps = {
   onDelete: (item: WatchlistItem) => void;
   onEdit: (item: WatchlistItem) => void;
   onView: (item: WatchlistItem) => void;
+  onAnalyze: (item: WatchlistItem) => void;
   onRefresh: () => void;
   onSearch: () => void;
   isSearching?: boolean;
   emptyDescription?: string;
   totalCount: number;
+  currentPage: number;
+  pageSize: number;
+  onPageChange: (page: number, pageSize: number) => void;
   marketFilter: string;
   tagFilter: string;
   marketOptions: FilterOption[];
@@ -31,8 +36,6 @@ type WatchlistCardGridProps = {
 };
 
 export function WatchlistCardGrid(props: WatchlistCardGridProps) {
-  const visibleItems = props.items.slice(0, 8);
-
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="mb-[18px] flex min-w-0 shrink-0 items-center gap-3 overflow-hidden rounded-xl border border-[#e5eaf3] bg-white px-4 py-4 shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
@@ -59,10 +62,10 @@ export function WatchlistCardGrid(props: WatchlistCardGridProps) {
         </div>
       </div>
 
-      {visibleItems.length > 0 ? (
-        <div className="grid min-w-0 grid-cols-[repeat(auto-fill,256px)] justify-start gap-4 overflow-x-auto pt-1 pb-1">
-          {visibleItems.map((item) => (
-            <WatchlistStockCard key={item.id} item={item} onDelete={props.onDelete} onEdit={props.onEdit} onView={props.onView} />
+      {props.items.length > 0 ? (
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fill,280px)] justify-start gap-4 overflow-x-auto pt-1 pb-1">
+          {props.items.map((item) => (
+            <WatchlistStockCard key={item.id} item={item} onDelete={props.onDelete} onEdit={props.onEdit} onView={props.onView} onAnalyze={props.onAnalyze} />
           ))}
         </div>
       ) : (
@@ -74,7 +77,16 @@ export function WatchlistCardGrid(props: WatchlistCardGridProps) {
       <div className="mt-4 flex shrink-0 items-center justify-between">
         <span className="text-[14px] text-slate-700">共 {props.totalCount} 条</span>
         <ConfigProvider locale={appAntdLocale}>
-          <Pagination className="watchlist-pagination" current={1} total={props.totalCount} pageSize={10} showQuickJumper showSizeChanger pageSizeOptions={[10]} onChange={() => undefined} />
+          <Pagination
+            className="watchlist-pagination"
+            current={props.currentPage}
+            total={props.totalCount}
+            pageSize={props.pageSize}
+            showQuickJumper
+            showSizeChanger
+            pageSizeOptions={[...PAGE_SIZE_OPTIONS]}
+            onChange={props.onPageChange}
+          />
         </ConfigProvider>
       </div>
     </section>

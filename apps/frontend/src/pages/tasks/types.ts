@@ -1,4 +1,4 @@
-export type TaskType = "AI 分析" | "资讯同步" | "行情刷新" | "缓存清理";
+export type TaskType = "AI 分析" | "资讯同步" | "行情刷新" | "缓存清理" | "数据重建";
 
 export type TaskStatus = "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED";
 
@@ -18,9 +18,11 @@ export type TaskItem = {
   status: TaskStatus;
   progress: number;
   startedAt: string;
+  startedDate: string;
   endedAt?: string;
   duration: string;
   errorSummary?: string;
+  reportId?: number;
   model?: string;
 };
 
@@ -43,6 +45,7 @@ export type TaskEventType =
   | "TASK_CREATED"
   | "TASK_STARTED"
   | "TASK_PROGRESS"
+  | "TASK_LOG"
   | "TASK_CHUNK"
   | "TASK_SUCCESS"
   | "TASK_FAILED"

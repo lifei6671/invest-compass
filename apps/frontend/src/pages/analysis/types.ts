@@ -12,11 +12,7 @@ export type AnalysisType =
   | "基本面分析"
   | "消息面分析";
 
-export type AIModel =
-  | "DeepSeek (DeepSeek-V3)"
-  | "OpenAI (gpt-4o)"
-  | "Qwen (qwen-max)"
-  | "本地模型 (Ollama)";
+export type AIModel = string;
 
 export type RiskPreference = "保守" | "中等" | "积极";
 
@@ -27,6 +23,19 @@ export type AnalysisConfig = {
   analysisType: AnalysisType;
   aiModel: AIModel;
   promptTemplate: string;
+};
+
+export type AnalysisModelOption = {
+  id: number;
+  label: string;
+  apiKeyRef: string;
+  disabled?: boolean;
+};
+
+export type AnalysisPromptOption = {
+  id: number;
+  label: string;
+  type: string;
 };
 
 export type OptionalHoldingContext = {

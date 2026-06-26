@@ -207,12 +207,26 @@ func eastMoneySecIDFromSymbol(symbol stock.Symbol) (string, error) {
 // eastMoneyPeriod 将内部 K 线周期映射为东方财富 klt 参数。
 func eastMoneyPeriod(period Period) (string, error) {
 	switch period {
+	case Period1Minute:
+		return "1", nil
+	case Period5Minute:
+		return "5", nil
+	case Period15Minute:
+		return "15", nil
+	case Period30Minute:
+		return "30", nil
+	case Period60Minute:
+		return "60", nil
 	case PeriodDay:
 		return "101", nil
 	case PeriodWeek:
 		return "102", nil
 	case PeriodMonth:
 		return "103", nil
+	case PeriodQuarter:
+		return "104", nil
+	case PeriodYear:
+		return "106", nil
 	default:
 		return "", fmt.Errorf("unsupported period %q", period)
 	}

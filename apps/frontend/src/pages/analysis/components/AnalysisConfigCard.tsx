@@ -1,12 +1,19 @@
 import { CloseOutlined, DownOutlined } from "@ant-design/icons";
 import { AutoComplete, Select } from "antd";
 import { useEffect, useMemo, useState } from "react";
-import { aiModels, analysisTypes, promptTemplates, stockCandidates } from "../defaults";
-import type { AIModel, AnalysisConfig, AnalysisType, SelectedStock } from "../types";
+import { analysisTypes } from "../defaults";
+import type { AIModel, AnalysisConfig, AnalysisModelOption, AnalysisPromptOption, AnalysisType, SelectedStock } from "../types";
 
 type AnalysisConfigCardProps = {
   value: AnalysisConfig;
+  modelOptions: AnalysisModelOption[];
+  promptOptions: AnalysisPromptOption[];
+  stockOptions: SelectedStock[];
+  loadingModels?: boolean;
+  loadingPrompts?: boolean;
+  searchingStocks?: boolean;
   onChange: (value: AnalysisConfig) => void;
+  onSearchStock: (keyword: string) => void;
   onManageTemplate: () => void;
 };
 
@@ -15,20 +22,20 @@ export function AnalysisConfigCard(props: AnalysisConfigCardProps) {
   const filteredStocks = useMemo(() => {
     const keyword = stockInput.trim().toLowerCase();
     if (!keyword) {
-      return stockCandidates;
+      return props.stockOptions;
     }
-    return stockCandidates.filter((item) => {
+    return props.stockOptions.filter((item) => {
       const haystack = [item.name, item.symbol, item.code].join(" ").toLowerCase();
       return haystack.includes(keyword);
     });
-  }, [stockInput]);
+  }, [props.stockOptions, stockInput]);
 
   useEffect(() => {
     setStockInput(displayStock(props.value.stock));
   }, [props.value.stock]);
 
   const selectStock = (value: string) => {
-    const stock = stockCandidates.find((item) => displayStock(item) === value);
+    const stock = props.stockOptions.find((item) => displayStock(item) === value);
     if (!stock) {
       return;
     }
@@ -69,7 +76,9 @@ export function AnalysisConfigCard(props: AnalysisConfigCardProps) {
               ),
             }))}
             onChange={setStockInput}
+            onSearch={props.onSearchStock}
             onSelect={selectStock}
+            notFoundContent={props.searchingStocks ? "搜索中..." : "暂无匹配股票"}
           />
         </label>
         <label className="analysis-field">
@@ -86,7 +95,9 @@ export function AnalysisConfigCard(props: AnalysisConfigCardProps) {
           <Select
             className="analysis-control"
             value={props.value.aiModel}
-            options={aiModels.map((item) => ({ value: item, label: item }))}
+            loading={props.loadingModels}
+            placeholder="请选择已配置模型"
+            options={props.modelOptions.map((item) => ({ value: String(item.id), label: item.label, disabled: item.disabled }))}
             onChange={(aiModel: AIModel) => props.onChange({ ...props.value, aiModel })}
           />
         </label>
@@ -95,7 +106,9 @@ export function AnalysisConfigCard(props: AnalysisConfigCardProps) {
           <Select
             className="analysis-control"
             value={props.value.promptTemplate}
-            options={promptTemplates.map((item) => ({ value: item, label: item }))}
+            loading={props.loadingPrompts}
+            placeholder="请选择 Prompt 模板"
+            options={props.promptOptions.map((item) => ({ value: String(item.id), label: item.label }))}
             onChange={(promptTemplate: string) => props.onChange({ ...props.value, promptTemplate })}
           />
         </label>

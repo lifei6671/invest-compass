@@ -3,13 +3,19 @@ import { Button, Pagination, Select, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { DeleteOutlined, DownloadOutlined, EyeOutlined, ReloadOutlined, StarFilled, StarOutlined } from "@ant-design/icons";
 import type { ReportItem, ReportStatus } from "../types";
+import { PAGE_SIZE_OPTIONS } from "../../../lib/pagination";
 
 type ReportTableCardProps = {
   reports: ReportItem[];
+  loading: boolean;
+  total: number;
+  currentPage: number;
+  pageSize: number;
   selectedRowKeys: Key[];
   onSelectedRowKeysChange: (keys: Key[]) => void;
-  onBatchAction: () => void;
+  onBatchAction: (action: "export" | "delete") => void;
   onRefresh: () => void;
+  onPageChange: (page: number, pageSize: number) => void;
   onView: (report: ReportItem) => void;
   onDownload: (report: ReportItem) => void;
   onDelete: (report: ReportItem) => void;
@@ -24,10 +30,15 @@ const statusMeta: Record<ReportStatus, { label: string; colorClass: string }> = 
 
 export function ReportTableCard({
   reports,
+  loading,
+  total,
+  currentPage,
+  pageSize,
   selectedRowKeys,
   onSelectedRowKeysChange,
   onBatchAction,
   onRefresh,
+  onPageChange,
   onView,
   onDownload,
   onDelete,
@@ -126,7 +137,7 @@ export function ReportTableCard({
       <div className="report-table-header">
         <div className="report-table-title">
           <h2>报告列表</h2>
-          <span>（共 156 条）</span>
+          <span>（共 {total} 条）</span>
         </div>
         <div className="report-table-tools">
           <Select
@@ -135,7 +146,7 @@ export function ReportTableCard({
             className="report-batch-select"
             onSelect={onBatchAction}
             options={[
-              { value: "export", label: "批量导出" },
+              { value: "export", label: "批量导出", disabled: true },
               { value: "delete", label: "批量删除" },
             ]}
           />
@@ -149,6 +160,7 @@ export function ReportTableCard({
         size="small"
         columns={columns}
         dataSource={reports}
+        loading={loading}
         pagination={false}
         scroll={{ x: 1080, y: 430 }}
         rowSelection={{
@@ -160,12 +172,12 @@ export function ReportTableCard({
       <div className="report-pagination-row">
         <Pagination
           size="small"
-          total={156}
-          current={1}
-          pageSize={20}
-          onChange={() => undefined}
+          total={total}
+          current={currentPage}
+          pageSize={pageSize}
+          onChange={onPageChange}
           showSizeChanger
-          pageSizeOptions={["20", "50", "100"]}
+          pageSizeOptions={[...PAGE_SIZE_OPTIONS]}
           showQuickJumper={{ goButton: "确定" }}
           showTotal={(total) => `共 ${total} 条`}
           locale={{

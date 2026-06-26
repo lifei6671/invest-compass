@@ -37,6 +37,19 @@ test("资讯中心刷新搜索时只调用 search_news 并展示资讯范围结�
   const calls: Array<{ command: string; payload?: unknown }> = [];
   mockIPC((command, payload) => {
     calls.push({ command, payload });
+    if (command === "news_market") {
+      return { code: 0, message: "ok", data: { items: [] } };
+    }
+    if (command === "news_stats") {
+      return {
+        code: 0,
+        message: "ok",
+        data: { total_count: 0, source_count: 0, sentiment_summary: "暂未接入情绪分类" },
+      };
+    }
+    if (command === "news_hot_topics") {
+      return { code: 0, message: "ok", data: { industries: [], mentioned_stocks: [] } };
+    }
     if (command === "search_news") {
       return {
         code: 0,
@@ -69,7 +82,18 @@ test("资讯中心刷新搜索时只调用 search_news 并展示资讯范围结�
     </AntApp>,
   );
 
+  await waitFor(() => {
+    expect(calls.map((call) => call.command)).toEqual(expect.arrayContaining(["news_market", "news_stats", "news_hot_topics"]));
+  });
+  expect(screen.queryByText("按热度")).not.toBeInTheDocument();
+  expect(screen.queryByText("按相关性")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "切换资讯视图" })).not.toBeInTheDocument();
+  calls.length = 0;
+
   fireEvent.change(screen.getByPlaceholderText("输入关键词，支持标题/摘要"), { target: { value: "光模块" } });
+  await waitFor(() => {
+    expect(screen.getByPlaceholderText("输入关键词，支持标题/摘要")).toHaveValue("光模块");
+  });
   fireEvent.click(screen.getByRole("button", { name: /刷新资讯/ }));
 
   await waitFor(() => {
@@ -101,7 +125,22 @@ test("资讯中心刷新搜索时只调用 search_news 并展示资讯范围结�
 });
 
 test("资讯中心搜索无结果时说明仅搜索资讯中心", async () => {
-  mockIPC((command) => {
+  const calls: Array<{ command: string; payload?: unknown }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    if (command === "news_market") {
+      return { code: 0, message: "ok", data: { items: [] } };
+    }
+    if (command === "news_stats") {
+      return {
+        code: 0,
+        message: "ok",
+        data: { total_count: 0, source_count: 0, sentiment_summary: "暂未接入情绪分类" },
+      };
+    }
+    if (command === "news_hot_topics") {
+      return { code: 0, message: "ok", data: { industries: [], mentioned_stocks: [] } };
+    }
     if (command === "search_news") {
       return { code: 0, message: "ok", data: [] };
     }
@@ -114,10 +153,19 @@ test("资讯中心搜索无结果时说明仅搜索资讯中心", async () => {
     </AntApp>,
   );
 
+  await waitFor(() => {
+    expect(calls.map((call) => call.command)).toEqual(expect.arrayContaining(["news_market", "news_stats", "news_hot_topics"]));
+  });
+  calls.length = 0;
+
   fireEvent.change(screen.getByPlaceholderText("输入关键词，支持标题/摘要"), { target: { value: "不存在" } });
+  await waitFor(() => {
+    expect(screen.getByPlaceholderText("输入关键词，支持标题/摘要")).toHaveValue("不存在");
+  });
   fireEvent.click(screen.getByRole("button", { name: /刷新资讯/ }));
 
   await waitFor(() => {
+    expect(calls.map((call) => call.command)).toContain("search_news");
     expect(screen.getByText("仅搜索资讯中心，暂无匹配资讯")).toBeInTheDocument();
   });
 });

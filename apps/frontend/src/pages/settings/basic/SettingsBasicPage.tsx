@@ -33,6 +33,7 @@ import { SearchIndexManagementCard } from "./components/SearchIndexManagementCar
 import { WorkspaceSettingsCard } from "./components/WorkspaceSettingsCard";
 import { SettingsRiskNotice } from "../components/SettingsRiskNotice";
 import { useDashboardStore } from "../../../stores/dashboardStore";
+import { notifyAutoRefreshSettingsChanged } from "../../../hooks/useAutoRefresh";
 import {
   basicSettingsKeys,
   notificationSettingsKeys,
@@ -43,12 +44,12 @@ import {
   initialCacheSummary,
   initialDesktopSettings,
   initialNotificationSettings,
-  initialProxySummary,
   initialWorkspace,
   type BasicSettingsState,
   type CacheSummary,
   type DesktopSettingsState,
   type NotificationSettingsState,
+  type ProxySummary,
   type WorkspaceSettingsState,
 } from "./types";
 
@@ -56,6 +57,7 @@ type PersistedBasicSettingsKey = Exclude<keyof BasicSettingsState, "defaultAIMod
 type InitialLoadOptions = {
   initial?: boolean;
 };
+type SettingsBasicSection = "all" | "basic" | "notifications" | "workspace" | "cache";
 
 const settingsInitialLoadErrorKey = "settings-basic-initial-load-error";
 const searchIndexInitialRetryDelayMs = 200;
@@ -66,6 +68,12 @@ const cacheTargetLabels: Record<string, string> = {
   chart_image: "图表缓存",
   task_logs: "任务日志",
   app_logs: "应用日志",
+};
+const proxySummaryKeys = ["proxy.mode", "proxy.http_url", "proxy.socks5_url"];
+
+type SettingsBasicPageProps = {
+  section?: SettingsBasicSection;
+  onEditProxy?: () => void;
 };
 
 const basicSettingKeyByField: Record<PersistedBasicSettingsKey, string> = {
@@ -85,14 +93,20 @@ const notificationSettingKeyByField: Record<keyof NotificationSettingsState, str
   providerErrorNotification: settingsKey.notificationsProviderError,
 };
 
-export function SettingsBasicPage() {
+export function SettingsBasicPage(props: SettingsBasicPageProps = {}) {
   const { message } = AntApp.useApp();
+  const section = props.section ?? "all";
+  const showBasicSection = section === "all" || section === "basic";
+  const showWorkspaceSection = section === "all" || section === "workspace";
+  const showNotificationSection = section === "all" || section === "notifications";
+  const showCacheSection = section === "all" || section === "cache";
   const [basicSettings, setBasicSettings] = useState<BasicSettingsState>(initialBasicSettings);
   const [aiConfigs, setAIConfigs] = useState<AIConfig[]>([]);
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettingsState>(initialWorkspace);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsState>(initialNotificationSettings);
   const [desktopSettings, setDesktopSettings] = useState<DesktopSettingsState>(initialDesktopSettings);
   const [cacheSummary, setCacheSummary] = useState<CacheSummary>(initialCacheSummary);
+  const [proxySummary, setProxySummary] = useState<ProxySummary>({ mode: "system", address: "根据系统设置" });
   const [cacheLoading, setCacheLoading] = useState(false);
   const [cacheConfirmOpen, setCacheConfirmOpen] = useState(false);
   const [searchIndexStatus, setSearchIndexStatus] = useState<SearchIndexStatus | null>(null);
@@ -170,6 +184,19 @@ export function SettingsBasicPage() {
   useEffect(() => {
     void loadNotificationSettings();
   }, [loadNotificationSettings]);
+
+  const loadProxySummary = useCallback(async () => {
+    try {
+      const settings = await settingsGet(proxySummaryKeys);
+      setProxySummary(proxySummaryFromItems(settings.items));
+    } catch (error) {
+      handleInitialLoadError("代理摘要", error);
+    }
+  }, [handleInitialLoadError]);
+
+  useEffect(() => {
+    void loadProxySummary();
+  }, [loadProxySummary]);
 
   const loadCacheSummary = useCallback(async (options: InitialLoadOptions = {}) => {
     try {
@@ -294,6 +321,9 @@ export function SettingsBasicPage() {
   const saveBasicSetting = async (field: PersistedBasicSettingsKey, value: string, previousValue: BasicSettingsState) => {
     try {
       await settingsSet({ items: [{ key: basicSettingKeyByField[field], value }] });
+      if (field === "quoteRefreshInterval") {
+        notifyAutoRefreshSettingsChanged();
+      }
       message.success("设置已更新");
     } catch (error) {
       setBasicSettings(previousValue);
@@ -429,41 +459,53 @@ export function SettingsBasicPage() {
 
   return (
     <>
-      <AppBasicSettingsCard
-        value={basicSettings}
-        aiModelOptions={aiConfigs.map((config) => ({
-          label: `${config.name} / ${config.model_name}`,
-          value: String(config.id),
-        }))}
-        onChange={handleBasicSettingsChange}
-      />
+      {showBasicSection ? (
+        <AppBasicSettingsCard
+          value={basicSettings}
+          aiModelOptions={aiConfigs.map((config) => ({
+            label: `${config.name} / ${config.model_name}`,
+            value: String(config.id),
+          }))}
+          onChange={handleBasicSettingsChange}
+        />
+      ) : null}
       <div className="settings-basic-card-grid">
-        <WorkspaceSettingsCard
-          value={workspaceSettings}
-          onSelectDirectory={handleSelectWorkspaceDirectory}
-          onOpenDirectory={handleOpenWorkspaceDirectory}
-        />
-        <NotificationSettingsCard
-          value={notificationSettings}
-          onChange={handleNotificationSettingsChange}
-        />
-        <DesktopCapabilityCard
-          value={desktopSettings}
-          onChange={handleDesktopSettingsChange}
-        />
-        <CacheManagementCard
-          value={cacheSummary}
-          loading={cacheLoading}
-          onCleanCache={handleRequestCleanCache}
-        />
-        <SearchIndexManagementCard
-          value={searchIndexStatus}
-          loading={searchIndexLoading}
-          rebuildingScope={rebuildingScope}
-          onRefresh={loadSearchIndexStatus}
-          onRebuild={handleRebuildSearchIndex}
-        />
-        <ProxySummaryCard value={initialProxySummary} onEditProxy={() => message.info("代理设置页待接入")} />
+        {showWorkspaceSection ? (
+          <WorkspaceSettingsCard
+            value={workspaceSettings}
+            onSelectDirectory={handleSelectWorkspaceDirectory}
+            onOpenDirectory={handleOpenWorkspaceDirectory}
+          />
+        ) : null}
+        {showNotificationSection ? (
+          <NotificationSettingsCard
+            value={notificationSettings}
+            onChange={handleNotificationSettingsChange}
+          />
+        ) : null}
+        {showBasicSection ? (
+          <>
+            <DesktopCapabilityCard
+              value={desktopSettings}
+              onChange={handleDesktopSettingsChange}
+            />
+            <SearchIndexManagementCard
+              value={searchIndexStatus}
+              loading={searchIndexLoading}
+              rebuildingScope={rebuildingScope}
+              onRefresh={loadSearchIndexStatus}
+              onRebuild={handleRebuildSearchIndex}
+            />
+            <ProxySummaryCard value={proxySummary} onEditProxy={props.onEditProxy ?? (() => void loadProxySummary())} />
+          </>
+        ) : null}
+        {showCacheSection ? (
+          <CacheManagementCard
+            value={cacheSummary}
+            loading={cacheLoading}
+            onCleanCache={handleRequestCleanCache}
+          />
+        ) : null}
       </div>
       <Modal
         title="确认清理缓存"
@@ -552,6 +594,21 @@ function notificationSettingsFromItems(items: SettingItem[]): Partial<Notificati
     taskFailedNotification: readBooleanSetting(items, settingsKey.notificationsTaskFailed, initialNotificationSettings.taskFailedNotification),
     providerErrorNotification: readBooleanSetting(items, settingsKey.notificationsProviderError, initialNotificationSettings.providerErrorNotification),
   };
+}
+
+function proxySummaryFromItems(items: SettingItem[]): ProxySummary {
+  const values = new Map(items.map((item) => [item.key, item.value]));
+  const rawMode = values.get("proxy.mode");
+  if (rawMode === "none") {
+    return { mode: "none", address: "直连" };
+  }
+  if (rawMode === "custom" || rawMode === "http" || rawMode === "socks5") {
+    return {
+      mode: "custom",
+      address: values.get("proxy.http_url") || values.get("proxy.socks5_url") || "未配置",
+    };
+  }
+  return { mode: "system", address: "根据系统设置" };
 }
 
 function readBooleanSetting(items: SettingItem[], key: string, fallback: boolean): boolean {

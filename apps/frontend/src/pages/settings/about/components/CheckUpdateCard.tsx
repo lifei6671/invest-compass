@@ -19,14 +19,15 @@ export function CheckUpdateCard(props: CheckUpdateCardProps) {
         <KeyValue
           label="更新状态"
           value={
-            <span className="settings-about-latest-status">
+            <span className={`settings-about-latest-status settings-about-latest-status-${props.value.updateStatus}`}>
               <InfoCircleFilled />
-              检查更新待接入
+              {statusLabel(props.value.updateStatus)}
             </span>
           }
         />
         <KeyValue label="最新版本" value={props.value.latestVersion} />
         <KeyValue label="发布日期" value={props.value.releaseDate} />
+        <KeyValue label="发布说明" value={props.value.releaseNoteStatus} />
       </div>
       <div className="settings-about-action-row">
         <Button type="primary" className="settings-about-primary-button" loading={props.checking} onClick={props.onCheck}>
@@ -38,6 +39,19 @@ export function CheckUpdateCard(props: CheckUpdateCardProps) {
       </div>
     </section>
   );
+}
+
+function statusLabel(status: UpdateInfo["updateStatus"]) {
+  switch (status) {
+    case "available":
+      return "发现新版本";
+    case "latest":
+      return "当前已是最新版本";
+    case "failed":
+      return "检查更新失败";
+    default:
+      return "未检查";
+  }
 }
 
 function CardTitle() {

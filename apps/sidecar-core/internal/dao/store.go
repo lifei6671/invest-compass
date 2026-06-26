@@ -60,6 +60,32 @@ func (store *Store) UpsertStocks(ctx context.Context, stocks []model.Stock) erro
 		Create(&stocks).Error
 }
 
+// UpsertBuiltinStocks 按 symbol 幂等写入内置基础股票池，保留全称和拼音等本地搜索资料。
+func (store *Store) UpsertBuiltinStocks(ctx context.Context, stocks []model.Stock) error {
+	if len(stocks) == 0 {
+		return nil
+	}
+	return store.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "symbol"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"market",
+				"code",
+				"name",
+				"pinyin",
+				"exchange",
+				"industry",
+				"list_date",
+				"status",
+				"full_name",
+				"pinyin_full",
+				"pinyin_initials",
+				"updated_at",
+			}),
+		}).
+		Create(&stocks).Error
+}
+
 // GetStockBySymbol 按标准 symbol 读取股票基础资料，供详情页和自选股展示同一份资料源。
 func (store *Store) GetStockBySymbol(ctx context.Context, symbol string) (model.Stock, bool, error) {
 	var stock model.Stock
@@ -261,13 +287,13 @@ func (store *Store) SaveWatchlist(ctx context.Context, item *model.Watchlist) er
 	return store.db.WithContext(ctx).Save(item).Error
 }
 
-// ListActiveWatchlists 按 sort_order、id 返回未软删除自选股。
+// ListActiveWatchlists 按添加时间倒序返回未软删除自选股。
 func (store *Store) ListActiveWatchlists(ctx context.Context) ([]model.Watchlist, error) {
 	var items []model.Watchlist
 	err := store.db.WithContext(ctx).
 		Where("deleted_at IS NULL").
-		Order("sort_order ASC").
-		Order("id ASC").
+		Order("created_at DESC").
+		Order("id DESC").
 		Find(&items).Error
 	return items, err
 }
@@ -621,6 +647,21 @@ func (store *Store) ListVisibleAnalysisReports(ctx context.Context) ([]model.Ana
 	return reports, err
 }
 
+// UpdateAnalysisReportFavorite 更新报告收藏状态。收藏属于用户元数据，不随报告正文 upsert 被覆盖。
+func (store *Store) UpdateAnalysisReportFavorite(ctx context.Context, id int64, favorite bool) error {
+	result := store.db.WithContext(ctx).
+		Model(&model.AnalysisReport{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Update("favorite", favorite)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 // GetAnalysisReportByTaskID 按 task_id 读取未软删除报告，供任务日志上下文摘要使用。
 func (store *Store) GetAnalysisReportByTaskID(ctx context.Context, taskID string) (model.AnalysisReport, bool, error) {
 	var report model.AnalysisReport
@@ -639,6 +680,13 @@ func (store *Store) GetAnalysisReportByTaskID(ctx context.Context, taskID string
 // SoftDeleteAnalysisReport 对分析报告执行软删除。
 func (store *Store) SoftDeleteAnalysisReport(ctx context.Context, id int64) error {
 	return store.db.WithContext(ctx).Delete(&model.AnalysisReport{}, id).Error
+}
+
+// BatchSoftDeleteAnalysisReports 在单个事务中批量软删除报告，避免接口失败时出现部分删除。
+func (store *Store) BatchSoftDeleteAnalysisReports(ctx context.Context, ids []int64) error {
+	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return tx.Delete(&model.AnalysisReport{}, ids).Error
+	})
 }
 
 // UpsertSetting 写入或更新非敏感设置项。

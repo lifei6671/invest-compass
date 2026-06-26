@@ -11,8 +11,7 @@ type ProxySummaryCardProps = {
 const proxyModeText: Record<ProxySummary["mode"], string> = {
   system: "系统代理",
   none: "不使用代理",
-  http: "HTTP 代理",
-  socks5: "SOCKS5 代理",
+  custom: "手动代理",
 };
 
 export function ProxySummaryCard(props: ProxySummaryCardProps) {

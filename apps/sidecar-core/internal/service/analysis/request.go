@@ -33,6 +33,7 @@ type CreateRequest struct {
 	AnalysisType     AnalysisType
 	AIConfigID       int64
 	PromptTemplateID int64
+	RetryOfTaskID    string
 	UserPosition     *UserPosition
 }
 
@@ -42,6 +43,7 @@ type ValidatedCreateRequest struct {
 	AnalysisType     AnalysisType
 	AIConfigID       int64
 	PromptTemplateID int64
+	RetryOfTaskID    string
 	UserPosition     *UserPosition
 }
 
@@ -71,6 +73,7 @@ func ValidateCreateRequest(request CreateRequest) (ValidatedCreateRequest, error
 		AnalysisType:     request.AnalysisType,
 		AIConfigID:       request.AIConfigID,
 		PromptTemplateID: request.PromptTemplateID,
+		RetryOfTaskID:    request.RetryOfTaskID,
 		UserPosition:     request.UserPosition,
 	}, nil
 }
@@ -82,6 +85,7 @@ func (request ValidatedCreateRequest) InputSnapshotForLog() string {
 		"analysis_type":      request.AnalysisType,
 		"ai_config_id":       request.AIConfigID,
 		"prompt_template_id": request.PromptTemplateID,
+		"retry_of_task_id":   request.RetryOfTaskID,
 		"has_user_position":  request.UserPosition != nil,
 	}
 	encoded, err := json.Marshal(payload)
@@ -98,6 +102,7 @@ func (request ValidatedCreateRequest) InputSnapshotForReport() string {
 		"analysis_type":      request.AnalysisType,
 		"ai_config_id":       request.AIConfigID,
 		"prompt_template_id": request.PromptTemplateID,
+		"retry_of_task_id":   request.RetryOfTaskID,
 		"user_position":      request.UserPosition,
 	}
 	encoded, err := json.Marshal(payload)
@@ -115,6 +120,9 @@ func CreateTask(request ValidatedCreateRequest, taskID string, now time.Time) (t
 		"ai_config_id":       request.AIConfigID,
 		"prompt_template_id": request.PromptTemplateID,
 		"has_user_position":  request.UserPosition != nil,
+	}
+	if request.RetryOfTaskID != "" {
+		payload["retry_of_task_id"] = request.RetryOfTaskID
 	}
 	encodedPayload, err := json.Marshal(payload)
 	if err != nil {

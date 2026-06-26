@@ -26,13 +26,44 @@ const (
 type Period string
 
 const (
+	// PeriodMinute 表示当日分时走势，主要用于首页和自选股迷你走势。
+	PeriodMinute Period = "minute"
+	// Period1Minute 表示 1 分钟 K 线。
+	Period1Minute Period = "1m"
+	// Period5Minute 表示 5 分钟 K 线。
+	Period5Minute Period = "5m"
+	// Period15Minute 表示 15 分钟 K 线。
+	Period15Minute Period = "15m"
+	// Period30Minute 表示 30 分钟 K 线。
+	Period30Minute Period = "30m"
+	// Period60Minute 表示 60 分钟 K 线。
+	Period60Minute Period = "60m"
 	// PeriodDay 表示日 K。
 	PeriodDay Period = "day"
 	// PeriodWeek 表示周 K。
 	PeriodWeek Period = "week"
 	// PeriodMonth 表示月 K。
 	PeriodMonth Period = "month"
+	// PeriodQuarter 表示季 K。
+	PeriodQuarter Period = "quarter"
+	// PeriodYear 表示年 K。
+	PeriodYear Period = "year"
 )
+
+// IsIntraday 判断周期是否属于盘中数据，盘中数据不能被持久缓存跨日复用。
+func (period Period) IsIntraday() bool {
+	return period == PeriodMinute || period.IsMinuteKline()
+}
+
+// IsMinuteKline 判断周期是否属于真实分钟级 K 线。
+func (period Period) IsMinuteKline() bool {
+	switch period {
+	case Period1Minute, Period5Minute, Period15Minute, Period30Minute, Period60Minute:
+		return true
+	default:
+		return false
+	}
+}
 
 // Adjust 表示 K 线复权方式。
 type Adjust string
@@ -128,21 +159,46 @@ type StockBasic struct {
 
 // Quote 是个股行情快照模型。
 type Quote struct {
-	Symbol        stock.Symbol
-	Price         float64
-	ChangeAmount  float64
-	ChangePercent float64
-	Open          float64
-	High          float64
-	Low           float64
-	PreClose      float64
-	Volume        float64
-	Amount        float64
-	TurnoverRate  float64
-	PE            float64
-	PB            float64
-	QuoteTime     time.Time
-	Provider      string
+	Symbol         stock.Symbol
+	Price          float64
+	ChangeAmount   float64
+	ChangePercent  float64
+	Open           float64
+	High           float64
+	Low            float64
+	PreClose       float64
+	Volume         float64
+	Amount         float64
+	TurnoverRate   float64
+	PE             float64
+	PB             float64
+	TotalMarketCap float64
+	FloatMarketCap float64
+	QuoteTime      time.Time
+	Provider       string
+}
+
+// NormalizeQuote 统一修正行情快照中的无效 0 价，避免未开盘时把 0 当作真实现价计算成 -100%。
+func NormalizeQuote(quote Quote) Quote {
+	if quote.Price <= 0 && quote.PreClose > 0 {
+		quote.Price = quote.PreClose
+	}
+	if quote.Price > 0 {
+		if quote.Open <= 0 {
+			quote.Open = quote.Price
+		}
+		if quote.High <= 0 {
+			quote.High = quote.Price
+		}
+		if quote.Low <= 0 {
+			quote.Low = quote.Price
+		}
+	}
+	if quote.Price > 0 && quote.PreClose > 0 {
+		quote.ChangeAmount = quote.Price - quote.PreClose
+		quote.ChangePercent = quote.ChangeAmount / quote.PreClose * 100
+	}
+	return quote
 }
 
 // KlineRequest 是 K 线查询请求。

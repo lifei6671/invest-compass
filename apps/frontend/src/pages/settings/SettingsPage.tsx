@@ -1,5 +1,5 @@
-import { App as AntApp } from "antd";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { AboutAppPage } from "./about/AboutAppPage";
 import { SettingsBasicPage } from "./basic/SettingsBasicPage";
 import { SettingsTabs } from "./basic/components/SettingsTabs";
@@ -13,20 +13,40 @@ type SettingsPageProps = {
   initialActiveTab?: SettingsTabKey;
 };
 
+const settingsTabKeys: SettingsTabKey[] = [
+  "basic",
+  "model-config",
+  "prompt-template",
+  "data-source",
+  "proxy",
+  "notifications",
+  "workspace",
+  "cache",
+  "about",
+];
+
 export function SettingsPage(props: SettingsPageProps = {}) {
-  const { message } = AntApp.useApp();
-  const [activeTab, setActiveTab] = useState<SettingsTabKey>(props.initialActiveTab ?? "basic");
+  const location = useLocation();
+  const queryTab = useMemo(() => new URLSearchParams(location.search).get("tab") as SettingsTabKey | null, [location.search]);
+  const initialTab = props.initialActiveTab ?? (queryTab && settingsTabKeys.includes(queryTab) ? queryTab : "basic");
+  const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab);
+
+  useEffect(() => {
+    if (!props.initialActiveTab && queryTab && settingsTabKeys.includes(queryTab)) {
+      setActiveTab(queryTab);
+    }
+  }, [props.initialActiveTab, queryTab, settingsTabKeys]);
 
   return (
     <section className="settings-basic-page">
       <SettingsTabs
         activeKey={activeTab}
         onChange={(key) => {
-          if (key === "basic" || key === "model-config" || key === "prompt-template" || key === "data-source" || key === "proxy" || key === "about") {
+          if (settingsTabKeys.includes(key)) {
             setActiveTab(key);
             return;
           }
-          message.info("该设置页待接入");
+          setActiveTab("basic");
         }}
       />
       {activeTab === "model-config" ? (
@@ -37,10 +57,16 @@ export function SettingsPage(props: SettingsPageProps = {}) {
         <DataSourceSettingsPage />
       ) : activeTab === "proxy" ? (
         <ProxySettingsPage />
+      ) : activeTab === "notifications" ? (
+        <SettingsBasicPage section="notifications" onEditProxy={() => setActiveTab("proxy")} />
+      ) : activeTab === "workspace" ? (
+        <SettingsBasicPage section="workspace" onEditProxy={() => setActiveTab("proxy")} />
+      ) : activeTab === "cache" ? (
+        <SettingsBasicPage section="cache" onEditProxy={() => setActiveTab("proxy")} />
       ) : activeTab === "about" ? (
         <AboutAppPage />
       ) : (
-        <SettingsBasicPage />
+        <SettingsBasicPage section="basic" onEditProxy={() => setActiveTab("proxy")} />
       )}
     </section>
   );

@@ -1,5 +1,5 @@
-import { App as AntApp, Button, Empty, Segmented } from "antd";
-import { CompressOutlined, EllipsisOutlined, SettingOutlined } from "@ant-design/icons";
+import { Button, Empty } from "antd";
+import { FullscreenOutlined } from "@ant-design/icons";
 import { useMemo } from "react";
 import { EChartView } from "../../charts/EChartView";
 import { APP_FONT } from "../../../styles/fonts";
@@ -11,15 +11,14 @@ type KlineChartCardProps = {
   adjust: AdjustValue;
   onPeriodChange?: (period: PeriodValue) => void;
   onAdjustChange?: (adjust: AdjustValue) => void;
+  onFullscreen?: () => void;
 };
 
 type PeriodKey = "分时" | "日K" | "周K" | "月K";
-type AdjustKey = "不复权" | "前复权" | "后复权";
 type PeriodValue = "day" | "week" | "month";
 type AdjustValue = "none" | "qfq" | "hfq";
 
 const periods: PeriodKey[] = ["分时", "日K", "周K", "月K"];
-const adjusts: AdjustKey[] = ["不复权", "前复权", "后复权"];
 
 const periodValues: Record<Exclude<PeriodKey, "分时">, PeriodValue> = {
   日K: "day",
@@ -33,22 +32,8 @@ const periodLabels: Record<PeriodValue, PeriodKey> = {
   month: "月K",
 };
 
-const adjustValues: Record<AdjustKey, AdjustValue> = {
-  不复权: "none",
-  前复权: "qfq",
-  后复权: "hfq",
-};
-
-const adjustLabels: Record<AdjustValue, AdjustKey> = {
-  none: "不复权",
-  qfq: "前复权",
-  hfq: "后复权",
-};
-
 export function KlineChartCard(props: KlineChartCardProps) {
-  const { message } = AntApp.useApp();
   const period = periodLabels[props.period];
-  const adjust = adjustLabels[props.adjust];
   const option = useMemo(() => buildKlineOption(props.items), [props.items]);
 
   return (
@@ -75,24 +60,13 @@ export function KlineChartCard(props: KlineChartCardProps) {
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          <Segmented
-            className="rounded-md border border-[#d9e2f1] bg-white p-0.5"
-            value={adjust}
-            onChange={(value) => {
-              props.onAdjustChange?.(adjustValues[value as AdjustKey]);
-            }}
-            options={adjusts.map((item) => ({
-              value: item,
-              label: <span className={["inline-flex h-7 min-w-[58px] items-center justify-center rounded px-2 text-[13px]", adjust === item ? "bg-[#eaf3ff] text-[#1677ff]" : "text-[#64748b]"].join(" ")}>{item}</span>,
-            }))}
-          />
-          <div className="flex items-center gap-3 text-[#475569]">
-            <Button type="text" className="h-8 w-8 p-0" icon={<SettingOutlined />} onClick={() => message.info("功能待接入")} />
-            <Button type="text" className="h-8 w-8 p-0" icon={<CompressOutlined />} onClick={() => message.info("功能待接入")} />
-            <Button type="text" className="h-8 w-8 p-0" icon={<EllipsisOutlined />} onClick={() => message.info("功能待接入")} />
-          </div>
-        </div>
+        <Button
+          className="h-8 rounded-md border-[#d9e2f1] text-[13px] font-medium text-[#475569]"
+          icon={<FullscreenOutlined />}
+          onClick={props.onFullscreen}
+        >
+          全屏
+        </Button>
       </div>
 
       <div className="border-t border-[#edf1f7] pt-3">
@@ -115,6 +89,8 @@ export function KlineChartCard(props: KlineChartCardProps) {
 function buildKlineOption(items: KlineItem[]) {
   const dates = items.map((item) => item.date.slice(0, 7));
   const candleData = items.map((item) => [item.open, item.close, item.low, item.high]);
+  const priceRange = calculatePriceRange(items);
+  const volumeMax = calculateVolumeMax(items);
   const volumeData = items.map((item, index) => ({
     value: item.volume,
     itemStyle: { color: item.close >= item.open ? "#ff4d4f" : "#16a34a" },
@@ -132,8 +108,8 @@ function buildKlineOption(items: KlineItem[]) {
       { type: "category", gridIndex: 1, data: dates, boundaryGap: true, axisLine: { lineStyle: { color: "#d9e2f1" } }, axisLabel: { color: "#64748b", fontFamily: APP_FONT, fontSize: 12 }, splitLine: { show: false } },
     ],
     yAxis: [
-      { scale: true, position: "right", min: 19, max: 27, axisLabel: { color: "#475569", fontFamily: APP_FONT, fontSize: 12 }, splitLine: { lineStyle: { color: "#edf1f7", type: "dashed" } } },
-      { scale: true, gridIndex: 1, position: "right", axisLabel: { color: "#475569", fontFamily: APP_FONT, fontSize: 12 }, splitLine: { lineStyle: { color: "#edf1f7" } } },
+      { scale: true, position: "right", min: priceRange.min, max: priceRange.max, axisLabel: { color: "#475569", fontFamily: APP_FONT, fontSize: 12 }, splitLine: { lineStyle: { color: "#edf1f7", type: "dashed" } } },
+      { scale: true, gridIndex: 1, position: "right", min: 0, max: volumeMax, axisLabel: { color: "#475569", fontFamily: APP_FONT, fontSize: 12 }, splitLine: { lineStyle: { color: "#edf1f7" } } },
     ],
     series: [
       {
@@ -149,6 +125,29 @@ function buildKlineOption(items: KlineItem[]) {
       { type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: volumeData, barWidth: "48%" },
     ],
   };
+}
+
+function calculatePriceRange(items: KlineItem[]) {
+  const lows = items.map((item) => item.low).filter(Number.isFinite);
+  const highs = items.map((item) => item.high).filter(Number.isFinite);
+  const min = Math.min(...lows);
+  const max = Math.max(...highs);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { min: undefined, max: undefined };
+  }
+  const padding = Math.max((max - min) * 0.12, max * 0.015, 0.5);
+  return {
+    min: Number(Math.max(0, min - padding).toFixed(2)),
+    max: Number((max + padding).toFixed(2)),
+  };
+}
+
+function calculateVolumeMax(items: KlineItem[]) {
+  const max = Math.max(...items.map((item) => item.volume).filter(Number.isFinite));
+  if (!Number.isFinite(max) || max <= 0) {
+    return undefined;
+  }
+  return Math.ceil(max * 1.18);
 }
 
 function ma(items: KlineItem[], size: number) {

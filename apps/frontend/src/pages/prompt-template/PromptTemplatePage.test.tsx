@@ -172,6 +172,46 @@ test("Prompt 模板页选择列表模板时调用详情命令", async () => {
   expect(calls).toContainEqual({ command: "prompt_templates_get", payload: { id: 8 } });
 });
 
+test("Prompt 全屏编辑弹窗使用独立滚动容器而不是页面滚动", async () => {
+  mockIPC((command) => {
+    if (command === "prompt_templates_list") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          items: [
+            {
+              id: 7,
+              name: "技术面分析",
+              type: "technical",
+              description: "",
+              content: Array.from({ length: 40 }, (_, index) => `第 ${index + 1} 行 Prompt 内容`).join("\n"),
+              variables: [],
+              is_builtin: false,
+            },
+          ],
+        },
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  });
+
+  render(
+    <AntApp>
+      <PromptTemplatePage />
+    </AntApp>,
+  );
+
+  await waitFor(() => {
+    expect(screen.getByDisplayValue(/第 40 行 Prompt 内容/)).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getAllByRole("button", { name: "全屏编辑" })[0]);
+
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.querySelector(".prompt-editor-fullscreen-content")).toBeInTheDocument();
+  expect(dialog.closest(".prompt-editor-fullscreen-modal")).toBeInTheDocument();
+});
+
 test("Prompt 模板页编辑和删除已有模板时调用真实命令", async () => {
   const calls: Array<{ command: string; payload?: any }> = [];
   mockIPC((command, payload) => {

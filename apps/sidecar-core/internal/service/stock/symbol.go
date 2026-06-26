@@ -32,6 +32,9 @@ func ParseSymbol(raw string) (Symbol, error) {
 	if normalized == "" {
 		return Symbol{}, newSymbolError(xerr.StockEmptySymbol, raw)
 	}
+	if !strings.Contains(normalized, ":") && strings.Contains(normalized, ".") {
+		return parseCNDotSymbol(normalized)
+	}
 
 	parts := strings.Split(normalized, ":")
 	switch parts[0] {
@@ -44,6 +47,15 @@ func ParseSymbol(raw string) (Symbol, error) {
 	default:
 		return Symbol{}, newSymbolError(xerr.StockUnsupportedMarket, normalized)
 	}
+}
+
+// parseCNDotSymbol 兼容基础股票库和前端展示使用的 600000.SH / 399001.SZ 格式。
+func parseCNDotSymbol(normalized string) (Symbol, error) {
+	parts := strings.Split(normalized, ".")
+	if len(parts) != 2 {
+		return Symbol{}, newSymbolError(xerr.StockInvalidSymbolFormat, normalized)
+	}
+	return parseCNSymbol([]string{"CN", parts[1], parts[0]}, normalized)
 }
 
 // parseCNSymbol 解析 A 股代码，要求包含市场、交易所和六位数字代码。

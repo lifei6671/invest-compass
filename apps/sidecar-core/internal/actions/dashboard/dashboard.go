@@ -121,7 +121,7 @@ func quoteModelToService(item model.Quote) (market.Quote, error) {
 	if err != nil {
 		return market.Quote{}, err
 	}
-	return market.Quote{
+	return market.NormalizeQuote(market.Quote{
 		Symbol:        symbol,
 		Price:         item.Price,
 		ChangeAmount:  item.ChangeAmount,
@@ -137,7 +137,7 @@ func quoteModelToService(item model.Quote) (market.Quote, error) {
 		PB:            item.PB,
 		QuoteTime:     item.QuoteTime,
 		Provider:      item.Provider,
-	}, nil
+	}), nil
 }
 
 // reportModelsToService 转换报告缓存为 Dashboard 业务模型。

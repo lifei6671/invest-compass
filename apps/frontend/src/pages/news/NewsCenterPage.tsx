@@ -1,13 +1,23 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { App as AntApp } from "antd";
 import { InfoCircleFilled, SafetyCertificateOutlined } from "@ant-design/icons";
 import type { DataSourceStatus, HotIndustry, MentionedStock, NewsFilters, NewsItem, SentimentSummary } from "./types";
 import { NewsFilterCard } from "./components/NewsFilterCard";
 import { NewsListCard } from "./components/NewsListCard";
 import { NewsSidebarPanel } from "./components/NewsSidebarPanel";
-import { openExternalURL, searchNews, type DocumentSearchItem } from "../../services/coreClient";
+import {
+  newsHotTopics,
+  newsMarket,
+  newsStats,
+  openExternalURL,
+  searchNews,
+  type DocumentSearchItem,
+  type NewsHotTopicsResult,
+  type NewsItem as CoreNewsItem,
+  type NewsStatsResult,
+} from "../../services/coreClient";
+import { DEFAULT_PAGE_SIZE } from "../../lib/pagination";
 
-const pageSize = 10;
 const initialNewsFilters: NewsFilters = {
   keyword: "",
   stock: "全部股票",
@@ -16,39 +26,62 @@ const initialNewsFilters: NewsFilters = {
   timeRange: "近 7 天",
 };
 const hotKeywords: string[] = [];
-const hotIndustries: HotIndustry[] = [];
-const mentionedStocks: MentionedStock[] = [];
 const dataSourceStatuses: DataSourceStatus[] = [];
-const sentimentSummary: SentimentSummary = {
+const emptySentimentSummary: SentimentSummary = {
   positive: { count: 0, percent: 0 },
   neutral: { count: 0, percent: 0 },
   negative: { count: 0, percent: 0 },
   summary: "暂无资讯情绪统计",
 };
+const defaultMarket = "CN";
+const newsQueryLimit = 20;
 
 export function NewsCenterPage() {
   const { message } = AntApp.useApp();
   const [filters, setFilters] = useState<NewsFilters>(initialNewsFilters);
   const [sortMode, setSortMode] = useState("按最新");
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [searchItems, setSearchItems] = useState<NewsItem[]>([]);
   const [remoteSearchMode, setRemoteSearchMode] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [hotIndustries, setHotIndustries] = useState<HotIndustry[]>([]);
+  const [mentionedStocks, setMentionedStocks] = useState<MentionedStock[]>([]);
+  const [sentimentSummary, setSentimentSummary] = useState<SentimentSummary>(emptySentimentSummary);
+  const [hotTopicsUpdatedAt, setHotTopicsUpdatedAt] = useState<string>();
+  const [statsUpdatedAt, setStatsUpdatedAt] = useState<string>();
 
   const filteredItems = useMemo(() => {
     if (remoteSearchMode) {
       return searchItems;
     }
-    return [];
+    return searchItems.filter((item) => {
+      if (filters.source !== "全部来源" && item.source !== filters.source) {
+        return false;
+      }
+      if (filters.stock !== "全部股票" && !item.tags.some((tag) => tag.includes(filters.stock))) {
+        return false;
+      }
+      if (filters.industry !== "全部行业" && !item.tags.some((tag) => tag.includes(filters.industry))) {
+        return false;
+      }
+      return true;
+    });
   }, [filters, remoteSearchMode, searchItems]);
 
   const visibleItems = filteredItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const totalCount = filteredItems.length;
 
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(totalCount / pageSize));
+    if (currentPage > maxPage) {
+      setCurrentPage(maxPage);
+    }
+  }, [currentPage, pageSize, totalCount]);
+
   const updateFilters = (patch: Partial<NewsFilters>) => {
     setFilters((current) => ({ ...current, ...patch }));
     setRemoteSearchMode(false);
-    setSearchItems([]);
     setCurrentPage(1);
   };
 
@@ -59,12 +92,11 @@ export function NewsCenterPage() {
 
   const handleSortModeChange = (value: string) => {
     setSortMode(value);
-    if (value === "按热度") {
-      message.info("热度排序待接入");
-    }
-    if (value === "按相关性") {
-      message.info("相关性排序待接入");
-    }
+  };
+
+  const handlePageChange = (page: number, nextPageSize: number) => {
+    setPageSize(nextPageSize);
+    setCurrentPage(nextPageSize === pageSize ? page : 1);
   };
 
   const handleCopySummary = async (item: NewsItem) => {
@@ -72,12 +104,46 @@ export function NewsCenterPage() {
     message.success("摘要已复制");
   };
 
+  const loadMarketNews = useCallback(async () => {
+    try {
+      setIsSearching(true);
+      const result = await newsMarket({ market: defaultMarket, limit: newsQueryLimit });
+      setSearchItems(result.items.map(mapCoreNewsItem));
+      setRemoteSearchMode(false);
+      setCurrentPage(1);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "市场资讯加载失败");
+    } finally {
+      setIsSearching(false);
+    }
+  }, [message]);
+
+  const loadNewsInsights = useCallback(async () => {
+    try {
+      const [stats, topics] = await Promise.all([
+        newsStats({ market: defaultMarket, limit: newsQueryLimit }),
+        newsHotTopics({ market: defaultMarket, limit: newsQueryLimit }),
+      ]);
+      setSentimentSummary(mapNewsStatsToSentiment(stats));
+      setHotIndustries(mapHotIndustries(topics));
+      setMentionedStocks(mapMentionedStocks(topics));
+      setStatsUpdatedAt(formatUpdateTime(stats.latest_published_at));
+      setHotTopicsUpdatedAt(formatUpdateTime(topics.updated_at));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "资讯统计加载失败");
+    }
+  }, [message]);
+
+  useEffect(() => {
+    void loadMarketNews();
+    void loadNewsInsights();
+  }, [loadMarketNews, loadNewsInsights]);
+
   const handleRefresh = async () => {
     const keyword = filters.keyword.trim();
     if (!keyword) {
-      setRemoteSearchMode(false);
-      setSearchItems([]);
-      message.info("请输入关键词后搜索资讯中心");
+      await loadMarketNews();
+      await loadNewsInsights();
       return;
     }
     try {
@@ -85,7 +151,7 @@ export function NewsCenterPage() {
       const results = await searchNews({
         keyword,
         symbols: [],
-        limit: 20,
+        limit: newsQueryLimit,
         offset: 0,
         sort: "relevance",
       });
@@ -136,20 +202,20 @@ export function NewsCenterPage() {
           totalCount={totalCount}
           sortMode={sortMode}
           currentPage={currentPage}
+          pageSize={pageSize}
           onSortModeChange={handleSortModeChange}
-          onViewSwitch={() => message.info("视图切换待接入")}
-          onPageChange={setCurrentPage}
+          onPageChange={handlePageChange}
           onOpenOriginal={handleOpenOriginal}
-          onAddContext={() => message.success("已加入 AI 分析上下文")}
           onCopySummary={handleCopySummary}
-          emptyDescription="仅搜索资讯中心，暂无匹配资讯"
+          emptyDescription={remoteSearchMode ? "仅搜索资讯中心，暂无匹配资讯" : "暂无市场资讯"}
         />
         <NewsSidebarPanel
           industries={hotIndustries}
           mentionedStocks={mentionedStocks}
           sentiment={sentimentSummary}
+          hotTopicsUpdatedAt={hotTopicsUpdatedAt}
+          statsUpdatedAt={statsUpdatedAt}
           statuses={dataSourceStatuses}
-          onCleanCache={() => message.success("资讯缓存已清理")}
         />
       </div>
 
@@ -158,22 +224,38 @@ export function NewsCenterPage() {
   );
 }
 
+function mapCoreNewsItem(item: CoreNewsItem): NewsItem {
+  const tags = Array.from(new Set([...(item.symbols ?? []), ...(item.tags ?? [])].map((tag) => tag.trim()).filter(Boolean)));
+  return {
+    id: String(item.id),
+    source: item.source || "资讯",
+    timeLabel: formatNewsTime(item.published_at),
+    title: item.title,
+    summary: item.summary || "",
+    tags,
+    url: normalizeNewsURL(item.url),
+  };
+}
+
 function mapSearchNewsItem(item: DocumentSearchItem): NewsItem {
   const tags = Array.from(new Set([item.symbol, ...item.highlights].map((tag) => tag.trim()).filter(Boolean)));
   return {
     id: item.doc_uid,
     source: item.source || "资讯",
-    timeLabel: formatSearchNewsTime(item.source_time),
+    timeLabel: formatNewsTime(item.source_time),
     title: item.title,
     summary: item.summary,
     tags,
-    url: documentSearchRefURL(item.ref_id),
+    url: normalizeNewsURL(item.ref_id),
   };
 }
 
-function formatSearchNewsTime(value: string): string {
+function formatNewsTime(value?: string): string {
+  if (!value) {
+    return "时间未知";
+  }
   const date = new Date(value);
-  if (!value || Number.isNaN(date.getTime())) {
+  if (Number.isNaN(date.getTime())) {
     return "时间未知";
   }
   return new Intl.DateTimeFormat("zh-CN", {
@@ -184,8 +266,49 @@ function formatSearchNewsTime(value: string): string {
   }).format(date);
 }
 
-function documentSearchRefURL(refID: string): string | undefined {
-  return /^https?:\/\//i.test(refID) ? refID : undefined;
+function mapNewsStatsToSentiment(stats: NewsStatsResult): SentimentSummary {
+  return {
+    positive: { count: 0, percent: 0 },
+    neutral: { count: 0, percent: 0 },
+    negative: { count: 0, percent: 0 },
+    summary: stats.sentiment_summary || "暂未接入情绪分类，当前仅展示新闻缓存数量、来源和标签统计。",
+  };
+}
+
+function mapHotIndustries(result: NewsHotTopicsResult): HotIndustry[] {
+  const maxCount = Math.max(1, ...result.industries.map((item) => item.count));
+  return result.industries.map((item, index) => ({
+    rank: index + 1,
+    name: item.name,
+    heat: Math.max(1, Math.round((item.count / maxCount) * 100)),
+  }));
+}
+
+function mapMentionedStocks(result: NewsHotTopicsResult): MentionedStock[] {
+  return result.mentioned_stocks.map((item) => ({
+    name: item.symbol,
+    count: item.count,
+  }));
+}
+
+function formatUpdateTime(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function normalizeNewsURL(value?: string): string | undefined {
+  return value && /^https?:\/\//i.test(value) ? value : undefined;
 }
 
 function NewsRiskNotice() {

@@ -27,7 +27,9 @@ test("Prompt 编辑区启用软换行以匹配预览区阅读方式", () => {
       value={editorState}
       templateTypeOptions={[{ label: "个股综合模板", value: "stock_full" }]}
       onChange={vi.fn()}
-      onToolAction={vi.fn()}
+      onSearch={vi.fn()}
+      onInsertVariable={vi.fn()}
+      onValidate={vi.fn()}
       onFormat={vi.fn()}
       onFullscreen={vi.fn()}
     />,
@@ -44,7 +46,9 @@ test("Prompt 编辑区 textarea 使用边框盒尺寸避免底部内容被父容
       value={editorState}
       templateTypeOptions={[{ label: "个股综合模板", value: "stock_full" }]}
       onChange={vi.fn()}
-      onToolAction={vi.fn()}
+      onSearch={vi.fn()}
+      onInsertVariable={vi.fn()}
+      onValidate={vi.fn()}
       onFormat={vi.fn()}
       onFullscreen={vi.fn()}
     />,
@@ -59,7 +63,9 @@ test("Prompt 编辑区底部保留可滚动安全区避免最后一行贴边裁�
       value={editorState}
       templateTypeOptions={[{ label: "个股综合模板", value: "stock_full" }]}
       onChange={vi.fn()}
-      onToolAction={vi.fn()}
+      onSearch={vi.fn()}
+      onInsertVariable={vi.fn()}
+      onValidate={vi.fn()}
       onFormat={vi.fn()}
       onFullscreen={vi.fn()}
     />,
@@ -76,7 +82,9 @@ test("Prompt 编辑器高度对齐右侧预览组合底部且保持内部滚动"
       value={editorState}
       templateTypeOptions={[{ label: "个股综合模板", value: "stock_full" }]}
       onChange={vi.fn()}
-      onToolAction={vi.fn()}
+      onSearch={vi.fn()}
+      onInsertVariable={vi.fn()}
+      onValidate={vi.fn()}
       onFormat={vi.fn()}
       onFullscreen={vi.fn()}
     />,
@@ -98,7 +106,9 @@ test("Prompt 编辑区内容不参与外层卡片高度计算", () => {
       }}
       templateTypeOptions={[{ label: "个股综合模板", value: "stock_full" }]}
       onChange={vi.fn()}
-      onToolAction={vi.fn()}
+      onSearch={vi.fn()}
+      onInsertVariable={vi.fn()}
+      onValidate={vi.fn()}
       onFormat={vi.fn()}
       onFullscreen={vi.fn()}
     />,
@@ -116,7 +126,9 @@ test("只读 Prompt 内容区保持可滚动而不是禁用控件", () => {
       readOnly
       templateTypeOptions={[{ label: "个股综合模板", value: "stock_full" }]}
       onChange={vi.fn()}
-      onToolAction={vi.fn()}
+      onSearch={vi.fn()}
+      onInsertVariable={vi.fn()}
+      onValidate={vi.fn()}
       onFormat={vi.fn()}
       onFullscreen={vi.fn()}
     />,

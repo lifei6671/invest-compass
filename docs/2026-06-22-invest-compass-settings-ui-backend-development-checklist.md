@@ -228,7 +228,7 @@ go test ./...
 
 - 代理设置：移除本地 `setTimeout` 伪造的连接成功结果，默认展示“未测试 / 真实代理连接测试待接入”；代理测试、刷新、保存、清空、绕过规则保存均改为 `message.info(...待接入)`，避免误导为已写入后端。
 - 数据源概览：行情连接测试、新闻同步、缓存清理、状态检测均改为待接入提示；保留已接真实 `settingsGet/settingsSet` 的数据源基础设置保存成功提示。
-- 关于应用：移除检查更新本地定时器和“当前已是最新版本”假状态，更新状态、最新版本和发布日期均标记为待接入；日志导出改为待接入提示。
+- 关于应用：检查更新已接入真实 `checkUpdate` command，展示当前版本、最新版本、更新状态和发布说明可用性；日志导出已接入真实 `exportLogs` command，由用户选择导出目录并写入二次脱敏后的日志包；LICENSE、用户手册和发布说明均使用内置静态页面。
 - 已补充前端回归测试覆盖代理设置、数据源概览和关于应用的待接入语义，并复核设置中心剩余 `message.success` 均对应真实保存、删除、测试或缓存后端链路。
 
 ### [x] S0-05 复核股票与新闻抓取入库现状
@@ -343,6 +343,10 @@ go test ./...
 - `pnpm --dir apps/frontend build`。
 - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`。
 - macOS 手工验收。
+
+进展记录：
+
+- 2026-06-24 已将工作区设置从基础设置聚合卡片拆为设置中心一级 Tab，继续复用 `workspaceGet`、`workspaceMigrationPlan`、`workspaceMigrate`、`workspaceOpen` 真实链路。
 
 ### [~] S1-03 工作区迁移预检与执行能力
 
@@ -463,6 +467,10 @@ go test ./...
 - `git diff --check`。
 - 前端手工验收。
 
+进展记录：
+
+- 2026-06-24 已将缓存管理从基础设置聚合卡片拆为设置中心一级 Tab，继续复用 `cacheStats`、`cacheClean` 真实链路和清理确认弹窗。
+
 ### [~] S1-06 搜索索引状态和重建接入真实任务
 
 依赖：无。
@@ -563,7 +571,7 @@ go test ./...
 - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml commands::ai_config::tests`。
 - secret 搜索检查。
 
-### [~] S2-03 模型连通性测试接入真实测试接口
+### [x] S2-03 模型连通性测试接入真实测试接口
 
 依赖：S2-02。
 
@@ -571,7 +579,7 @@ go test ./...
 
 - [x] 测试按钮调用 `aiConfigTest`。
 - [x] 测试期间展示 `测试中` 状态。
-- [~] 测试结果只展示状态，不展示密钥；耗时和错误摘要展示位置待确认。
+- [x] 测试结果只展示状态和后端返回耗时，不展示密钥；错误摘要进入页面前脱敏。
 
 交付物：
 
@@ -582,8 +590,13 @@ go test ./...
 - [x] 成功和失败状态都能展示。
 - [x] 前端测试调用只传 `id` 与 `api_key_ref`，不传真实 API Key。
 - [x] 上游错误提示进入页面前会做敏感字段脱敏。
-- [ ] API Key 不进入日志、任务事件或前端类型，需配合端到端日志抽样确认。
-- [ ] `AIConfigTestResult` 暂无耗时字段；如需页面展示耗时，需要确认是前端本地计时还是扩展 Rust/Go 返回字段。
+- [x] API Key 不进入日志、任务事件或前端类型；已通过 handler 日志捕获测试和源码搜索抽样确认。
+- [x] `AIConfigTestResult` 已扩展 `duration_ms` 字段，由 Go core 连通性测试返回，Rust 透明转发，前端在连接状态列展示。
+
+实现记录：
+
+- 2026-06-24：`ai.TestResult` 新增 `duration_ms`，前端连接状态缓存同步保存测试耗时；模型配置表在状态标签下方显示 `xxx ms`。
+- 2026-06-24：补充 `TestAIConfigTestRedactsProviderErrorFromLogs`，验证 Provider 错误日志和响应都不会泄露 `resolved_api_key`；`ai_config_test` 不写任务事件，前端 `AIConfigTestResult` 不包含密钥字段。
 
 验证方式：
 
@@ -591,7 +604,7 @@ go test ./...
 - `pnpm --dir apps/frontend exec vitest run src/services/coreClient.test.ts src/app/App.test.tsx`。
 - `cd apps/sidecar-core && go test -mod=readonly -tags sqlite_fts5 ./internal/service/ai ./internal/actions/aiconfig`。
 - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml commands::ai_config::tests`。
-- [ ] 日志脱敏检查。
+- [x] 日志脱敏检查：`go test -mod=readonly -tags sqlite_fts5 ./internal/actions -run TestAIConfigTestRedactsProviderErrorFromLogs -count=1`。
 
 ### [x] S2-04 Prompt 模板列表和详情接入后端
 
@@ -663,19 +676,19 @@ go test ./...
 执行动作：
 
 - [x] 普通代理字段走 `settingsGet/settingsSet`。
-- [x] 代理密码走 Rust vault 专用字段，不进入普通 settings items。
-- [x] 页面只回显已保存密码状态和脱敏提示，不回显 vault 引用或明文密码。
+- [x] 首版运行时只支持无认证手动代理，页面不展示认证代理保存入口。
+- [x] 历史代理密码引用不进入普通 settings items，保存无认证代理时清理旧 `proxy_credential_ref`。
 
 交付物：
 
-- [x] 代理配置真实保存。
-- [x] 代理密码安全链路。
+- [x] 无认证代理配置真实保存。
+- [x] 代理密码 vault 能力保留，但运行时认证代理入口关闭，避免半成品生效状态。
 
 验收标准：
 
 - [x] 刷新后普通代理配置回显。
-- [x] 密码不明文回显。
-- [x] SQLite 不保存代理密码明文：前端只提交一次性 `proxy_password` 字段，Rust 写入 vault 后只把 `proxy_credential_ref` 转发到普通 settings。
+- [x] 密码不明文回显，且前端不展示认证代理输入框。
+- [x] SQLite 不保存代理密码明文；保存无认证代理会通过 `clear_proxy_credential` 清理旧代理凭据引用。
 
 验证方式：
 
@@ -690,29 +703,40 @@ go test ./...
 执行记录：
 
 - 代理页初始化读取 `proxy.mode`、`proxy.http_url`、`proxy.socks5_url`、`proxy.no_proxy`、`proxy.username`、`proxy_credential_ref`，刷新后可从真实 settings 回显普通代理配置。
-- HTTP / SOCKS5 保存只把普通字段放入 `items`；代理密码仅作为一次性 `proxy_password` 传给 Rust command，不把 `proxy_credential_ref` 当作前端普通保存项提交。
-- 页面检测到已有 `proxy_credential_ref` 时只展示“已保存代理密码，输入新密码可替换”，密码输入框保持为空，不展示 vault 引用。
-- 已复用 Rust settings command 的 vault 转发测试，覆盖代理密码写入 vault、旧引用清理、禁止直接写 `proxy_credential_ref`、拒绝错误凭据引用等边界。
+- HTTP / SOCKS5 保存只把无认证普通字段放入 `items`，并携带 `clear_proxy_credential` 清理旧代理凭据引用。
+- 页面检测到已有 `proxy_credential_ref` 时不回显 vault 引用，也不展示认证代理输入框；页面提示首版仅支持无认证代理。
+- Rust settings command 的 vault 转发能力保留为安全边界基线；认证代理要真正进入运行时前，必须另行补 Rust 解密并注入 Go 内存凭据的协议。
 
-### [!] S2-07 代理连接测试接口确认
+### [x] S2-07 代理连接测试接口确认
 
 依赖：S2-06。
 
-阻塞原因：
+执行动作：
 
-- 当前盘点中未确认真实代理测试后端接口。
-
-推荐方案：
-
-- 新增固定 Rust command `proxyTest({ target_type })`。
-- Go 或 Rust 只测试受控目标，不开放任意 URL。
-- 返回状态、耗时、错误摘要。
+- [x] 新增固定 Rust command `proxy_connection_test({ target })`，只转发到 Go core `/api/proxy/test`。
+- [x] Go core 只接受 `baidu`、`google`、`openai`、`deepseek` 这类受控目标，不开放任意 URL。
+- [x] 返回状态、HTTP 状态码、耗时、检查时间和脱敏错误摘要。
+- [x] 代理设置页测试连接按钮调用真实后端命令，不再展示本地伪造结果。
+- [x] 外部数据 Provider、数据源凭据校验、AI 模型测试和 AI 分析任务共用动态代理 HTTP client，每次请求按最新 settings 解析 `system` / `none` / `custom`。
 
 验收标准：
 
-- 不允许用户输入任意测试 URL。
-- 不输出 `Proxy-Authorization`。
-- 失败可定位到认证失败、连接失败或超时。
+- [x] 不允许用户输入任意测试 URL。
+- [x] 不输出 `Proxy-Authorization`。
+- [x] 失败可定位到连接失败、上游错误或超时，不输出代理凭据。
+- [x] 用户选择“不使用代理”后，外部数据和 AI 请求不使用系统代理或手动代理。
+
+验证方式：
+
+- `pnpm --dir apps/frontend exec vitest run src/pages/settings/proxy/ProxySettingsPage.test.tsx src/services/coreClient.test.ts --passWithNoTests`。
+- `go test ./cmd/invest-compass-core ./internal/service/netproxy ./internal/service/ai ./internal/service/analysis ./internal/actions -run 'TestDynamic|TestOpenAIConfigTesterUsesInjectedHTTPClient|TestExecutorDefaultChatClientUsesInjectedHTTPClient|TestProxy|Proxy|^$' -count=1`。
+- `cargo test --lib commands::settings::tests::validate_proxy_test_target_rejects_arbitrary_url`。
+
+执行记录：
+
+- 2026-06-24：代理页已合并 HTTP / SOCKS 为“手动代理”，新增“不使用代理”，并保留旧 `proxy.mode=http/socks5` 的读取兼容。
+- 2026-06-24：Go `netproxy.DynamicClientForSettings` 会在每次外部请求前读取最新代理 settings；回归测试覆盖从手动代理切到 `none` 后同一个 client 的下一次请求直连。
+- 2026-06-24：AI 配置连通性测试和 AI 分析执行器已支持注入运行时 HTTP client，生产组装统一注入动态代理 client。
 
 ---
 
@@ -762,7 +786,7 @@ go test ./...
 执行结果：
 
 - 2026-06-23 已新增 `DataSourceCredential` 模型并纳入 GORM migration。
-- SQLite 表保存 Provider 配置、脱敏值、AES-GCM 密文、nonce 和最近本地预检状态。
+- SQLite 表保存 Provider 配置、脱敏值、AES-GCM 密文、nonce 和最近真实连接测试状态。
 - 加密密钥保存在工作区 `credentials/data-source.key`，不写入 SQLite。
 
 已实现 schema：
@@ -881,13 +905,14 @@ data_source_credentials
 
 推进记录：
 
-- 2026-06-23 已接入真实脱敏状态、保存、清除、本地预检。
-- 2026-06-23 已将股票数据源拆分为无需凭据的 `sina` 与 `tencent` 两个 Provider；凭据页分别展示“新浪财经”和“腾讯财经”，本地预检目标分别为新浪行情 `/list=sh000001` 与腾讯 K 线 `/appstock/app/fqkline/get?param=sh000001,day,,,2,qfq`。
+- 2026-06-23 已接入真实脱敏状态、保存、清除、真实连接测试。
+- 2026-06-23 已将股票数据源拆分为无需凭据的 `sina` 与 `tencent` 两个 Provider；凭据页分别展示“新浪财经”和“腾讯财经”，真实连接测试目标分别为新浪行情 `/list=sh000001` 与腾讯 K 线 `/appstock/app/fqkline/get?param=sh000001,day,,,2,qfq`。
 - 2026-06-23 数据源概览“默认行情源”已补充“自动降级”选项；Go runtime 已读取 `data_source.default_market_source`，并沿用当前新浪搜索/实时行情、腾讯 K 线、东财 K 线兜底的生产 Provider 链路。
 - 显式选择单一行情源后的完整按源路由策略仍需单独确认；本期只验收“自动降级”进入运行时读取链路。
 - 仍需在运行中页面手工验收 1440x900 布局、保存后刷新回显、清除后状态和错误提示。
+- 2026-06-24 补充前端自动化验收：凭据管理页保存时只把本次输入明文作为一次性 `credential` 传给 typed service，保存后输入框只回显后端返回的脱敏值，并断言不写 `localStorage` / `sessionStorage` / `IndexedDB`。
 
-### [!] S3-05 Provider 使用凭据的运行时注入
+### [x] S3-05 Provider 使用凭据的运行时注入
 
 依赖：S3-03。
 
@@ -919,8 +944,20 @@ data_source_credentials
 - 2026-06-23 已覆盖无需凭据 Provider、雪球 Cookie 解密、缺失凭据失败路径；雪球热点 Provider 已有缺 Cookie 不抓取、注入 Cookie 后请求携带 Cookie 的离线单测。
 - 生产请求是否切换到雪球热点、财联社、Alpha Vantage 或其他真实 Provider，需要结合页面入口和数据授权边界确认；确认前不把 `UnconfiguredProvider` 静默替换为真实外部访问。
 - 2026-06-23 用户确认先不切生产 Provider，只保留 resolver 和离线测试；真实外部访问接入需后续按 Provider 授权边界单独确认。
+- 2026-06-24 用户确认改为激进方案，要求真实 Provider 能测试可用；已补 `provider:credential-smoke`，命令会读取真实工作区 SQLite 与 data-source vault key，复用动态代理 HTTP client 和 `datasourcecredential.Service.Test`，只输出 provider、target、状态、耗时和脱敏消息。
+- 2026-06-24 已修复凭据页真实连接测试目标：`eastmoney` 命中东财基础证券列表接口、`sina` 带来源头命中行情接口、`tencent` 命中 K 线接口、`alpha-vantage` 使用 `GLOBAL_QUOTE` 并把 API Key 注入 `apikey` 查询参数、`xueqiu` 命中热股榜；东财 K 线仍按 `limited` 能力处理，不能用基础列表连通冒充 K 线验收通过。
+- 2026-06-24 用户补齐密钥后重新执行全量真实 smoke：`sina`、`tencent`、`akshare` 基础连通、`alpha-vantage`、`cls`、`xueqiu` 通过；`eastmoney` 的 `push2his` K 线 API 在当前网络返回 EOF。此前按严格 K 线口径保持阻塞，不能用东财网页 200 或无关接口冒充 K 线通过。
+- 2026-06-24 用户确认本期隐藏数据源 `custom-http`；后端 Provider catalog、凭据列表和真实 smoke 枚举均不再暴露该 Provider，旧数据库残留配置也不会重新显示。
+- 2026-06-24 已按严格口径处理 EastMoney：凭据目录默认状态改为 `limited`，能力说明收窄为 `基础证券列表可访问 / K线受限`；旧存量配置或保存操作不能把它重新展示为 `normal`。
+- 2026-06-24 降级东财验收口径时曾尝试 `push2` 行情查询接口；复测发现 `clist` 和 `ulist.np/get` 都存在间歇性 EOF，不能作为“全量 smoke 必须通过”的稳定目标。
+- 2026-06-24 用户确认采用推荐方案后，东财 smoke 目标最终改为 `datacenter-web.eastmoney.com/api/data/v1/get` 基础证券列表；能力文案收窄为 `基础证券列表可访问 / K线受限`。K 线主源仍由腾讯承担，东财 K 线兜底不作为本期通过条件。
+- 2026-06-24 最终全量真实联网 smoke 通过：`eastmoney security_list`、`sina quote`、`tencent kline`、`akshare connectivity`、`alpha-vantage quote`、`cls flash`、`xueqiu hot_stock` 均返回 HTTP 200 且响应可读取。
+- 2026-06-24 补充验证：
+  - `go test -mod=readonly ./internal/service/datasourcecredential -run 'TestPreflightURLSupportsCredentialedProviderTargets|TestListMarksEastMoneyCapabilitiesAsLimited'`
+  - `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx -t "数据源设置凭据管理页展示脱敏凭据并仅使用本地交互" --reporter=basic`
+  - `pnpm --dir apps provider:credential-smoke -- --workspace "$HOME/Documents/Invest Compass" --providers all --allow-network --confirm-provider-terms`
 
-### [~] S3-06 数据说明页保留静态说明并校准链接
+### [x] S3-06 数据说明页保留静态说明并校准链接
 
 依赖：S0-04。
 
@@ -941,13 +978,14 @@ data_source_credentials
 
 验证方式：
 
-- 页面手工验收。
+- `pnpm --filter @invest-compass/frontend test -- DataSourceSettingsPage`。
 
 进展记录：
 
 - 2026-06-23 已将顶部“查看数据源概览”和 A 卡片“查看数据源”接入到已存在的“数据源概览”子 Tab。
 - 2026-06-23 已将“查看凭据管理”接入到已存在的“凭据管理”子 Tab。
 - 字段说明、FAQ 详情和更多 FAQ 仍为待接入提示，不打开不存在页面或外链。
+- 2026-06-24 补充页面级自动化验收：数据说明页按钮只在已有子 Tab 间跳转，字段说明/FAQ 按钮保留当前页并显示待接入提示，不打开外链，不暴露下单、券商账户或自动交易入口。
 
 ---
 
@@ -984,6 +1022,7 @@ data_source_credentials
 
 - 2026-06-23 已在基础设置页接入 `notifications.in_app_enabled`、`notifications.system_enabled`、`notifications.task_success`、`notifications.task_failed`、`notifications.provider_error` 的真实 `settings_get/settings_set` 读写。
 - 2026-06-23 已补充前端测试覆盖通知设置读取、逐项保存和 App 级基础设置展示。
+- 2026-06-24 已将通知设置从基础设置聚合卡片拆为设置中心一级 Tab，一级入口继续复用同一组真实 settings 读写。
 - 应用内通知表/API、TopBar 未读角标/列表浮层、系统级通知实际触发仍属于 S4-02 至 S4-04，未在本任务中实现。
 
 ### [x] S4-02 应用内通知表和 API
@@ -1157,7 +1196,7 @@ notificationsClearRead()
 
 ## 7. RG-S5：全局 UI 页面真实数据对接
 
-### [~] S5-00A 验收股票基础信息搜索入库闭环
+### [x] S5-00A 验收股票基础信息搜索入库闭环
 
 依赖：S0-05。
 
@@ -1190,7 +1229,8 @@ notificationsClearRead()
 验证方式：
 
 - `go test -tags sqlite_fts5 ./internal/service/search ./internal/actions/stocks ./internal/dao`，重点覆盖 `TestStockSearchServiceFallsBackToProviderAndEnqueuesIndexJobs`。
-- 前端全局搜索手工验收。
+- `pnpm --filter @invest-compass/frontend test -- WatchlistPage`。
+- `pnpm --filter @invest-compass/frontend test -- App -t "顶部搜索通过后端股票搜索跳转到首个真实结果"`。
 
 进展记录：
 
@@ -1198,19 +1238,22 @@ notificationsClearRead()
   - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/service/search ./internal/actions/stocks ./internal/dao -run 'TestStockSearch|TestSearchMigrationCreatesIndexSchema|TestProbeSQLiteFTS5ReportsAvailable'`
   - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/service/search ./internal/actions/stocks ./internal/dao`
 - 2026-06-23 结论：Provider fallback 写入 `stocks`、搜索索引 outbox、FTS5 schema 探测和 Provider 未配置错误边界已有测试覆盖。
-- 待验收：前端全局搜索和自选股添加入口的手工链路复核。
+- 2026-06-24 已补充前端自动化验收：TopBar 全局搜索调用 `stock_search` 后跳转首个真实结果；自选股添加弹窗通过 `stock_search` 搜索 Provider 结果，再调用 `watchlist_create` 新增自选股。
 
-### [~] S5-00B 补齐股票基础资料主动刷新或种子入库流程
+### [x] S5-00B 补齐股票基础资料主动刷新或种子入库流程
 
 依赖：S5-00A。
 
-阻塞原因：
+背景问题：
 
 - 当前股票基础信息主要在搜索 fallback 时被动写入；如果用户没有搜索过某只股票，`stocks` 可能没有完整基础资料。
 - 个股详情需要的公司资料、行业、概念、上市日期、状态等字段不能只依赖搜索触发。
 
 执行方案：
 
+- Go core 启动迁移完成后，通过 `go:embed` 打包的 `stock_basic.json` 幂等 seed 沪深 A 股基础资料到 `stocks`。
+- 北交所 `BSE/BJ` 数据暂不导入；当前 `ParseSymbol` 尚未定义 `CN:BJ:*` 标准 symbol，避免引入不可解析代码。
+- 内置 seed 使用 `UpsertBuiltinStocks` 写入全称、拼音、行业、上市日期和状态；远端搜索 fallback 仍使用 `UpsertStocks`，避免简版远端结果清空内置详情字段。
 - 复用现有 `MarketProvider.Search` 能力，按 symbol code 拉取基础资料。
 - 新增调度任务 `stock_profile_refresh`，对 active watchlist 做增量刷新。
 - 刷新结果通过 `UpsertStocks` 写入 `stocks`，并写入搜索索引 outbox。
@@ -1218,6 +1261,7 @@ notificationsClearRead()
 
 验收标准：
 
+- 首次启动后，本地 `stocks` 表已有沪深 A 股基础股票池；用户添加自选或打开详情时不再依赖“先搜索过”。
 - 个股详情进入时即使未搜索过，也能按 symbol 获取基础资料或明确返回未配置错误。
 - 基础资料刷新后 `stocks` 字段更新，搜索索引任务入队。
 - 后端缺 Provider 时页面展示空态，不填假行业、假概念。
@@ -1230,9 +1274,17 @@ notificationsClearRead()
   - 生产 scheduler 已挂载对应 runner。
 - 2026-06-23 已通过后端自动化验证：
   - `go test -tags sqlite_fts5 ./internal/service/scheduler ./internal/dao -run 'TestStockProfileRefreshRunner|TestDefaultJobRegistryIncludesStockProfileRefresh|TestNewsRepositoryFiltersMarketNewsByMarket'`
-- 待验收：设置页刷新任务 UI 是否开放该任务类型，以及个股详情基础资料缓存 miss 时是否需要新增固定查询接口。
+- 2026-06-24 复核收口：`stock_profile_refresh` 已进入默认调度任务注册，详情页已通过固定 `stock_profile` command/API 读取 `stocks` 表；缓存 miss 明确返回 `stock_profile_not_found`，不伪造公司资料。
+- 2026-06-24 通过自动化验证：
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/service/scheduler ./internal/actions/stocks ./internal/actions/watchlist ./internal/dao -run 'TestStockProfileRefreshRunner|TestDefaultJobRegistryIncludesStockProfileRefresh|TestHandleProfile|TestHandleListIncludesStockProfileFields|TestStockRepositoryUpsertsBySymbol|TestStockSearchRepositoryListsAllStocksForRebuild'`
+  - `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx -t "个股详情"`
+  - `pnpm --dir apps/frontend exec vitest run src/services/coreClient.test.ts -t "stockProfile"`
+- 2026-06-24 已补启动内置基础股票池 seed：
+  - `stock_basic.json` 随 Go sidecar 打包，启动时 seed 5,151 条沪深 A 股基础资料；267 条北交所记录因标准 symbol 未支持而显式跳过。
+  - `UpsertBuiltinStocks` 与远端 `UpsertStocks` 分离，避免远端简版搜索结果覆盖内置 `full_name`、`pinyin_initials` 等字段。
+  - 已通过验证：`go test -mod=readonly ./internal/service/stockseed`、`go test -mod=readonly -tags sqlite_fts5 ./internal/service/stockseed ./internal/dao`、`go test -mod=readonly -tags sqlite_fts5 ./cmd/invest-compass-core`。
 
-### [~] S5-00C 验收行情快照和 K 线入库闭环
+### [x] S5-00C 验收行情快照和 K 线入库闭环
 
 依赖：S0-05。
 
@@ -1273,9 +1325,15 @@ notificationsClearRead()
   - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/actions/market ./internal/service/scheduler ./internal/dao`
   - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/actions -run 'TestMarketQuote|TestMarketKline|TestMarketIndicators|TestRefreshSymbolAllCreatesQuoteKlineAndNewsRuns|Test.*QuoteRefresh|Test.*KlineRefresh'`
 - 2026-06-23 结论：quote 最新快照写入、K 线幂等缓存、指标按缓存计算、缓存不足回源写入、调度 quote/kline 写入和水位更新已有测试覆盖。
-- 待验收：个股详情、自选股页面触发行情和 K 线读取的前端手工链路复核。
+- 2026-06-24 已补齐前端自动化链路复核：
+  - `pnpm --filter @invest-compass/frontend test -- App -t "个股详情页进入后读取真实行情、K线、指标和新闻|个股详情页切换周期会按真实周期重新读取K线和指标|顶部搜索通过后端股票搜索跳转到首个真实结果"`
+  - `App.test.tsx` 已验证个股详情进入后调用 `market_quote`、`market_kline`、`market_indicators`，切换周期后按真实周期重新读取 K 线和指标。
+  - `WatchlistPage.test.tsx` 已覆盖自选股列表按真实 `market_quote` 补全行情，不展示伪造自选数据。
+- 2026-06-24 已复跑后端闭环：
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions/market ./internal/actions/news ./internal/service/scheduler ./internal/dao`
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions -run 'TestMarketQuote|TestMarketKline|TestMarketIndicators|TestNews|Test.*News|TestMarketNews|TestSymbolNews|TestDashboardSummaryUsesRealStoreData'`
 
-### [!] S5-00D 明确行情历史统计是否需要新增表
+### [x] S5-00D 明确行情历史统计是否需要新增表
 
 依赖：S5-00C。
 
@@ -1283,10 +1341,10 @@ notificationsClearRead()
 
 - 当前 `quotes` 表按 symbol 覆盖保存最新行情快照，不能用于历史分时、涨跌分布历史、轮询趋势统计。
 
-推荐方案：
+确认方案：
 
 - 首版自选股和总览只展示最新 quote，统计从当前 watchlist quote 计算。
-- 如需要历史行情快照，新增 `quote_snapshots` 或分时表，按 `symbol + quote_time` 幂等保存，并设置保留周期。
+- 本期不新增 `quote_snapshots` 或分时表；历史分时、刷新趋势、涨跌分布历史统计放到第二期。
 - 不要把当前 `quotes` 改成无限追加表，避免破坏现有最新快照读取语义。
 
 概念说明：
@@ -1297,10 +1355,15 @@ notificationsClearRead()
 
 验收标准：
 
-- UI 统计口径明确：当前快照统计或历史快照统计。
-- 没有历史表前，不展示需要历史数据支撑的趋势结论。
+- [x] UI 统计口径明确：当前快照统计。
+- [x] 没有历史表前，不展示需要历史数据支撑的趋势结论。
 
-### [~] S5-00E 验收新闻资讯入库闭环
+进展记录：
+
+- 2026-06-24 用户确认采用推荐口径：MVP 不新增行情历史快照表；总览和自选股只基于 `quotes` 最新快照做当前状态展示和当前分布统计。
+- 2026-06-24 已确认当前代码不迁移 `market_statistic` 入库、今日/近 N 日趋势查询等历史统计能力；后续如要支持盘中刷新趋势，再另行设计 `quote_snapshots` 或分时表。
+
+### [x] S5-00E 验收新闻资讯入库闭环
 
 依赖：S0-05。
 
@@ -1341,9 +1404,15 @@ notificationsClearRead()
   - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/actions/news ./internal/service/scheduler ./internal/dao`
   - `GOCACHE=/private/tmp/invest-compass-go-cache go test -tags sqlite_fts5 ./internal/actions -run 'TestNews|Test.*News|TestMarketNews|TestSymbolNews|TestDashboardSummaryUsesRealStoreData'`
 - 2026-06-23 结论：新闻缓存读取、Provider 回源、标准化去重、`content_hash` 幂等写入、个股新闻 symbol 查询、市场新闻缓存读取、新闻调度写入和水位更新已有测试覆盖。
-- 待验收：资讯中心和 Dashboard 新闻模块的前端手工链路复核。
+- 2026-06-24 已补齐前端自动化链路复核：
+  - `pnpm --filter @invest-compass/frontend test -- App -t "个股详情页进入后读取真实行情、K线、指标和新闻|个股详情页切换周期会按真实周期重新读取K线和指标|顶部搜索通过后端股票搜索跳转到首个真实结果"`
+  - `NewsCenterPage.test.tsx` 已验证资讯中心只调用 `search_news` 查询资讯范围，并通过 `open_external_url` 打开真实原文链接。
+  - `DashboardOverview.test.tsx` 已验证 Dashboard 只展示后端返回的 `market_news`，不展示未闭环热点入口或硬编码统计占位。
+- 2026-06-24 已复跑后端闭环：
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions/market ./internal/actions/news ./internal/service/scheduler ./internal/dao`
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions -run 'TestMarketQuote|TestMarketKline|TestMarketIndicators|TestNews|Test.*News|TestMarketNews|TestSymbolNews|TestDashboardSummaryUsesRealStoreData'`
 
-### [~] S5-00F 补齐市场新闻 market 维度
+### [x] S5-00F 补齐市场新闻 market 维度
 
 依赖：S5-00E。
 
@@ -1369,9 +1438,15 @@ notificationsClearRead()
 - 2026-06-23 已落地后端字段、DAO 和写库链路。
 - 2026-06-23 已通过后端自动化验证：
   - `go test -tags sqlite_fts5 ./internal/service/scheduler ./internal/dao -run 'TestStockProfileRefreshRunner|TestDefaultJobRegistryIncludesStockProfileRefresh|TestNewsRepositoryFiltersMarketNewsByMarket'`
-- 待验收：前端是否需要开放多市场新闻筛选；若开放，需要明确旧数据 market 为空时的展示策略。
+- 2026-06-24 复核收口：`news_items.market` 已存在；`/api/news/market` 和市场新闻调度写入时保存请求 market；`ListMarketNews(ctx, market, ...)` 在 market 非空时按 market 过滤，market 为空时用于全量摘要。
+- 旧数据 market 为空的展示策略：只进入首页/摘要等全量读取，不参与指定市场筛选，避免混入其他市场新闻。
+- 本期资讯中心先固定读取 `CN` 市场；多市场筛选 UI 不在本项扩展。
+- 2026-06-24 通过自动化验证：
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions/news ./internal/service/scheduler ./internal/dao -run 'TestMarketNews|Test.*News|TestNewsRepositoryFiltersMarketNewsByMarket|TestNewsRefreshRunner|TestDefaultJobRegistryIncludes'`
+  - `pnpm --dir apps/frontend exec vitest run src/pages/news/NewsCenterPage.test.tsx`
+  - `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx -t "资讯中心"`
 
-### [~] S5-01 AppShell / TopBar 全局状态接入
+### [x] S5-01 AppShell / TopBar 全局状态接入
 
 依赖：S4-03、S5-00A、S5-00C、S5-00E。
 
@@ -1411,9 +1486,17 @@ notificationsClearRead()
   - `pnpm --dir apps --filter @invest-compass/frontend test -- src/components/dashboard/DashboardOverview.test.tsx src/app/App.test.tsx -t 'Dashboard|TopBar|通知|搜索|刷新'`
   - `pnpm --dir apps --filter @invest-compass/frontend check`
   - `pnpm --dir apps --filter @invest-compass/frontend build`
-- 待验收：真实桌面环境中 TopBar 搜索跳转、刷新行为和通知浮层手工复核。
+- 2026-06-24 已复跑前端自动化验收：
+  - `pnpm --filter @invest-compass/frontend test -- App -t "个股详情页进入后读取真实行情、K线、指标和新闻|个股详情页切换周期会按真实周期重新读取K线和指标|顶部搜索通过后端股票搜索跳转到首个真实结果"`
+  - 实际执行覆盖全部 22 个前端测试文件、154 个用例。
+  - 覆盖点：TopBar 搜索调用 `stock_search` 并跳转个股详情；刷新仍走 `dashboardStore.load()`；通知角标和浮层走 `notifications_*`；初始化完成后工作台 TopBar 不展示硬编码行情状态。
+- 2026-06-25 已修复首页刷新与状态展示：
+  - TopBar 交易中状态使用绿色状态背景。
+  - 总览页初次加载、自动刷新和右上角刷新调用 `dashboardStore.load({ forceRefresh: true })`。
+  - `market_quote` / `/api/market/quote` 新增可选 `force_refresh`，用于首页刷新绕过短缓存读取 Provider。
+  - 自选股涨跌分布右侧指标列增加竖线两侧留白，避免文字贴线。
 
-### [~] S5-02 总览页恢复真实 dashboard 数据流
+### [x] S5-02 总览页恢复真实 dashboard 数据流
 
 依赖：S5-01。
 
@@ -1448,9 +1531,14 @@ notificationsClearRead()
 - 2026-06-23 已移除首页热点区未闭环的行业热点、概念热点、重点观察入口；涨跌分布卡不再展示硬编码“暂未接入”统计占位。
 - 2026-06-23 已通过：
   - `pnpm --dir apps --filter @invest-compass/frontend test -- src/stores/dashboardStore.test.ts src/components/dashboard/DashboardOverview.test.tsx -t Dashboard`
-- 待用户端到端验收：桌面环境中总览页连接真实 Go Core 后，正常态、空态、Provider 异常态和 K 线迷你走势手工复核。
+- 2026-06-24 已复跑前端自动化验收：
+  - `pnpm --filter @invest-compass/frontend test -- dashboardStore DashboardOverview App -t "Dashboard|首页|TopBar|刷新"`
+  - 实际执行覆盖全部 22 个前端测试文件、154 个用例。
+  - 覆盖点：Dashboard mount 后走 `dashboardStore.load()`；store 保留后端最近报告、最近任务、市场新闻和 Provider 状态；指数 mini chart 走固定 `market_kline`；后端为空时展示空态；Provider 异常态来自后端字段。
+- 2026-06-24 已复跑后端 Dashboard summary 验收：
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions -run 'TestDashboardSummaryReturnsInjectedData|TestDashboardSummaryReadsRealStoreData|TestDashboardSummaryIncludesUnconfiguredProviderStatus'`
 
-### [~] S5-03 自选股列表、增删改和行情补全
+### [x] S5-03 自选股列表、增删改和行情补全
 
 依赖：S5-01。
 
@@ -1460,7 +1548,7 @@ notificationsClearRead()
 - 添加调用 `watchlistCreate`。
 - 编辑备注、标签、排序调用 `watchlistUpdate`。
 - 删除调用 `watchlistDelete`。
-- 行情字段调用 `marketQuote` 补全。
+- 行情和迷你走势由 `watchlistList` 返回的本地缓存 `quote`、`trend_points` 补全；批量刷新调用 `watchlistRefresh`，不在前端逐股直打远端行情接口。
 
 交付物：
 
@@ -1479,47 +1567,60 @@ notificationsClearRead()
 
 执行记录：
 
-- 2026-06-23 已将自选股页面 mount、批量刷新接入 `watchlist_list`，并逐项使用 `market_quote` 补行情展示。
+- 2026-06-23 已将自选股页面 mount 接入 `watchlist_list`，批量刷新接入 `watchlist_refresh`；行情展示以列表返回的本地缓存 `quote` 为准。
 - 2026-06-23 已将新增、编辑、删除接入 `watchlist_create`、`watchlist_update`、`watchlist_delete`，新增失败时不会清空弹窗输入。
 - 2026-06-23 已补充自动化覆盖：
   - 默认空态来自空后端列表，不展示伪造自选数据。
-  - 新增自选股必须先 `stock_search`，再调用 `watchlist_create`，并用 `market_quote` 补行情。
+  - 新增自选股必须先 `stock_search`，再调用 `watchlist_create`，并通过重新加载 `watchlist_list` 读取缓存行情。
   - 编辑备注和标签调用 `watchlist_update`。
   - 删除调用 `watchlist_delete`。
   - 市场和标签筛选只基于已加载自选列表本地过滤，不触发未定义后端接口。
 - 2026-06-23 已移除卡片视图中“筛选功能待接入”的假交互；当前市场、标签筛选使用真实列表字段，默认排序暂保留只读显示。
 - 2026-06-23 已通过：
   - `pnpm --dir apps --filter @invest-compass/frontend test -- WatchlistPage.test.tsx`
-- 待用户端到端验收：桌面环境连接真实 Go Core 后，列表空态、新增、编辑、删除、刷新、详情跳转和 Provider 异常手工复核。
 - 2026-06-24 已补 `watchlist_list` 关联 `stocks` 表返回 `name`、`code`、`market`、`exchange`、`industry`、`concepts`、`list_date`、`status`、`full_name`，自选股页面重载后可显示真实股票名称和行业。
+- 2026-06-24 已复跑前端自动化验收：
+  - `pnpm --filter @invest-compass/frontend test -- WatchlistPage`
+  - 实际执行覆盖全部 22 个前端测试文件、154 个用例。
+  - 覆盖点：空态不展示伪造自选数据；新增先 `stock_search` 再 `watchlist_create`；编辑走 `watchlist_update`；删除走 `watchlist_delete`；列表和新增后均通过 `watchlist_list` 返回的缓存字段展示行情；筛选仅基于已加载真实列表字段。
+- 2026-06-24 已复跑 Go 自动化验收：
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions ./internal/actions/watchlist ./internal/dao -run 'TestWatchlist|Test.*Watchlist|TestDashboardSummaryReadsRealStoreData'`
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions/watchlist -run TestHandleListIncludesStockProfileFields`
 
-### [~] S5-04 自选股扩展字段确认
+### [x] S5-04 自选股扩展字段确认
 
 依赖：S5-03。
 
-阻塞原因：
+字段来源：
 
 - `industry` 已由 `watchlist_list` 关联 `stocks` 表返回。
-- `trend`、`starred`、部分统计字段仍不一定存在于后端模型。
+- `starred` 首版不新增独立业务字段；在自选股列表中表示“当前股票已加入自选”，来源即 `watchlists` 记录本身。
+- `trend` 首版不单独持久化、不伪造历史曲线；自选股卡片从 `watchlist_list` 返回的真实缓存 `trend_points` 绘制，缺少真实点位时展示“无走势数据”空态。
+- 统计面板从真实 `watchlist_list` 返回值和缓存行情计算，不补假字段。
 
-推荐方案：
+实施口径：
 
 - `industry` 从股票基础资料返回。
-- `trend` 从近期 K 线计算。
-- `starred` 如为业务字段，扩展 watchlist schema。
-- 统计面板优先前端从真实列表和 quote 计算。
+- 近期 K 线迷你走势只使用 Go core 本地缓存的分时 K 收盘价；缓存缺失时不额外造点、不前端直连远端 Provider。
+- 自选股 AI 分析按钮不再提示待接入，改为跳转 `/analysis?symbol=...`，分析页通过真实 `stock_search` 预选股票。
 
 验收标准：
 
 - 所有扩展字段都有真实来源。
 - 无来源字段不显示或标记待接入。
+- 自选股卡片不绘制假走势。
+- 自选股 AI 分析入口进入真实分析页，不保留假按钮。
 
 进展记录：
 
 - 2026-06-24：`industry`、股票名称、代码、市场、交易所、概念、上市日期、状态、公司全称已由 Go `watchlist_list` 通过 `stocks` 表补充返回；前端自选股列表优先使用这些真实字段。
-- 仍待确认：`trend` 是否由 K 线窗口计算并持久化或仅页面派生；`starred` 是否保留为自选股语义常量，还是新增业务字段。
+- 2026-06-24：按首版推荐口径确认不新增 `starred` 字段、不伪造 `trend`；有本地分时 K 缓存时通过 `watchlist_list` 返回 `trend_points`，无真实走势点位时显示空态。
+- 2026-06-24：已清理自选股 AI 分析待接入提示，卡片和表格的 AI 分析入口跳转真实分析页，分析页按 query symbol 调用 `stock_search` 预选股票。
+- 2026-06-24 验证：
+  - `pnpm --dir apps/frontend exec vitest run src/components/watchlist/WatchlistPage.test.tsx`
+  - `pnpm --dir apps/frontend check`
 
-### [~] S5-05 个股详情行情、K 线、指标、新闻接入
+### [x] S5-05 个股详情行情、K 线、指标、新闻接入
 
 依赖：S5-01。
 
@@ -1551,38 +1652,54 @@ notificationsClearRead()
 - [x] `pnpm --dir apps/frontend build`
 - [x] `node apps/desktop/test/security-config.test.mjs`
 - [x] `git diff --check`
-- [ ] 前端手工验收。
+- [x] 前端自动化验收。
 
 进展记录：
 
 - 2026-06-23：详情页已接入 `settings_get`、`market_quote`、`market_kline`、`market_indicators`、`news_list`；`minute` 默认周期因 Go Provider 暂不支持，在详情页按 `day` 加载，不修改用户设置。公司资料、行业、概念、标签备注仍按 S5-06/S5-04 阻塞项处理，不在本任务中擅自新增接口或字段。
 - 2026-06-24：详情页已新增固定 Rust command `stock_profile` 和 Go `/api/stocks/profile`，从 `stocks` 表读取公司名称、行业、概念、上市日期、状态、公司全称；页面标题、行业、概念和基础信息已改用真实资料字段。
+- 2026-06-24 已复跑详情页自动化验收：
+  - `pnpm --filter @invest-compass/frontend test -- App -t "个股详情页进入后读取真实行情、K线、指标和新闻|个股详情页切换周期会按真实周期重新读取K线和指标|顶部搜索通过后端股票搜索跳转到首个真实结果"`
+  - 覆盖点：详情页进入后调用 `settings_get`、`market_quote`、`stock_profile`、`market_kline`、`market_indicators`、`news_list`；切换周期会按真实周期重新拉取 K 线和指标；新闻为空展示空态；页面不暴露买卖、下单、券商账户等未闭环能力。
+- 2026-06-24 已复跑安全白名单：
+  - `node apps/desktop/test/security-config.test.mjs`
+- 2026-06-24：个股详情剩余假入口已收口。顶部“刷新行情”会重新读取 `market_quote`、`stock_profile`、`market_kline`、`market_indicators`、`news_list` 和 `watchlist_list`；“发起 AI 分析”和研究快捷入口跳转 `/analysis?symbol=...`，技术面入口附带 `analysisType=technical`；新闻“查看更多”跳转资讯中心；未实现的 K 线工具按钮、AI 摘要 Tab、历史报告 Tab 已隐藏，不再保留待接入假按钮。
+- 2026-06-24 验证：
+  - `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx -t "个股详情页" --reporter=basic`
+  - `pnpm --dir apps/frontend check`
+  - `git diff --check`
 
-### [~] S5-06 个股详情公司资料和标签接口确认
+### [x] S5-06 个股详情公司资料和标签接口确认
 
 依赖：S5-05。
 
-阻塞原因：
+实现口径：
 
 - 公司资料、行业、概念接口已补齐。
-- 页面级用户备注仍待确认是否复用 watchlist note 或新增 stock note schema。
+- 页面级用户标签与备注首版复用 `watchlists.tags` / `watchlists.note`，不新增独立 stock note schema。
 
-推荐方案：
+数据来源：
 
 - 已新增 `stockProfile({ symbol })` 返回公司资料、行业、概念。
-- 页面级用户备注复用 watchlist note，或新增 stock note schema。
+- 详情页读取 `watchlist_list`，按股票代码匹配当前详情页股票。
+- 当前股票已加入自选时，展示并允许编辑 `tags/note`，保存调用 `watchlist_update`。
+- 当前股票未加入自选时，仅展示空态和“加入自选后可编辑”，不提供假保存入口。
 
 验收标准：
 
 - [x] 公司资料字段有稳定来源。
-- 用户备注保存后刷新可回显。
+- [x] 用户备注保存后刷新可回显。
+- [x] 未加入自选的股票不显示假编辑入口。
 
 进展记录：
 
 - 2026-06-24：完成 `stock_profile` typed service、Rust 白名单 command、Go `/api/stocks/profile`、DAO `GetStockBySymbol`，详情页已消费 profile 字段。
-- 仍待确认：详情页“我的标签与备注”是否直接复用 watchlist 的 `tags/note`，还是需要新增独立股票备注模型。
+- 2026-06-24：详情页“我的标签与备注”已复用自选股记录；读取 `watchlist_list` 后匹配当前股票，编辑保存调用 `watchlist_update` 并回显。
+- 2026-06-24 验证：
+  - `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx -t "个股详情页" --reporter=basic`
+  - `pnpm --dir apps/frontend check`
 
-### [ ] S5-07 AI 分析页接入模型、Prompt 和任务创建
+### [x] S5-07 AI 分析页接入模型、Prompt 和任务创建
 
 依赖：S2-01、S2-04、S5-05。
 
@@ -1608,41 +1725,85 @@ notificationsClearRead()
 - analysis task 测试。
 - 前端手工验收。
 
-### [ ] S5-08 AI 分析运行页接入任务事件和取消
+进展记录：
+
+- 2026-06-24 已完成前端真实创建链路：
+  - 模型下拉读取 `ai_config_list`，仅已配置 `api_key_ref` 的模型可用于创建任务。
+  - Prompt 模板读取 `prompt_templates_list`，首版创建链路只开放 `stock_full` / `technical` 类型。
+  - 股票输入通过 `stock_search` 查询，选中后读取 `stock_profile`、`market_quote`、`market_kline`、`market_indicators`、`news_list` 构建上下文预览。
+  - 开始分析调用 `analysis_task_create`，成功后跳转 `/analysis/running?taskId=...`。
+  - 未配置模型时“开始分析”禁用，不会触发任务创建。
+- 2026-06-24 已通过自动化验证：
+  - `pnpm --filter @invest-compass/frontend test -- App -t "AI 分析页"`
+  - `pnpm --filter @invest-compass/frontend check`
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions ./internal/actions/analysis ./internal/service/analysis -run 'TestAnalysisTask|Test.*Analysis|TestCreate|TestValidate'`
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml commands::tasks::tests -- --test-threads=1`
+- 2026-06-24：AI 分析页输出预览全屏按钮已改为真实弹窗，弹窗内容区独立滚动；未生成输出前，“保存报告”“复制 Markdown”“导出 Markdown”禁用，不再弹出待接入提示。导出仍以生成后的报告详情页 `reportExport` 为真实保存链路。
+- 2026-06-24 补充验证：
+  - `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx -t "AI 分析页读取真实模型" --reporter=basic`
+  - `pnpm --dir apps/frontend check`
+
+### [x] S5-08 AI 分析运行页接入任务事件和取消
 
 依赖：S5-07。
 
 执行动作：
 
-- 运行页订阅 `analysisTaskSubscribe`。
-- 支持 `TASK_PROGRESS`、`TASK_LOG`、`TASK_CHUNK`、`TASK_SUCCESS`、`TASK_FAILED`。
-- 取消按钮调用 `analysisTaskCancel`。
+- [x] 运行页订阅 `analysisTaskSubscribe`。
+- [x] 运行页通过 `taskEvents` 恢复历史事件。
+- [x] 支持 `TASK_PROGRESS`、`TASK_LOG`、`TASK_CHUNK`、`TASK_SUCCESS`、`TASK_FAILED`、`TASK_CANCELLED`。
+- [x] 取消按钮调用 `analysisTaskCancel`。
+- [x] 成功后读取 `task_get.report_id`，有真实报告 ID 时显示“查看报告”并跳转报告详情。
 
 交付物：
 
-- 任务运行实时状态。
+- [x] 任务运行实时状态。
 
 验收标准：
 
-- 断线后可从 `taskEvents` 恢复。
-- 取消后任务状态正确。
-- 成功后可跳转报告详情。
+- [x] 断线后可从 `taskEvents` 恢复。
+- [x] 取消后任务状态正确。
+- [x] 成功后可跳转报告详情：运行页复用 S5-15 已补齐的 `task_get.report_id`，不新增任务表字段或额外查询接口。
 
 验证方式：
 
-- task event 测试。
+- `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx -t "AI 分析运行页恢复任务事件、订阅增量事件并支持取消|AI 分析页读取真实模型、Prompt 和股票上下文后创建分析任务"`。
+- `pnpm --filter @invest-compass/frontend exec vitest run src/services/coreClient.test.ts`。
+- `pnpm --filter @invest-compass/frontend check`。
 - 前端手工验收。
 
-### [ ] S5-09 报告历史默认列表、筛选和删除接入
+进展记录：
+
+- 2026-06-24 已将运行页从本地空态改为真实任务事件链路：
+  - 页面读取 URL `taskId` 后调用 `task_get` 建立任务摘要。
+  - 页面先用 `task_events(taskId, 0)` 恢复历史事件，再调用 `analysis_task_subscribe(taskId, lastEventId)` 订阅增量事件。
+  - 页面监听 Rust 转发的 `analysis-task-event`，将事件映射为任务步骤、任务日志和流式 Markdown 输出。
+  - “停止生成”调用 `analysis_task_cancel`，成功后本地状态切换为 `CANCELLED`。
+  - `task_events` typed service 已兼容 Go API 真实返回的 `event_type + payload` 字符串，并归一化为前端消费的 `event + data`。
+- 2026-06-24 已通过自动化验证：
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx -t "AI 分析运行页恢复任务事件、订阅增量事件并支持取消|AI 分析页读取真实模型、Prompt 和股票上下文后创建分析任务"`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/services/coreClient.test.ts`
+  - `pnpm --filter @invest-compass/frontend check`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx`
+- 2026-06-24：S5-15 已为 `task_get/task_list` 返回 `report_id`。运行页现在在终态任务恢复时读取 `task_get.report_id`，显示真实“查看报告”按钮并跳转 `/reports/:reportId`；实时成功事件如果带 `report_id` 也会同步更新入口。
+- 2026-06-24 补充验证：
+  - `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx -t "AI 分析运行页成功任务可跳转已生成报告" --reporter=basic`
+
+### [~] S5-09 报告历史默认列表、筛选和删除接入
 
 依赖：S5-08。
 
 执行动作：
 
-- 页面加载调用 `reportList`。
-- 筛选条件映射到后端支持字段。
-- 搜索继续使用 `searchReports` 或和 `reportList` 统一。
-- 删除调用 `reportDelete`。
+- [x] 页面加载调用 `reportList`。
+- [x] 筛选条件基于 `reportList` 返回的真实列表做本地二次筛选；后端当前未提供列表筛选参数，未新增接口。
+- [x] 搜索继续使用固定 `searchReports` 报告范围命令。
+- [x] 删除调用 `reportDelete`，删除后从当前列表移除，重置/刷新会重新读取真实列表。
+- [x] 右侧统计、常用模型和分析类型分布由 S5-10 `reportStats` 接口返回，不再使用静态 156 或静态统计数组。
+- [x] 批量删除由 S5-10 `reportBatchDelete(ids)` 接入真实后端。
+- [x] 收藏由 S5-10 `reportUpdate(id, favorite)` 接入真实后端。
+- [x] 单条导出由 S5-10 `reportExport(id)` 接入 Rust 保存对话框。
+- [!] 批量导出保存策略放到第二期，入口继续禁用，不伪装成功。
 
 交付物：
 
@@ -1650,45 +1811,86 @@ notificationsClearRead()
 
 验收标准：
 
-- 删除后刷新不出现。
-- 筛选条件后端不支持时禁用或待接入。
-- 统计不再使用静态数据。
+- [x] 删除后刷新不出现：后端 `reportDelete` 已软删除，页面重置/刷新走 `reportList`。
+- [x] 筛选条件后端不支持时未新增后端参数，当前对真实返回列表做本地筛选。
+- [x] 统计不再使用静态数据。
+- [ ] 桌面端手工验收：真实报告列表、删除后刷新、关键词搜索和统计展示。
 
 验证方式：
 
 - report service 测试。
 - 前端手工验收。
 
-### [!] S5-10 报告收藏、批量、导出、统计接口确认
+进展记录：
 
-依赖：S5-09。
+- 2026-06-24：报告历史页已接入 `reportList` 默认列表、`searchReports` 报告范围搜索和 `reportDelete` 删除；表格总数、分页总数来自当前真实列表。
+- 2026-06-24：右侧报告统计、常用模型 TOP 5、分析类型分布已改为读取 S5-10 `reportStats`；批量删除已改为调用 `reportBatchDelete(ids)`。
+- 2026-06-24：用户确认新增收藏字段和导出默认选择保存位置后，报告历史页已接入 `reportUpdate(id, favorite)` 和 `reportExport(id)`；批量导出仍禁用，等待第二期多文件保存策略。
+- 2026-06-24 已通过自动化验证：
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/pages/reports/ReportHistoryPage.test.tsx`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx -t "分析报告历史页面展示空态并按报告范围搜索"`
 
-阻塞原因：
-
-- 收藏、批量操作、导出格式和统计口径需要后端接口或产品确认。
-
-推荐方案：
-
-- 收藏新增 `reportUpdate({ id, favorite })`。
-- 批量删除新增 `reportBatchDelete(ids)`。
-- 导出由 Rust 固定 command 处理文件选择和写入。
-- 统计由 `reportStats` 返回，或前端基于当前筛选列表计算。
-
-验收标准：
-
-- 每个按钮都有真实能力或禁用态。
-- 导出文件不包含完整敏感输入快照。
-
-### [ ] S5-11 报告详情动作接入
+### [~] S5-10 报告收藏、批量、导出、统计接口确认
 
 依赖：S5-09。
 
 执行动作：
 
-- 详情读取 `reportGet`。
-- 删除调用 `reportDelete`。
-- 重新分析调用 `analysisTaskCreate`，使用报告源 symbol 和模板。
-- 导出按 S5-10 方案实现或禁用。
+- [x] 新增 Go `/api/reports/stats`，只从可见报告元数据聚合统计，不返回正文或输入快照。
+- [x] 新增 Go `/api/reports/batch-delete`，批量软删除报告。
+- [x] 新增 Rust `report_stats` 和 `report_batch_delete` 白名单 command。
+- [x] 新增前端 `reportStats` 和 `reportBatchDelete` typed service。
+- [x] 报告历史页右侧统计读取 `reportStats`。
+- [x] 报告历史页批量删除选中报告调用 `reportBatchDelete(ids)`。
+- [x] 新增 `analysis_reports.favorite` 字段，报告收藏状态随列表和详情返回。
+- [x] 新增 Go `/api/reports/update`，仅允许更新收藏状态，不通过该接口修改正文或输入快照。
+- [x] 新增 Go `/api/reports/export`，返回安全建议文件名和默认不含完整 `input_snapshot` 的 Markdown 内容。
+- [x] 新增 Rust `report_update` 和 `report_export` 白名单 command；`report_export` 通过系统保存对话框选择写入位置，前端不传任意路径。
+- [x] 新增前端 `reportUpdate` 和 `reportExport` typed service，报告历史和详情页单条收藏/导出均已接入。
+- [!] 批量导出继续禁用，第二期确认多报告保存为目录、压缩包或逐个保存后再接入。
+
+推荐方案：
+
+- 收藏新增 `reportUpdate(id, favorite)`，当前采用 `analysis_reports.favorite` 字段。
+- 批量删除已新增 `reportBatchDelete(ids)`。
+- 单条导出由 Rust 固定 command 处理文件选择和写入，前端不传保存路径。
+- 统计已由 `reportStats` 返回，前端不再伪造周环比、成功率等无来源数据。
+
+验收标准：
+
+- [x] 每个按钮都有真实能力或禁用态。
+- [x] 统计响应不包含完整敏感输入快照。
+- [x] 批量删除不覆盖报告正文或任务事件，只做报告软删除。
+- [x] 导出文件不包含完整敏感输入快照。
+- [ ] 桌面端手工验收：统计、批量删除、收藏、单条导出保存位置选择。
+
+进展记录：
+
+- 2026-06-24：`reportStats` 返回报告总数、覆盖股票数、最新报告时间、分析类型分布和常用模型 TOP；Go action 只使用元数据字段，测试覆盖不泄露正文和输入快照。
+- 2026-06-24：`reportBatchDelete(ids)` 已接通 Go/Rust/前端，批量删除前会校验 ID，前端删除后刷新统计并清空选中项。
+- 2026-06-24：收藏已接通 Go `/api/reports/update`、Rust `report_update`、前端 `reportUpdate` 和 `analysis_reports.favorite` 字段；报告 upsert 不覆盖用户收藏状态。
+- 2026-06-24：单条导出已接通 Go `/api/reports/export`、Rust `report_export` 和前端 `reportExport`；导出内容默认不含完整 `input_snapshot`，保存位置由系统保存对话框选择。批量导出仍禁用，放到第二期。
+- 2026-06-24 已通过自动化验证：
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions -run "TestReportsAPIListsGetsAndSoftDeletes|TestReportsAPIStatsAndBatchDelete"`
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions -run 'TestReportsAPI(UpdatesFavorite|ExportsMarkdownWithoutInputSnapshot)' -count=1`
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/dao -run 'Test(MigrateCreatesInitialSchema|ReportRepositoryUpsertsByTaskID)' -count=1`
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml commands::reports::tests -- --test-threads=1`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/pages/reports/ReportHistoryPage.test.tsx`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/services/coreClient.test.ts -t "任务和报告方法"`
+  - `pnpm --filter @invest-compass/frontend check`
+  - `pnpm --dir apps/frontend exec vitest run src/services/coreClient.test.ts src/pages/reports/ReportHistoryPage.test.tsx src/app/App.test.tsx`
+
+### [~] S5-11 报告详情动作接入
+
+依赖：S5-09。
+
+执行动作：
+
+- [x] 详情读取 `reportGet`。
+- [x] 删除调用 `reportDelete`，删除成功后返回报告列表。
+- [x] 重新分析调用 `analysisTaskCreate`，使用报告源 symbol、报告 analysis type、报告 `prompt_template_id` 和当前默认可用 AI 配置创建新任务。
+- [x] 导出按 S5-10 方案实现：调用 `reportExport(id)` 并由系统保存对话框选择位置。
+- [x] 收藏按 S5-10 方案实现：调用 `reportUpdate(id, favorite)`。
 
 交付物：
 
@@ -1696,108 +1898,176 @@ notificationsClearRead()
 
 验收标准：
 
-- 报告不存在展示 404/空态。
-- 重新分析创建新任务，不覆盖旧报告。
-- 删除后返回报告列表。
+- [x] 报告不存在展示 404/空态。
+- [x] 重新分析创建新任务，不覆盖旧报告。
+- [x] 删除后返回报告列表。
+- [ ] 桌面端手工验收：详情页删除、重新分析跳转运行页、收藏和单条导出保存位置选择。
 
 验证方式：
 
 - 前端手工验收。
 
-### [ ] S5-12 资讯中心默认列表和筛选接入
+进展记录：
+
+- 2026-06-24：报告详情页已接入真实 `reportGet`、`reportDelete` 和 `analysisTaskCreate`。重新分析不复用不可见的旧 API Key 明文；页面读取当前默认可用 AI 配置，只向任务创建传递 `api_key_ref`。当前 `reportGet` 未返回旧报告的原始 `ai_config_id`，因此重新分析不强行猜测旧模型配置。
+- 2026-06-24 已通过自动化验证：
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx -t "分析报告详情页面重新分析使用报告来源创建新任务|分析报告详情页面删除报告后返回真实报告列表"`
+
+### [~] S5-12 资讯中心默认列表和筛选接入
 
 依赖：S5-01。
 
 执行动作：
 
-- 默认列表调用 `newsMarket` 或 `newsList`。
-- 关键词搜索调用 `searchNews`。
-- 打开原文继续调用 `openExternalURL`。
-- 加入 AI 上下文如无后端支持先禁用。
+- [x] 默认列表调用 `newsMarket` 或 `newsList`。
+- [x] 关键词搜索调用 `searchNews`。
+- [x] 打开原文继续调用 `openExternalURL`。
+- [x] 加入 AI 上下文如无后端支持先禁用。
 
 交付物：
 
-- 资讯中心真实新闻列表。
+- [x] 资讯中心真实新闻列表。
 
 验收标准：
 
-- 新闻为空时展示空态。
-- 外链通过系统浏览器打开。
-- 不展示假热点和假统计。
+- [x] 新闻为空时展示空态。
+- [x] 外链通过系统浏览器打开。
+- [x] 不展示假热点和假统计。
+- [ ] 桌面端手工验收：默认市场资讯列表、关键词搜索、打开原文、空态和待接入提示。
 
 验证方式：
 
 - news service 测试。
 - 前端手工验收。
 
-### [!] S5-13 资讯侧栏统计、热点和加入上下文接口确认
+进展记录：
+
+- 2026-06-24：资讯中心默认列表已接入 `newsMarket({ market: "CN", limit: 20 })`，关键词搜索继续调用 `searchNews`，打开原文继续调用 `openExternalURL`。筛选条件当前只对已加载真实列表做本地二次筛选，不新增后端未支持参数。
+- 2026-06-24：`加入 AI 上下文` 已隐藏并放入第二期；资讯侧栏热点和统计改为读取本地新闻缓存，不再展示固定更新时间或虚构缓存容量。资讯缓存清理入口保持禁用，等待后续明确缓存命令后再开放。
+- 2026-06-24 已通过自动化验证：
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx -t "资讯中心页面加载真实市场新闻并按资讯范围搜索"`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx src/services/coreClient.test.ts`
+  - `pnpm --filter @invest-compass/frontend check`
+
+### [~] S5-13 资讯侧栏统计、热点和加入上下文接口确认
 
 依赖：S5-12。
 
-阻塞原因：
+执行动作：
 
-- 侧栏统计、热点榜、加入 AI 上下文需要明确数据来源和保存方式。
+- [x] 统计由 `newsStats` 返回。
+- [x] 热点由 `newsHotTopics` 返回。
+- [x] 资讯侧栏统计和热点只读取本地 `news_items` 缓存，不触发 Provider 回源。
+- [x] 未接入情绪分类前，不展示伪造利好/利空比例。
+- [x] 加入上下文入口本期隐藏，放到第二期开发。
 
-推荐方案：
+交付物：
 
-- 统计由 `newsStats` 返回。
-- 热点由 `newsHotTopics` 返回。
-- 加入上下文先作为 AI 分析页临时输入，不单独落库。
+- [x] Go core `/api/news/stats` 和 `/api/news/hot-topics`。
+- [x] Rust `news_stats` 和 `news_hot_topics` 白名单 command。
+- [x] 前端 `newsStats`、`newsHotTopics` typed service 和资讯侧栏真实展示。
 
 验收标准：
 
-- 统计口径可解释。
-- 上下文内容不包含外部网页未授权全文。
+- [x] 统计口径可解释。
+- [x] 上下文内容不包含外部网页未授权全文。
+- [x] 不展示假热点、固定更新时间、虚构缓存容量或未闭环加入上下文按钮。
+- [ ] 桌面端手工验收：资讯侧栏热点标签、提及股票、统计说明和空态。
 
-### [ ] S5-14 任务历史主列表和事件详情接入
+进展记录：
+
+- 2026-06-24：`newsStats` 返回缓存新闻总数、来源数、最新发布时间和“情绪分类未接入”的说明；`newsHotTopics` 基于缓存新闻 tags 和 symbols 汇总热点标签与高频提及股票。前端将 count 归一化为热度条，仅用于展示相对强弱，不代表外部热度排行。
+- 2026-06-24：`加入上下文` 按确认隐藏，放到第二期；资讯侧栏不再显示 `15:30 更新` 和 `缓存总量：312 MB`。
+- 2026-06-24 已通过自动化验证：
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions -run "TestNewsStatsAndHotTopicsUseCachedNews|TestNewsMarketReturnsSortedCachedItems"`
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml commands::news::tests -- --test-threads=1`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx -t "资讯中心页面加载真实市场新闻并按资讯范围搜索"`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/services/coreClient.test.ts -t "新闻统计"`
+
+### [~] S5-14 任务历史主列表和事件详情接入
 
 依赖：S5-08。
 
 执行动作：
 
-- 页面加载调用 `taskList`。
-- 详情调用 `taskGet` 和 `taskEvents`。
-- 任务日志抽屉继续调用 `taskLogs*`。
-- 取消调用 `analysisTaskCancel` 或 `task cancel` 固定接口。
+- [x] 页面加载调用 `taskList`。
+- [x] 详情调用 `taskGet` 和 `taskEvents`。
+- [x] 任务日志抽屉继续调用 `taskLogs*`。
+- [x] 取消调用 `analysisTaskCancel` 或 `task cancel` 固定接口。
 
 交付物：
 
-- 任务历史真实列表和详情。
+- [x] 任务历史真实列表和详情。
 
 验收标准：
 
-- 任务状态刷新后不丢。
-- 失败任务展示错误摘要。
-- 任务事件可回放。
+- [x] 任务状态刷新后不丢。
+- [x] 失败任务展示错误摘要。
+- [x] 任务事件可回放。
+- [x] 成功任务跳转报告、失败任务重试归属 S5-15；S5-14 只保留列表、详情和取消主链路。
+- [ ] 桌面端手工验收：真实任务列表、详情事件、日志抽屉、取消运行中任务。
 
 验证方式：
 
 - task service 测试。
 - 前端手工验收。
 
-### [!] S5-15 任务重试和报告跳转规则确认
+进展记录：
+
+- 2026-06-24：任务历史页已从本地空数组改为默认调用 `taskList(100)`；页面将 Go/Rust 返回的 `TaskItem` 归一化为 UI 任务类型、状态、进度、开始/结束时间和耗时。
+- 2026-06-24：点击任务行会调用 `taskGet(taskId)` 和 `taskEvents(taskId, 0)`，详情抽屉展示真实事件流；取消运行中任务调用 `analysisTaskCancel(taskId)`，成功后本地任务状态切换为 `CANCELLED`。
+- 2026-06-24：旧详情面板不再硬编码 `2025-05-20`，开始时间直接展示真实任务时间字段。
+- 2026-06-24：修复搜索索引重建任务被前端兜底标记为 `AI 分析` 的问题；`SEARCH_REBUILD` / `search-rebuild-*` 归类为 `数据重建`，此类非报告任务不显示报告入口。
+- 2026-06-24 已通过自动化验证：
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx -t "任务历史页面读取真实任务列表、事件详情并支持取消"`
+  - `pnpm --dir apps/frontend exec vitest run src/app/App.test.tsx -t "任务历史搜索索引重建任务展示为数据重建且不显示报告入口"`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx src/services/coreClient.test.ts`
+  - `pnpm --filter @invest-compass/frontend check`
+
+### [~] S5-15 任务重试和报告跳转规则确认
 
 依赖：S5-14。
 
-阻塞原因：
+执行动作：
 
-- 重试是否复用原输入、是否生成新 task_id、报告跳转字段来源需要确认。
+- [x] 任务列表和详情返回 `report_id`，来源为已保存报告的 `task_id -> report_id` 反查，不新增任务表字段。
+- [x] 成功 AI 分析任务点击“报告”时跳转 `/reports/:reportId`。
+- [x] 失败 AI 分析任务点击“重试”时读取原任务 `TASK_CREATED` 事件，并创建新任务。
+- [x] 重试任务通过 `retry_of_task_id` 引用原任务，不覆盖原任务事件。
+- [x] 原任务包含一次性持仓输入时拒绝自动重试，提示用户重新创建分析任务。
+- [x] 前端重试只从 AI 配置列表读取 `api_key_ref`，不从任务事件或日志恢复明文凭据。
+- [x] Rust command 转发 `retry_of_task_id`，并继续阻止 `api_key_ref` 进入 Go core 请求体。
 
-推荐方案：
+交付物：
 
-- 重试生成新任务，引用 `retry_of_task_id`。
-- 报告跳转依赖任务成功后保存的 `report_id`。
+- [x] Go `task_list/task_get` 增加 `report_id` 响应字段。
+- [x] Go `analysis_task_create` 接收并记录 `retry_of_task_id`。
+- [x] Rust `analysis_task_create` 白名单 payload 支持 `retry_of_task_id`。
+- [x] 前端任务历史“报告”和“重试”按钮接入真实能力。
 
 验收标准：
 
-- 重试不覆盖原任务事件。
-- 成功任务能稳定跳转报告。
+- [x] 重试不覆盖原任务事件。
+- [x] 成功任务能稳定跳转报告。
+- [x] 不从历史任务恢复一次性持仓明细或明文 API Key。
+- [ ] 桌面端手工验收：成功任务报告跳转、失败任务重试创建新任务、含持仓任务重试拒绝提示。
+
+进展记录：
+
+- 2026-06-24：S5-15 按确认方案实现。报告跳转不改 DB schema，直接使用报告表中已有 `task_id` 关系反查 `report_id`；任务重试生成新任务，并在 `TASK_CREATED` 事件安全 payload 中记录 `retry_of_task_id`。
+- 2026-06-24：原任务如果含一次性持仓输入，任务历史页不会从事件中恢复持仓详情，改为提示用户重新创建分析任务，避免持仓输入被历史事件反推。
+- 2026-06-24 已通过自动化验证：
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/actions ./internal/service/analysis -run "TestTasksAPIListsGetsAndReplaysEvents|TestCreateTaskBuildsPendingTaskAndSafeCreatedEvent"`
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml commands::tasks::tests -- --test-threads=1`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/app/App.test.tsx -t "任务历史成功分析任务可跳转已生成报告|任务历史失败分析任务可按原创建事件生成重试任务|任务历史页面读取真实任务列表、事件详情并支持取消"`
+  - `pnpm --filter @invest-compass/frontend exec vitest run src/services/coreClient.test.ts -t "分析任务"`
+  - `pnpm --filter @invest-compass/frontend check`
 
 ---
 
 ## 8. RG-S6：关于、日志、更新和发布验收
 
-### [ ] S6-01 关于页检查更新接入
+### [x] S6-01 关于页检查更新接入
 
 依赖：无。
 
@@ -1810,6 +2080,7 @@ notificationsClearRead()
 交付物：
 
 - 关于页检查更新真实结果。
+- 发布说明只展示可用性，不打开外链或本地文件；打开方式仍归 S6-03。
 
 验收标准：
 
@@ -1820,7 +2091,15 @@ notificationsClearRead()
 
 - update service 测试或手工验收。
 
-### [ ] S6-02 日志导出接入并二次脱敏
+进展记录：
+
+- 2026-06-24：S6-01 已接入。关于页检查更新按钮调用真实 `check_update` 白名单 command，并展示当前版本、最新版本、`发现新版本` / `当前已是最新版本` / `检查更新失败` 状态，以及发布说明可用性；不提供下载、安装或授权激活入口。
+- 2026-06-24：发布说明打开仍保留为 S6-03 决策项，本次不直接打开外链或本地文件。
+- 2026-06-24 已通过自动化验证：
+  - `pnpm --dir apps/frontend exec vitest run src/pages/settings/about/AboutAppPage.test.tsx src/services/coreClient.test.ts src/app/App.test.tsx`
+  - `pnpm --filter @invest-compass/frontend check`
+
+### [x] S6-02 日志导出接入并二次脱敏
 
 依赖：S3-03、S4-02。
 
@@ -1844,25 +2123,41 @@ notificationsClearRead()
 - 日志脱敏测试。
 - 手工导出检查。
 
-### [!] S6-03 LICENSE、用户手册、发布说明打开方式确认
+进展记录：
+
+- 2026-06-24：S6-02 已接入。关于页日志导出按钮先打开系统目录选择器；用户取消时不调用后端，选择目录后调用固定 `export_logs` command，由 Rust 请求 Go `/api/logs/export` 获取已脱敏日志包并写入用户授权目录。
+- 2026-06-24：保留现有 Go `logexport` 二次脱敏规则和 Rust 目录/文件名校验边界；前端不传文件名，不直接构造日志内容。
+- 2026-06-24 已通过自动化验证：
+  - `pnpm --dir apps/frontend exec vitest run src/pages/settings/about/AboutAppPage.test.tsx src/services/coreClient.test.ts src/app/App.test.tsx`
+  - `pnpm --filter @invest-compass/frontend check`
+  - `go test -mod=readonly -tags sqlite_fts5 ./internal/service/logexport ./internal/actions/logexport`
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml commands::logs::tests -- --test-threads=1`
+
+### [x] S6-03 LICENSE、用户手册、发布说明打开方式确认
 
 依赖：无。
 
-阻塞原因：
+确认方案：
 
-- 需要确认是内置静态页面、本地文件，还是外部链接。
-
-推荐方案：
-
-- LICENSE 和发布说明使用内置静态页面或本地打包文件。
-- 用户手册如打开外链，必须走 `openExternalURL` 并限制 URL 白名单。
+- 暂时使用内置静态页面，不打开外链，不读取本地打包文件。
+- LICENSE 展示 GPL v3.0 摘要、无担保声明和第三方组件说明。
+- 用户手册展示首版使用流程、风险边界和排障建议。
+- 发布说明展示 v0.1.0 内测能力、已知边界和合规提示。
 
 验收标准：
 
 - 不直接在前端 `window.open` 外链。
-- 外链打开失败有提示。
+- 不调用 `openExternalURL` 或其他外部打开命令。
+- 静态页面在弹窗内滚动展示，关闭后不影响关于页状态。
 
-### [ ] S6-04 全量 secret 和禁用词检查
+进展记录：
+
+- 2026-06-24：S6-03 已按确认方案实现为内置静态页面。关于页 `查看 LICENSE`、`打开用户手册`、`查看发布说明` 均打开应用内弹窗，不访问外链，不增加 Rust/Go command。
+- 2026-06-24 已通过自动化验证：
+  - `pnpm --dir apps/frontend exec vitest run src/pages/settings/about/AboutAppPage.test.tsx src/services/coreClient.test.ts src/app/App.test.tsx`
+  - `pnpm --filter @invest-compass/frontend check`
+
+### [x] S6-04 全量 secret 和禁用词检查
 
 依赖：S2、S3、S4、S5。
 
@@ -1886,7 +2181,18 @@ notificationsClearRead()
 - `rg` 检查。
 - 人工 review。
 
-### [ ] S6-05 按变更范围执行最终验证
+进展记录：
+
+- 2026-06-24：已修正关于页内置静态文档中的首版禁用入口字面量，避免前端生产源码出现容易被误判为交易闭环入口的文案。
+- 2026-06-24：生产源码禁用词扫描仅剩 `apps/sidecar-core/internal/service/prompt/builder.go` 中的合规约束文案，用于禁止模型输出诱导表达，不是用户可点击入口。
+- 2026-06-24：secret 扫描命中项已人工分类，剩余命中均为凭据处理字段、脱敏正则、真实请求头设置点或 Rust 内联测试夹具；未发现真实密钥、真实 Cookie、真实 Token 或真实代理密码落入仓库。
+- 2026-06-24 已通过自动化验证：
+  - `rg -n --glob '!**/*.test.*' --glob '!**/*_test.go' --glob '!**/test/**' --glob '!**/*.md' "(下单|自动下单|实盘|交易托管|券商账户|稳赚|必涨|收益承诺|保证收益|买入信号|卖出信号|立即买入|立即卖出|目标价|满仓|清仓|加仓|减仓|推荐买入|推荐卖出|荐股)" apps/frontend/src apps/desktop/src-tauri/src apps/sidecar-core/internal apps/sidecar-core/pkg`
+  - `rg -n --glob '!**/*.test.*' --glob '!**/*_test.go' --glob '!**/test/**' --glob '!**/*.md' "(sk-[A-Za-z0-9_\\-]{8,}|Authorization|Proxy-Authorization|api[_-]?key\\s*[:=]\\s*[\\\"']?[^\\s\\\"']+|proxy_password\\s*[:=]|Cookie:\\s*|token=|Bearer\\s+[A-Za-z0-9._\\-]{8,}|secret\\s*[:=])" apps/frontend/src apps/desktop/src-tauri/src apps/sidecar-core/internal apps/sidecar-core/pkg`
+  - `node --test apps/desktop/test/security-config.test.mjs --test-name-pattern "前端生产源码禁止首版未闭环入口文案|前端和共享契约禁止暴露 Go core、runtime token 或内部密钥字段"`
+  - `pnpm --dir apps/frontend exec vitest run src/pages/settings/about/AboutAppPage.test.tsx src/services/coreClient.test.ts src/app/App.test.tsx`
+
+### [x] S6-05 按变更范围执行最终验证
 
 依赖：全部开发任务。
 
@@ -1905,6 +2211,18 @@ notificationsClearRead()
 
 - 所有必需验证通过。
 - 无法执行的验证说明原因、影响范围和剩余风险。
+
+进展记录：
+
+- 2026-06-24：首次在沙箱内执行 `pnpm --dir apps build` 时被 Go build cache 写入 `~/Library/Caches/go-build` 权限拦截；使用升级权限重跑同一命令后通过。
+- 2026-06-24：`pnpm --dir apps test` 首轮发现 Go 测试辅助函数缺少中文注释，已补齐 Prompt、AI、分析执行器和代理测试中的辅助函数注释并重新格式化。
+- 2026-06-24：`pnpm --dir apps test` 后续发现资讯中心单测仍按旧假设只允许 `search_news`，已更新测试夹具，先接受页面默认读取 `news_market` / `news_stats` / `news_hot_topics`，再验证关键词刷新调用 `search_news`。
+- 2026-06-24：`pnpm --dir apps test` 后续发现调度设计文档默认任务示例漏掉 `stock_profile_refresh`，已同步 `docs/2026-06-19-invest-compass-scheduler-design.md`。
+- 2026-06-24 已通过自动化验证：
+  - `pnpm --dir apps build`
+  - `pnpm --dir apps test`
+  - `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  - `git diff --check`
 
 ---
 
@@ -1946,6 +2264,4 @@ notificationsClearRead()
 - S5-04：自选股扩展字段来源。
 - S5-06：个股详情公司资料和用户备注接口。
 - S5-10：报告收藏、批量、导出、统计接口。
-- S5-13：资讯侧栏统计、热点和加入上下文。
-- S5-15：任务重试和报告跳转规则。
 - S6-03：LICENSE、用户手册、发布说明打开方式。

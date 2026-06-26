@@ -154,6 +154,11 @@ func (store *missingTaskStore) ListTaskEventsAfter(context.Context, string, int6
 	return nil, nil
 }
 
+// GetAnalysisReportByTaskID 实现 Store 接口；SSE 缺失任务用例不需要报告上下文。
+func (store *missingTaskStore) GetAnalysisReportByTaskID(context.Context, string) (model.AnalysisReport, bool, error) {
+	return model.AnalysisReport{}, false, nil
+}
+
 type terminalTaskStore struct {
 	task   model.Task
 	events []model.TaskEvent
@@ -178,4 +183,9 @@ func (store *terminalTaskStore) ListTaskEventsAfter(_ context.Context, taskID st
 		}
 	}
 	return result, nil
+}
+
+// GetAnalysisReportByTaskID 实现 Store 接口；终态 SSE 空增量用例不需要报告上下文。
+func (store *terminalTaskStore) GetAnalysisReportByTaskID(context.Context, string) (model.AnalysisReport, bool, error) {
+	return model.AnalysisReport{}, false, nil
 }

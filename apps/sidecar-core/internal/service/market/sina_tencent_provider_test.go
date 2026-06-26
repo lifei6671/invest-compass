@@ -14,6 +14,7 @@ import (
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
 	settingsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/settings"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/stock"
+	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/crawler"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 )
@@ -66,6 +67,9 @@ func TestSinaTencentProviderQuoteParsesSinaCNQuote(t *testing.T) {
 		if request.URL.Path != "/quote" || request.URL.Query().Get("list") != "sh600519" {
 			t.Fatalf("unexpected quote request: %s", request.URL.String())
 		}
+		if request.URL.Query().Get("rn") != "" {
+			t.Fatalf("sina quote request must not append rn because Sina treats the full list value as symbol: %s", request.URL.String())
+		}
 		parts := []string{
 			"贵州茅台", "1790.00", "1780.00", "1810.50", "1820.00", "1775.00", "1810.00", "1811.00",
 			"123456", "223456789.00", "100", "1810.00", "200", "1809.00", "300", "1808.00",
@@ -93,6 +97,214 @@ func TestSinaTencentProviderQuoteParsesSinaCNQuote(t *testing.T) {
 	}
 	if quote.ChangeAmount != 30.50 || quote.ChangePercent < 1.71 || quote.ChangePercent > 1.72 {
 		t.Fatalf("unexpected quote change fields: %+v", quote)
+	}
+}
+
+// TestSinaTencentProviderQuoteNormalizesPreOpenZeroPrice 验证未开盘时新浪返回 0 现价不会被计算成 -100%。
+func TestSinaTencentProviderQuoteNormalizesPreOpenZeroPrice(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/quote" || request.URL.Query().Get("list") != "sh603026" {
+			t.Fatalf("unexpected quote request: %s", request.URL.String())
+		}
+		parts := []string{
+			"石大胜华", "0.00", "93.78", "0.00", "0.00", "0.00", "0.00", "0.00",
+			"0", "0.00", "0", "0.00", "0", "0.00", "0", "0.00",
+			"0", "0.00", "0", "0.00", "0", "0.00", "0", "0.00",
+			"0", "0.00", "0", "0.00", "0", "0.00", "2026-06-26", "09:14:33",
+		}
+		_, _ = writer.Write(mustGB18030(t, `var hq_str_sh603026="`+strings.Join(parts, ",")+`";`))
+	}))
+	defer server.Close()
+
+	provider, err := NewSinaTencentProvider(SinaTencentConfig{
+		QuoteURL: server.URL + "/quote",
+	})
+	if err != nil {
+		t.Fatalf("NewSinaTencentProvider returned error: %v", err)
+	}
+	symbol := mustParseMarketSymbol(t, "CN:SH:603026")
+
+	quote, err := provider.Quote(context.Background(), symbol)
+	if err != nil {
+		t.Fatalf("Quote returned error: %v", err)
+	}
+	if quote.Price != 93.78 || quote.Open != 93.78 || quote.High != 93.78 || quote.Low != 93.78 {
+		t.Fatalf("unexpected normalized pre-open price fields: %+v", quote)
+	}
+	if quote.ChangeAmount != 0 || quote.ChangePercent != 0 {
+		t.Fatalf("pre-open zero price must not become negative change: %+v", quote)
+	}
+}
+
+// TestSinaTencentProviderQuoteEnrichesValuationFields 验证 A 股实时行情会补充换手率、市盈率和市净率字段。
+func TestSinaTencentProviderQuoteEnrichesValuationFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/quote":
+			if request.URL.Query().Get("list") != "sz000001" {
+				t.Fatalf("unexpected quote request: %s", request.URL.String())
+			}
+			parts := []string{
+				"平安银行", "11.00", "10.50", "11.20", "11.30", "10.90", "11.20", "11.21",
+				"123456", "223456789.00", "100", "11.20", "200", "11.19", "300", "11.18",
+				"400", "11.17", "500", "11.16", "100", "11.21", "200", "11.22",
+				"300", "11.23", "400", "11.24", "500", "11.25", "2026-06-25", "09:56:49",
+			}
+			_, _ = writer.Write(mustGB18030(t, `var hq_str_sz000001="`+strings.Join(parts, ",")+`";`))
+		case "/valuation":
+			if request.URL.Query().Get("secid") != "0.000001" {
+				t.Fatalf("unexpected valuation request: %s", request.URL.String())
+			}
+			if request.URL.Query().Get("fields") != "f168,f162,f167,f116,f117" {
+				t.Fatalf("unexpected valuation fields: %s", request.URL.String())
+			}
+			_, _ = writer.Write([]byte(`{"rc":0,"data":{"f168":398,"f162":35210,"f167":239072,"f116":123456789000,"f117":98765432100}}`))
+		default:
+			t.Fatalf("unexpected request path: %s", request.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	provider, err := NewSinaTencentProvider(SinaTencentConfig{
+		Sina: SinaConfig{
+			QuoteURL:     server.URL + "/quote",
+			ValuationURL: server.URL + "/valuation",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSinaTencentProvider returned error: %v", err)
+	}
+	symbol := mustParseMarketSymbol(t, "CN:SZ:000001")
+
+	quote, err := provider.Quote(context.Background(), symbol)
+	if err != nil {
+		t.Fatalf("Quote returned error: %v", err)
+	}
+	if quote.TurnoverRate != 3.98 || quote.PE != 352.10 || quote.PB != 2390.72 {
+		t.Fatalf("unexpected valuation fields: %+v", quote)
+	}
+	if quote.TotalMarketCap != 123456789000 || quote.FloatMarketCap != 98765432100 {
+		t.Fatalf("unexpected market cap fields: %+v", quote)
+	}
+}
+
+// TestParseEastMoneyQuoteValuationRejectsMissingRequiredFields 验证东财估值缺失时不把缺失字段伪装成 0。
+func TestParseEastMoneyQuoteValuationRejectsMissingRequiredFields(t *testing.T) {
+	_, err := parseEastMoneyQuoteValuation(eastMoneyQuoteValuationResponse{
+		RC:   0,
+		Code: 0,
+		Data: eastMoneyQuoteValuationData{
+			TurnoverRate: []byte(`"-"`),
+			PE:           []byte(`35210`),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing turnover rate to return error")
+	}
+
+	_, err = parseEastMoneyQuoteValuation(eastMoneyQuoteValuationResponse{
+		RC:   0,
+		Code: 0,
+		Data: eastMoneyQuoteValuationData{
+			TurnoverRate: []byte(`398`),
+			PE:           []byte(`null`),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing PE to return error")
+	}
+}
+
+// TestSinaTencentProviderQuoteParsesSinaCNIndexQuote 验证首页指数代码能通过新浪实时行情接口读取。
+func TestSinaTencentProviderQuoteParsesSinaCNIndexQuote(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/quote" || request.URL.Query().Get("list") != "sh000001" {
+			t.Fatalf("unexpected index quote request: %s", request.URL.String())
+		}
+		if request.URL.Query().Get("rn") != "" {
+			t.Fatalf("sina index quote request must not append rn because Sina treats the full list value as symbol: %s", request.URL.String())
+		}
+		parts := []string{
+			"上证指数", "4090.1001", "4106.2517", "4110.8134", "4117.2848", "4075.4921", "0", "0",
+			"644527518", "1514193285000", "0", "0", "0", "0", "0", "0",
+			"0", "0", "0", "0", "0", "0", "0", "0",
+			"0", "0", "0", "0", "0", "0", "2026-06-24", "15:30:39",
+		}
+		_, _ = writer.Write(mustGB18030(t, `var hq_str_sh000001="`+strings.Join(parts, ",")+`";`))
+	}))
+	defer server.Close()
+
+	provider, err := NewSinaTencentProvider(SinaTencentConfig{
+		QuoteURL: server.URL + "/quote",
+	})
+	if err != nil {
+		t.Fatalf("NewSinaTencentProvider returned error: %v", err)
+	}
+	symbol := mustParseMarketSymbol(t, "CN:SH:000001")
+
+	quote, err := provider.Quote(context.Background(), symbol)
+	if err != nil {
+		t.Fatalf("Quote returned error: %v", err)
+	}
+	if quote.Symbol.String() != "CN:SH:000001" || quote.Price != 4110.8134 || quote.PreClose != 4106.2517 {
+		t.Fatalf("unexpected index quote: %+v", quote)
+	}
+	if quote.ChangeAmount < 4.56 || quote.ChangeAmount > 4.57 || quote.ChangePercent < 0.11 || quote.ChangePercent > 0.12 {
+		t.Fatalf("unexpected index change fields: %+v", quote)
+	}
+}
+
+// TestNewMarketCrawlerUsesDesktopUserAgent 验证行情 Provider 请求使用桌面 UA，避免外部数据源拒绝默认 Go UA。
+func TestNewMarketCrawlerUsesDesktopUserAgent(t *testing.T) {
+	original := randomDesktopUserAgent
+	randomDesktopUserAgent = func() string {
+		return "Mozilla/5.0 test desktop chrome"
+	}
+	defer func() {
+		randomDesktopUserAgent = original
+	}()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("User-Agent") != "Mozilla/5.0 test desktop chrome" {
+			t.Fatalf("unexpected user agent: %s", request.Header.Get("User-Agent"))
+		}
+		_, _ = writer.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	client, err := newMarketCrawler("ua-test-source", time.Second, nil)
+	if err != nil {
+		t.Fatalf("newMarketCrawler returned error: %v", err)
+	}
+	if _, err := client.Fetch(context.Background(), crawler.Request{URL: server.URL}); err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+}
+
+// TestNewMarketCrawlerFallsBackDesktopUserAgent 验证随机 UA 生成失败时回退到固定桌面 Chrome UA。
+func TestNewMarketCrawlerFallsBackDesktopUserAgent(t *testing.T) {
+	original := randomDesktopUserAgent
+	randomDesktopUserAgent = func() string {
+		return ""
+	}
+	defer func() {
+		randomDesktopUserAgent = original
+	}()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("User-Agent") != fallbackDesktopUserAgent {
+			t.Fatalf("unexpected fallback user agent: %s", request.Header.Get("User-Agent"))
+		}
+		_, _ = writer.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	client, err := newMarketCrawler("ua-fallback-source", time.Second, nil)
+	if err != nil {
+		t.Fatalf("newMarketCrawler returned error: %v", err)
+	}
+	if _, err := client.Fetch(context.Background(), crawler.Request{URL: server.URL}); err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
 	}
 }
 
@@ -176,11 +388,11 @@ func TestSinaTencentProviderKlineMapsNoAdjustForTencent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, err := NewSinaTencentProvider(SinaTencentConfig{
+	provider, err := NewTencentProvider(TencentConfig{
 		KlineURL: server.URL + "/kline",
 	})
 	if err != nil {
-		t.Fatalf("NewSinaTencentProvider returned error: %v", err)
+		t.Fatalf("NewTencentProvider returned error: %v", err)
 	}
 	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
 
@@ -208,11 +420,11 @@ func TestSinaTencentProviderKlineParsesTencentResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, err := NewSinaTencentProvider(SinaTencentConfig{
+	provider, err := NewTencentProvider(TencentConfig{
 		KlineURL: server.URL + "/kline",
 	})
 	if err != nil {
-		t.Fatalf("NewSinaTencentProvider returned error: %v", err)
+		t.Fatalf("NewTencentProvider returned error: %v", err)
 	}
 	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
 
@@ -230,6 +442,73 @@ func TestSinaTencentProviderKlineParsesTencentResponse(t *testing.T) {
 	}
 	if bars[0].Symbol.String() != "CN:SH:600519" || bars[0].Period != PeriodDay || bars[0].Adjust != AdjustForward {
 		t.Fatalf("unexpected bar metadata: %+v", bars[0])
+	}
+}
+
+// TestSinaTencentProviderKlineParsesTencentIndexResponse 验证腾讯指数 K 线响应即使包含 qt 等非 K 线对象也能读取 day 数组。
+func TestSinaTencentProviderKlineParsesTencentIndexResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/kline" || request.URL.Query().Get("param") != "sh000001,day,,,2,qfq" {
+			t.Fatalf("unexpected index kline request: %s", request.URL.String())
+		}
+		_, _ = writer.Write([]byte(`{"code":0,"data":{"sh000001":{"day":[["2026-06-23","4153.590","4106.250","4175.350","4085.590","709003913.000"],["2026-06-24","4090.100","4110.810","4117.280","4075.490","644527518.000"]],"qt":{"sh000001":["1","上证指数"]},"market":["SH_close_已收盘"],"version":"16"}}}`))
+	}))
+	defer server.Close()
+
+	provider, err := NewTencentProvider(TencentConfig{
+		KlineURL: server.URL + "/kline",
+	})
+	if err != nil {
+		t.Fatalf("NewTencentProvider returned error: %v", err)
+	}
+	symbol := mustParseMarketSymbol(t, "CN:SH:000001")
+
+	bars, err := provider.Kline(context.Background(), KlineRequest{
+		Symbol: symbol,
+		Period: PeriodDay,
+		Adjust: AdjustForward,
+		Limit:  2,
+	})
+	if err != nil {
+		t.Fatalf("Kline returned error: %v", err)
+	}
+	if len(bars) != 2 || bars[1].Close != 4110.810 || bars[1].Symbol.String() != "CN:SH:000001" {
+		t.Fatalf("unexpected index bars: %+v", bars)
+	}
+}
+
+// TestSinaTencentProviderMinuteKlineParsesTencentMinuteResponse 验证腾讯分时接口转换为当日 minute KlineBar。
+func TestSinaTencentProviderMinuteKlineParsesTencentMinuteResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/minute" || request.URL.Query().Get("code") != "sh600519" {
+			t.Fatalf("unexpected minute request: %s", request.URL.String())
+		}
+		_, _ = writer.Write([]byte(`{"code":0,"data":{"sh600519":{"data":{"date":"20260624","data":["0959 1810.50 123456 223456789","1000 1811.00 223456 323456789"]}}}}`))
+	}))
+	defer server.Close()
+
+	provider, err := NewSinaTencentProvider(SinaTencentConfig{
+		MinuteURL: server.URL + "/minute",
+	})
+	if err != nil {
+		t.Fatalf("NewSinaTencentProvider returned error: %v", err)
+	}
+	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
+
+	bars, err := provider.Kline(context.Background(), KlineRequest{
+		Symbol: symbol,
+		Period: PeriodMinute,
+		Adjust: AdjustNone,
+		Limit:  2,
+	})
+	if err != nil {
+		t.Fatalf("Kline returned error: %v", err)
+	}
+	if len(bars) != 2 || bars[0].TradeDate != "2026-06-24 09:59" || bars[1].TradeDate != "2026-06-24 10:00" || bars[1].Close != 1811.00 {
+		t.Fatalf("unexpected minute bars: %+v", bars)
+	}
+	if bars[0].Symbol.String() != "CN:SH:600519" || bars[0].Period != PeriodMinute || bars[0].Adjust != AdjustNone || bars[0].Amount != 223456789 {
+		t.Fatalf("unexpected minute bar metadata: %+v", bars[0])
 	}
 }
 
@@ -275,6 +554,35 @@ func TestEastMoneyProviderKlineParsesPush2HisResponse(t *testing.T) {
 	}
 }
 
+// TestEastMoneyPeriodSupportsGoStockAlignedPeriods 验证东财 klt 映射覆盖 go-stock 已使用的主要 K 线周期。
+func TestEastMoneyPeriodSupportsGoStockAlignedPeriods(t *testing.T) {
+	tests := []struct {
+		period   Period
+		expected string
+	}{
+		{period: Period1Minute, expected: "1"},
+		{period: Period5Minute, expected: "5"},
+		{period: Period15Minute, expected: "15"},
+		{period: Period30Minute, expected: "30"},
+		{period: Period60Minute, expected: "60"},
+		{period: PeriodDay, expected: "101"},
+		{period: PeriodWeek, expected: "102"},
+		{period: PeriodMonth, expected: "103"},
+		{period: PeriodQuarter, expected: "104"},
+		{period: PeriodYear, expected: "106"},
+	}
+
+	for _, test := range tests {
+		actual, err := eastMoneyPeriod(test.period)
+		if err != nil {
+			t.Fatalf("eastMoneyPeriod(%q) returned error: %v", test.period, err)
+		}
+		if actual != test.expected {
+			t.Fatalf("eastMoneyPeriod(%q)=%q, expected %q", test.period, actual, test.expected)
+		}
+	}
+}
+
 // TestCompositeMarketProviderCombinesSinaAndTencent 验证组合 Provider 对外提供完整 MarketProvider 契约。
 func TestCompositeMarketProviderCombinesSinaAndTencent(t *testing.T) {
 	sina := &recordingSinaSource{
@@ -308,24 +616,96 @@ func TestCompositeMarketProviderCombinesSinaAndTencent(t *testing.T) {
 	}
 }
 
-// TestCompositeMarketProviderFallsBackToEastMoneyKline 验证腾讯 K 线不可用时组合 Provider 使用东财 K 线兜底。
+// TestCompositeMarketProviderFallsBackToEastMoneyKline 验证 TDX 不可用时组合 Provider 使用东财 K 线兜底。
 func TestCompositeMarketProviderFallsBackToEastMoneyKline(t *testing.T) {
 	sina := &recordingSinaSource{}
-	tencent := &recordingTencentSource{klineErr: errors.New("tencent unavailable")}
+	tdx := &recordingTdxSource{klineErr: errors.New("tdx unavailable")}
+	tencent := &recordingTencentSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-18", Close: 1800}},
+	}
 	eastMoney := &recordingEastMoneySource{
 		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-19", Close: 1822}},
 	}
-	provider := NewCompositeMarketProviderWithKlineFallback("composite-test", sina, tencent, eastMoney, nil)
+	provider := NewCompositeMarketProviderWithKlineFallbacks("composite-test", sina, tencent, eastMoney, tdx, nil)
 	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
 
 	bars, err := provider.Kline(context.Background(), KlineRequest{Symbol: symbol, Period: PeriodDay, Adjust: AdjustForward, Limit: 1})
 	if err != nil {
 		t.Fatalf("Kline returned error: %v", err)
 	}
-	if !tencent.klineCalled || !eastMoney.klineCalled {
-		t.Fatalf("expected tencent then eastmoney calls, tencent=%+v eastMoney=%+v", tencent, eastMoney)
+	if !tdx.klineCalled || !eastMoney.klineCalled || tencent.klineCalled {
+		t.Fatalf("expected tdx then eastmoney calls, tdx=%+v eastMoney=%+v tencent=%+v", tdx, eastMoney, tencent)
 	}
 	if len(bars) != 1 || bars[0].Provider != "composite-test" || bars[0].Close != 1822 {
+		t.Fatalf("unexpected fallback bars: %+v", bars)
+	}
+}
+
+// TestCompositeMarketProviderDoesNotFallbackMinuteKline 验证分时走势不能用东财日 K 兜底，避免首页显示错误周期曲线。
+func TestCompositeMarketProviderDoesNotFallbackMinuteKline(t *testing.T) {
+	sina := &recordingSinaSource{}
+	tencent := &recordingTencentSource{klineErr: errors.New("tencent minute unavailable")}
+	eastMoney := &recordingEastMoneySource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-19", Close: 1822}},
+	}
+	provider := NewCompositeMarketProviderWithKlineFallback("composite-test", sina, tencent, eastMoney, nil)
+	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
+
+	_, err := provider.Kline(context.Background(), KlineRequest{Symbol: symbol, Period: PeriodMinute, Adjust: AdjustNone, Limit: 1})
+	if err == nil {
+		t.Fatal("expected minute kline error instead of daily fallback")
+	}
+	if !tencent.klineCalled || eastMoney.klineCalled {
+		t.Fatalf("expected only tencent minute call, tencent=%+v eastMoney=%+v", tencent, eastMoney)
+	}
+}
+
+// TestCompositeMarketProviderUsesTdxForMinuteKlinePeriods 验证分钟级 K 线优先使用通达信链路。
+func TestCompositeMarketProviderUsesTdxForMinuteKlinePeriods(t *testing.T) {
+	sina := &recordingSinaSource{}
+	tencent := &recordingTencentSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: Period5Minute, Adjust: AdjustForward, TradeDate: "2026-06-19 10:30", Close: 1800}},
+	}
+	tdx := &recordingTdxSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: Period5Minute, Adjust: AdjustForward, TradeDate: "2026-06-19 10:30", Close: 1822}},
+	}
+	eastMoney := &recordingEastMoneySource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: Period5Minute, Adjust: AdjustForward, TradeDate: "2026-06-19 10:30", Close: 1810}},
+	}
+	provider := NewCompositeMarketProviderWithKlineFallbacks("composite-test", sina, tencent, eastMoney, tdx, nil)
+	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
+
+	bars, err := provider.Kline(context.Background(), KlineRequest{Symbol: symbol, Period: Period5Minute, Adjust: AdjustForward, Limit: 1})
+	if err != nil {
+		t.Fatalf("Kline returned error: %v", err)
+	}
+	if !tdx.klineCalled || tencent.klineCalled || eastMoney.klineCalled {
+		t.Fatalf("expected only tdx minute kline call, tdx=%+v tencent=%+v eastMoney=%+v", tdx, tencent, eastMoney)
+	}
+	if len(bars) != 1 || bars[0].Provider != "composite-test" || bars[0].Close != 1822 {
+		t.Fatalf("unexpected tdx bars: %+v", bars)
+	}
+}
+
+// TestCompositeMarketProviderFallsBackToEastMoneyForMinuteKline 验证通达信分钟 K 失败时使用东财分钟 K 兜底。
+func TestCompositeMarketProviderFallsBackToEastMoneyForMinuteKline(t *testing.T) {
+	sina := &recordingSinaSource{}
+	tencent := &recordingTencentSource{}
+	tdx := &recordingTdxSource{klineErr: errors.New("tdx unavailable")}
+	eastMoney := &recordingEastMoneySource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: Period15Minute, Adjust: AdjustForward, TradeDate: "2026-06-19 10:30", Close: 1810}},
+	}
+	provider := NewCompositeMarketProviderWithKlineFallbacks("composite-test", sina, tencent, eastMoney, tdx, nil)
+	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
+
+	bars, err := provider.Kline(context.Background(), KlineRequest{Symbol: symbol, Period: Period15Minute, Adjust: AdjustForward, Limit: 1})
+	if err != nil {
+		t.Fatalf("Kline returned error: %v", err)
+	}
+	if !tdx.klineCalled || tencent.klineCalled || !eastMoney.klineCalled {
+		t.Fatalf("expected tdx then eastmoney minute kline calls, tdx=%+v tencent=%+v eastMoney=%+v", tdx, tencent, eastMoney)
+	}
+	if len(bars) != 1 || bars[0].Provider != "composite-test" || bars[0].Close != 1810 {
 		t.Fatalf("unexpected fallback bars: %+v", bars)
 	}
 }
@@ -333,11 +713,14 @@ func TestCompositeMarketProviderFallsBackToEastMoneyKline(t *testing.T) {
 // TestSettingsBackedMarketProviderReadsDefaultSource 验证行情运行时会读取数据源默认行情源配置，并沿用自动降级链路。
 func TestSettingsBackedMarketProviderReadsDefaultSource(t *testing.T) {
 	sina := &recordingSinaSource{}
-	tencent := &recordingTencentSource{klineErr: errors.New("tencent unavailable")}
+	tencent := &recordingTencentSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-18", Close: 1800}},
+	}
+	tdx := &recordingTdxSource{klineErr: errors.New("tdx unavailable")}
 	eastMoney := &recordingEastMoneySource{
 		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-19", Close: 1822}},
 	}
-	baseProvider := NewCompositeMarketProviderWithKlineFallback("composite-test", sina, tencent, eastMoney, nil)
+	baseProvider := NewCompositeMarketProviderWithKlineFallbacks("composite-test", sina, tencent, eastMoney, tdx, nil)
 	store := &recordingMarketSettingsStore{
 		settings: []model.Setting{{Key: settingsservice.SettingKeyDataSourceDefaultMarketSource, Value: settingsservice.DataSourceMarketSourceAutoFallback}},
 	}
@@ -351,11 +734,131 @@ func TestSettingsBackedMarketProviderReadsDefaultSource(t *testing.T) {
 	if len(store.requestedKeys) != 1 || store.requestedKeys[0] != settingsservice.SettingKeyDataSourceDefaultMarketSource {
 		t.Fatalf("expected provider to read default source setting, got %+v", store.requestedKeys)
 	}
-	if !tencent.klineCalled || !eastMoney.klineCalled {
-		t.Fatalf("expected auto fallback kline calls, tencent=%+v eastMoney=%+v", tencent, eastMoney)
+	if !tdx.klineCalled || !eastMoney.klineCalled || tencent.klineCalled {
+		t.Fatalf("expected auto fallback kline calls, tdx=%+v eastMoney=%+v tencent=%+v", tdx, eastMoney, tencent)
 	}
 	if len(bars) != 1 || bars[0].Close != 1822 {
 		t.Fatalf("unexpected bars: %+v", bars)
+	}
+}
+
+// TestSettingsBackedMarketProviderPrefersTdxWhenConfigured 验证设置为通达信时，K 线优先走 TDX 源。
+func TestSettingsBackedMarketProviderPrefersTdxWhenConfigured(t *testing.T) {
+	sina := &recordingSinaSource{}
+	tencent := &recordingTencentSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-18", Close: 1800}},
+	}
+	tdx := &recordingTdxSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-19", Close: 1822}},
+	}
+	eastMoney := &recordingEastMoneySource{}
+	baseProvider := NewCompositeMarketProviderWithKlineFallbacks("composite-test", sina, tencent, eastMoney, tdx, nil)
+	store := &recordingMarketSettingsStore{
+		settings: []model.Setting{{Key: settingsservice.SettingKeyDataSourceDefaultMarketSource, Value: settingsservice.DataSourceMarketSourceTdx}},
+	}
+	provider := NewSettingsBackedMarketProvider(store, baseProvider)
+	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
+
+	bars, err := provider.Kline(context.Background(), KlineRequest{Symbol: symbol, Period: PeriodDay, Adjust: AdjustForward, Limit: 1})
+	if err != nil {
+		t.Fatalf("Kline returned error: %v", err)
+	}
+	if !tdx.klineCalled || tencent.klineCalled || eastMoney.klineCalled {
+		t.Fatalf("expected tdx preferred kline call, tdx=%+v tencent=%+v eastMoney=%+v", tdx, tencent, eastMoney)
+	}
+	if len(bars) != 1 || bars[0].Provider != "composite-test" || bars[0].Close != 1822 {
+		t.Fatalf("unexpected tdx bars: %+v", bars)
+	}
+}
+
+// TestSettingsBackedMarketProviderFallsBackWhenPreferredTdxFails 验证 TDX 不可用时不会让 K 线直接空白。
+func TestSettingsBackedMarketProviderFallsBackWhenPreferredTdxFails(t *testing.T) {
+	sina := &recordingSinaSource{}
+	tencent := &recordingTencentSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-18", Close: 1800}},
+	}
+	tdx := &recordingTdxSource{klineErr: errors.New("tdx unavailable")}
+	eastMoney := &recordingEastMoneySource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-19", Close: 1818}},
+	}
+	baseProvider := NewCompositeMarketProviderWithKlineFallbacks("composite-test", sina, tencent, eastMoney, tdx, nil)
+	store := &recordingMarketSettingsStore{
+		settings: []model.Setting{{Key: settingsservice.SettingKeyDataSourceDefaultMarketSource, Value: settingsservice.DataSourceMarketSourceTdx}},
+	}
+	provider := NewSettingsBackedMarketProvider(store, baseProvider)
+	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
+
+	bars, err := provider.Kline(context.Background(), KlineRequest{Symbol: symbol, Period: PeriodDay, Adjust: AdjustForward, Limit: 1})
+	if err != nil {
+		t.Fatalf("Kline returned error: %v", err)
+	}
+	if !tdx.klineCalled || !eastMoney.klineCalled || tencent.klineCalled {
+		t.Fatalf("expected tdx failure to fall back to eastmoney before tencent, tdx=%+v eastMoney=%+v tencent=%+v", tdx, eastMoney, tencent)
+	}
+	if len(bars) != 1 || bars[0].Provider != "composite-test" || bars[0].Close != 1818 {
+		t.Fatalf("unexpected fallback bars: %+v", bars)
+	}
+}
+
+// TestSettingsBackedMarketProviderPrefersEastMoneyWhenConfigured 验证显式选择东财时不再先走自动 TDX 链路。
+func TestSettingsBackedMarketProviderPrefersEastMoneyWhenConfigured(t *testing.T) {
+	sina := &recordingSinaSource{}
+	tencent := &recordingTencentSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-18", Close: 1800}},
+	}
+	tdx := &recordingTdxSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-17", Close: 1790}},
+	}
+	eastMoney := &recordingEastMoneySource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-19", Close: 1822}},
+	}
+	baseProvider := NewCompositeMarketProviderWithKlineFallbacks("composite-test", sina, tencent, eastMoney, tdx, nil)
+	store := &recordingMarketSettingsStore{
+		settings: []model.Setting{{Key: settingsservice.SettingKeyDataSourceDefaultMarketSource, Value: settingsservice.DataSourceMarketSourceEastMoney}},
+	}
+	provider := NewSettingsBackedMarketProvider(store, baseProvider)
+	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
+
+	bars, err := provider.Kline(context.Background(), KlineRequest{Symbol: symbol, Period: PeriodDay, Adjust: AdjustForward, Limit: 1})
+	if err != nil {
+		t.Fatalf("Kline returned error: %v", err)
+	}
+	if tdx.klineCalled || !eastMoney.klineCalled || tencent.klineCalled {
+		t.Fatalf("expected eastmoney-only kline call, tdx=%+v eastMoney=%+v tencent=%+v", tdx, eastMoney, tencent)
+	}
+	if len(bars) != 1 || bars[0].Provider != "composite-test" || bars[0].Close != 1822 {
+		t.Fatalf("unexpected eastmoney bars: %+v", bars)
+	}
+}
+
+// TestSettingsBackedMarketProviderPrefersTencentWhenConfigured 验证显式选择腾讯时不再被自动 TDX/东财链路覆盖。
+func TestSettingsBackedMarketProviderPrefersTencentWhenConfigured(t *testing.T) {
+	sina := &recordingSinaSource{}
+	tencent := &recordingTencentSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-18", Close: 1800}},
+	}
+	tdx := &recordingTdxSource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-17", Close: 1790}},
+	}
+	eastMoney := &recordingEastMoneySource{
+		klineResult: []KlineBar{{Symbol: mustParseMarketSymbol(t, "CN:SH:600519"), Period: PeriodDay, Adjust: AdjustForward, TradeDate: "2026-06-19", Close: 1822}},
+	}
+	baseProvider := NewCompositeMarketProviderWithKlineFallbacks("composite-test", sina, tencent, eastMoney, tdx, nil)
+	store := &recordingMarketSettingsStore{
+		settings: []model.Setting{{Key: settingsservice.SettingKeyDataSourceDefaultMarketSource, Value: settingsservice.DataSourceMarketSourceTencent}},
+	}
+	provider := NewSettingsBackedMarketProvider(store, baseProvider)
+	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
+
+	bars, err := provider.Kline(context.Background(), KlineRequest{Symbol: symbol, Period: PeriodDay, Adjust: AdjustForward, Limit: 1})
+	if err != nil {
+		t.Fatalf("Kline returned error: %v", err)
+	}
+	if tdx.klineCalled || eastMoney.klineCalled || !tencent.klineCalled {
+		t.Fatalf("expected tencent-only kline call, tdx=%+v eastMoney=%+v tencent=%+v", tdx, eastMoney, tencent)
+	}
+	if len(bars) != 1 || bars[0].Provider != "composite-test" || bars[0].Close != 1800 {
+		t.Fatalf("unexpected tencent bars: %+v", bars)
 	}
 }
 
@@ -444,6 +947,21 @@ type recordingEastMoneySource struct {
 
 // Kline 记录东财 K 线调用并返回固定 K 线。
 func (source *recordingEastMoneySource) Kline(context.Context, KlineRequest) ([]KlineBar, error) {
+	source.klineCalled = true
+	if source.klineErr != nil {
+		return nil, source.klineErr
+	}
+	return source.klineResult, nil
+}
+
+type recordingTdxSource struct {
+	klineCalled bool
+	klineResult []KlineBar
+	klineErr    error
+}
+
+// Kline 记录通达信 K 线调用并返回固定 K 线。
+func (source *recordingTdxSource) Kline(context.Context, KlineRequest) ([]KlineBar, error) {
 	source.klineCalled = true
 	if source.klineErr != nil {
 		return nil, source.klineErr

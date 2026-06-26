@@ -41,7 +41,7 @@ export function ProxyConnectionTestCard(props: ProxyConnectionTestCardProps) {
           ) : (
             <>
               <span className="settings-data-source-tag settings-data-source-tag-muted">未测试</span>
-              <p>真实代理连接测试待接入</p>
+              <p>点击测试连接后将使用当前代理设置访问所选目标</p>
             </>
           )}
         </div>

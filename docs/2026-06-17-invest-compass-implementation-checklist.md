@@ -478,9 +478,9 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增未配置 Provider 的安全状态模型，真实数据源未配置时只返回 `available=false` 和 `source=unconfigured`，不伪造行情、搜索或 K 线能力。
   - Provider 错误会保留 provider/operation 可观测上下文，并复用统一脱敏入口避免泄露授权头和 API Key。
   - 单测已覆盖接口契约、标准 symbol 使用、合规状态描述、未配置状态和错误脱敏。
-  - 已新增 `sina-tencent-market` 真实组合 Provider：`SinaSource/SinaProvider` 只负责新浪 suggest/实时行情，`TencentSource/TencentProvider` 只负责腾讯结构化 K 线，`EastMoneySource/EastMoneyProvider` 只负责东方财富 `push2his` K 线兜底，`CompositeMarketProvider` 对外组合成完整 `MarketProvider`；授权和样例验收完成前，生产 `main.go` 仍保持 `UnconfiguredProvider` 安全状态。
-  - K 线 Provider 链路为腾讯优先、东财 direct HTTP 兜底；不迁移 chromedp Cookie 抓取逻辑，也不依赖本地浏览器路径。
-  - Provider 单测覆盖新浪搜索解析、GB18030 解码、A 股实时行情字段映射、非股票六位代码拒绝、腾讯 K 线解析、不复权参数映射、东财 push2his K 线解析、拆分后的新浪/腾讯/东财职责边界、组合 Provider 委派和东财兜底、异常字段快速失败、状态元信息和未支持市场拒绝。
+  - 已新增 `sina-tencent-market` 真实组合 Provider：`SinaSource/SinaProvider` 只负责新浪 suggest/实时行情，`TencentSource/TencentProvider` 只负责腾讯结构化 K 线和当日分时走势，`EastMoneySource/EastMoneyProvider` 只负责东方财富 `push2his` K 线兜底，`TdxSource/TdxProvider` 只负责通达信 MAC K 线，`CompositeMarketProvider` 对外组合成完整 `MarketProvider`。
+  - K 线 Provider 默认链路为通达信 MAC 优先、东财 direct HTTP 兜底、腾讯结构化 K 线再兜底；设置中心显式选择 `eastmoney` 或 `tencent` 时直接命中对应 K 线 Provider，不迁移 chromedp Cookie 抓取逻辑，也不依赖本地浏览器路径。
+  - Provider 单测覆盖新浪搜索解析、GB18030 解码、A 股实时行情字段映射、非股票六位代码拒绝、腾讯 K 线/分时解析、不复权参数映射、东财 push2his K 线解析、拆分后的新浪/腾讯/东财/TDX 职责边界、组合 Provider 委派、显式默认行情源选择、异常字段快速失败、状态元信息和未支持市场拒绝。
   - 已新增 `scripts/provider-smoke.mjs`，默认 dry-run 不访问网络；只有执行方显式传入 `--allow-network --confirm-provider-terms` 后，才对新浪 suggest/quote、腾讯 K 线和东财 K 线样例端点做 live smoke 检查；live smoke 会校验端点特征响应体，避免把错误页或空壳 200 当成 Provider 样例通过。
   - 当前 Provider 仅声明支持 `CN` A 股；`HK` / `US`、数据源授权复核、真实外网样例查询和跨平台开发环境验收完成前，T13 仍保持 `[~]`，不能标记为 `[x]`。
 
@@ -525,6 +525,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 对应 Rust command。
 - 执行动作：
   - 支持标签、备注、排序。
+  - active 列表按 `created_at DESC, id DESC` 返回，保证最新添加的自选股优先展示。
   - 删除使用软删除。
   - active symbol 唯一约束生效。
 - 验证：
@@ -536,7 +537,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 当前进展：
   - 已新增 `apps/sidecar-core/internal/service/watchlist` 自选股规则模块。
   - 已复用 `stock.ParseSymbol` 作为 symbol 标准化唯一来源，避免自选股另行维护股票代码解析规则。
-  - 已实现创建、更新元数据、软删除和 active 列表过滤排序规则。
+  - 已实现创建、更新元数据、软删除和 active 列表过滤排序规则，列表按添加时间倒序返回并输出 `created_at` / `updated_at`。
   - 已实现 active symbol 唯一校验，软删除后同一 symbol 可重新添加。
   - 单测覆盖重复添加、软删除后重新添加、列表过滤 deleted 数据和标签/备注/排序更新。
   - 已在 Go core `apps/sidecar-core/internal/actions/watchlist` 接入 `POST /api/watchlist/list`、`POST /api/watchlist/create`、`POST /api/watchlist/update`、`POST /api/watchlist/delete`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
@@ -578,7 +579,7 @@ P7 跨平台桌面能力、打包、发布验收
   - 已新增 `dao.Store.SaveQuote`、`LatestQuote`、`SaveKlines`、`ListKlines`，行情缓存读写全部收敛在 GORM dao 层。
   - Rust `market_kline` 已在转发前校验 `limit` 必须为 1-500，非法请求不进入 Go core。
   - 已新增 Rust 白名单 command：`market_quote`、`market_kline`，固定映射到 `POST /api/market/quote` 和 `POST /api/market/kline`，禁止通用 path 代理。
-  - 单测覆盖 quote 返回价格/涨跌幅/时间/provider、quote 缓存命中不重复请求 Provider、K 线有序返回和缓存写入、DAO quote/kline 幂等更新、Rust command 固定 path 和 Rust command 非法 `limit` 早失败。
+  - 单测覆盖 quote 返回价格/涨跌幅/时间/provider、quote 估值和市值字段、quote 缓存命中不重复请求 Provider、K 线有序返回和缓存写入、DAO quote/kline 幂等更新、Rust command 固定 path 和 Rust command 非法 `limit` 早失败。
   - 受 T13/T30 后续接入约束，真实合规 Provider 注入和股票详情页真实展示完成后再标记为 `[x]`。
 
 ### T17 技术指标计算
@@ -1142,7 +1143,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 执行动作：
   - 搜索结果使用 `stock_search`。
   - 添加/删除使用 watchlist command。
-  - 表格行情使用真实 quote 数据。
+  - 表格和卡片行情使用真实 quote 数据，卡片走势图使用真实 K 线 close 序列。
 - 验证：
   - 添加后立即出现在列表。
   - 删除后列表消失且可重新添加。
@@ -1151,9 +1152,9 @@ P7 跨平台桌面能力、打包、发布验收
   - 用户可以完成自选股基础管理。
 - 当前进展：
   - 已新增前端 typed service：`stockSearch()`、`marketQuote()`、`watchlistList()`、`watchlistCreate()`、`watchlistUpdate()`、`watchlistDelete()`，均固定调用 Rust 白名单 command，不接触 Go core 地址或 token。
-  - 已新增 `/watchlist` 页面和主导航入口，页面读取 `watchlist_list` 后按每个 symbol 调用 `market_quote` 展示真实行情；行情失败时展示错误，不填充假价格。
+  - 已新增 `/watchlist` 页面和主导航入口，页面读取 `watchlist_list` 后按添加时间倒序展示，卡片和表格只消费后端返回的 quote 与 `trend_points` 缓存；行情或走势缺失时展示空态，不填充假价格或假走势。
   - 已支持搜索股票、添加自选、编辑排序/标签/备注、刷新列表和软删除自选；删除后仍可从搜索结果重新添加。
-  - 自选股行内已提供单股 quote 刷新入口，调用 `scheduler_refresh_symbol` 并提交 `data_type=quote`，成功后重新读取该 symbol 的行情缓存。
+  - 自选股刷新入口调用前端 `watchlistRefresh()` typed service，经 Rust `watchlist_refresh` 固定命令进入 Go `POST /api/watchlist/refresh`，由 Go 服务统一刷新 quote 和分时走势缓存。
   - 已覆盖重复添加时展示后端业务错误，避免把失败吞掉或显示成功态。
   - `apps/frontend/src/services/coreClient.test.ts` 覆盖自选股、股票搜索和行情 command 契约。
   - `apps/frontend/src/app/App.test.tsx` 覆盖自选股列表行情、行内单股刷新、搜索添加、更新、删除后重加和重复添加错误展示。
@@ -1263,7 +1264,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 历史数据可追溯、可复查、可清理。
 - 当前进度：
-  - 已新增 `/reports` 页面，通过 typed invoke service 调用 `report_list`、`report_get`、`report_delete` 展示报告列表、报告详情和删除操作。
+  - 已新增 `/reports` 页面，通过 typed invoke service 调用 `report_list`、`report_get`、`report_delete`、`report_stats`、`report_batch_delete`、`report_update`、`report_export` 展示报告列表、报告详情、统计、收藏、导出和删除操作。
   - 已新增 `/tasks` 页面，通过 typed invoke service 调用 `task_list`、`task_get`、`task_events` 展示任务列表、任务详情、失败原因和持久化事件回放。
   - 任务详情打开时会先通过 `task_events(task_id, 0)` 补拉持久化事件，再以最新事件 ID 调用 `analysis_task_subscribe` 订阅新增事件，并用增量 `task_events` 合并展示新增事件。
   - 报告详情已支持复制 Markdown 和导出 Markdown，默认只使用报告标题、股票代码、分析类型、生成时间、正文和风险摘要，不包含完整 `input_snapshot`。
@@ -1294,6 +1295,7 @@ P7 跨平台桌面能力、打包、发布验收
   - Rust settings command 已支持代理密码写入/删除本地 vault，并只把 `proxy_credential_ref` 转发给 Go core。
   - 已新增 `/settings` 页面，通过 typed invoke service 读取 settings、workspace、cache、provider status 和 autostart 状态，并支持保存代理设置、保存工作区、关闭到托盘开关、开机自动启动开关、清理允许的缓存目标、检查更新和导出脱敏日志。
   - 设置页会在提交前拒绝带 username/password 的代理 URL，不把代理密码混进 URL。
+  - 2026-06-25：首版手动代理运行时只支持无认证代理；设置页不再展示认证代理保存入口，保存无认证代理时会清空旧 `proxy_credential_ref`，Go runtime 遇到历史 `proxy.username` / `proxy_credential_ref` 会明确失败，避免认证代理“保存但不生效”。
   - 设置页已支持读取和保存检查更新配置 `update.manifest_url` / `update.allowed_hosts`，并通过真实 `settings_set` 写入 settings。
   - 设置页已支持读取和保存任务成功/失败通知开关 `notifications.task_terminal`，AI 分析终态通知会尊重该设置，缺省保持开启。
   - 设置页日志导出会在空目标目录时早失败，不触发 `export_logs`；有效目录会 trim 后交给 Rust 白名单 command。

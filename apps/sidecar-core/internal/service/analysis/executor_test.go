@@ -3,6 +3,8 @@ package analysis
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +118,40 @@ func TestExecutorCompletesTaskAndSavesReport(t *testing.T) {
 		taskNotifier.tasks[0].ID != "task-1" ||
 		taskNotifier.tasks[0].Status != string(task.StatusSuccess) {
 		t.Fatalf("expected success task notification, got %+v", taskNotifier.tasks)
+	}
+}
+
+// TestExecutorDefaultChatClientUsesInjectedHTTPClient 验证分析任务默认 AI client 复用运行时代理 HTTP client。
+func TestExecutorDefaultChatClientUsesInjectedHTTPClient(t *testing.T) {
+	var called bool
+	executor := Executor{
+		HTTPClient: &http.Client{Transport: analysisRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+			called = true
+			if request.URL.Host != "ai.example.test" {
+				t.Fatalf("unexpected host: %s", request.URL.Host)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"id":"chatcmpl-test","choices":[{"message":{"content":"报告正文"}}]}`)),
+			}, nil
+		})},
+	}
+	client := executor.chatClient(aiservice.Config{
+		BaseURL:        "https://ai.example.test",
+		ModelName:      "gpt-analysis",
+		TimeoutSeconds: 1,
+	}, "sk-runtime-secret")
+
+	response, err := client.Chat(context.Background(), aiservice.ChatRequest{
+		Model:    "gpt-analysis",
+		Messages: []aiservice.Message{{Role: aiservice.RoleUser, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+	if !called || response.Content != "报告正文" {
+		t.Fatalf("expected injected HTTP client to be used, called=%v response=%+v", called, response)
 	}
 }
 
@@ -480,6 +516,13 @@ type recordingChatClient struct {
 	requests []aiservice.ChatRequest
 	response aiservice.ChatResponse
 	err      error
+}
+
+type analysisRoundTripFunc func(*http.Request) (*http.Response, error)
+
+// RoundTrip 让分析执行器测试用函数捕获外部 HTTP 请求。
+func (fn analysisRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
 }
 
 // Chat 记录测试 AI 请求并返回预设响应。

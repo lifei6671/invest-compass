@@ -363,6 +363,7 @@ test("模型配置页测试连接调用真实 ai_config_test 并跨重新挂载�
           provider: "openai-compatible",
           model: "gpt-4.1-mini",
           message: "ok",
+          duration_ms: 128,
         },
       };
     }
@@ -389,6 +390,7 @@ test("模型配置页测试连接调用真实 ai_config_test 并跨重新挂载�
   await waitFor(() => {
     expect(screen.getByText("正常")).toBeInTheDocument();
   });
+  expect(screen.getByText("128 ms")).toBeInTheDocument();
   view.unmount();
 
   render(
@@ -401,6 +403,7 @@ test("模型配置页测试连接调用真实 ai_config_test 并跨重新挂载�
     expect(screen.getByText("OpenAI 主配置")).toBeInTheDocument();
   });
   expect(screen.getByText("正常")).toBeInTheDocument();
+  expect(screen.getByText("128 ms")).toBeInTheDocument();
 });
 
 test("模型配置页测试连接中禁用当前测试按钮避免重复触发", async () => {

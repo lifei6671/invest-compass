@@ -13,6 +13,7 @@ export type UpdateInfo = {
   latestVersion: string;
   updateStatus: "unsupported" | "latest" | "available" | "failed";
   releaseDate: string;
+  releaseNoteStatus: string;
 };
 
 export type LicenseInfo = {
@@ -69,6 +70,7 @@ export const updateInfo: UpdateInfo = {
   latestVersion: "待接入",
   updateStatus: "unsupported",
   releaseDate: "待接入",
+  releaseNoteStatus: "待接入",
 };
 
 export const licenseInfo: LicenseInfo = {

@@ -107,22 +107,25 @@ func symbolsFromScopeKey(scopeKey string) []string {
 
 // modelQuoteFromMarket 将 market service 行情模型转换为持久化模型。
 func modelQuoteFromMarket(quote marketservice.Quote) model.Quote {
+	quote = marketservice.NormalizeQuote(quote)
 	return model.Quote{
-		Symbol:        quote.Symbol.String(),
-		Price:         quote.Price,
-		ChangeAmount:  quote.ChangeAmount,
-		ChangePercent: quote.ChangePercent,
-		Open:          quote.Open,
-		High:          quote.High,
-		Low:           quote.Low,
-		PreClose:      quote.PreClose,
-		Volume:        quote.Volume,
-		Amount:        quote.Amount,
-		TurnoverRate:  quote.TurnoverRate,
-		PE:            quote.PE,
-		PB:            quote.PB,
-		QuoteTime:     quote.QuoteTime,
-		Provider:      quote.Provider,
+		Symbol:         quote.Symbol.String(),
+		Price:          quote.Price,
+		ChangeAmount:   quote.ChangeAmount,
+		ChangePercent:  quote.ChangePercent,
+		Open:           quote.Open,
+		High:           quote.High,
+		Low:            quote.Low,
+		PreClose:       quote.PreClose,
+		Volume:         quote.Volume,
+		Amount:         quote.Amount,
+		TurnoverRate:   quote.TurnoverRate,
+		PE:             quote.PE,
+		PB:             quote.PB,
+		TotalMarketCap: quote.TotalMarketCap,
+		FloatMarketCap: quote.FloatMarketCap,
+		QuoteTime:      quote.QuoteTime,
+		Provider:       quote.Provider,
 	}
 }
 

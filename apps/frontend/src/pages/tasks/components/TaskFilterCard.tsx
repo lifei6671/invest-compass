@@ -11,7 +11,7 @@ type TaskFilterCardProps = {
   onQuery: () => void;
 };
 
-const taskTypeOptions: Array<TaskFilters["taskType"]> = ["全部类型", "AI 分析", "资讯同步", "行情刷新", "缓存清理"];
+const taskTypeOptions: Array<TaskFilters["taskType"]> = ["全部类型", "AI 分析", "资讯同步", "行情刷新", "缓存清理", "数据重建"];
 const taskStatusOptions: Array<TaskFilters["status"]> = ["全部状态", "RUNNING", "SUCCESS", "FAILED", "CANCELLED"];
 const { RangePicker } = DatePicker;
 

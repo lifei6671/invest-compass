@@ -119,6 +119,7 @@ func TestCreateTaskBuildsPendingTaskAndSafeCreatedEvent(t *testing.T) {
 		AnalysisType:     AnalysisStockFull,
 		AIConfigID:       1,
 		PromptTemplateID: 2,
+		RetryOfTaskID:    "analysis-old",
 		UserPosition: &UserPosition{
 			CostPrice: 1680,
 			Shares:    100,
@@ -154,6 +155,9 @@ func TestCreateTaskBuildsPendingTaskAndSafeCreatedEvent(t *testing.T) {
 	}
 	if payload["has_user_position"] != true {
 		t.Fatalf("created event payload should keep position presence only: %s", event.Payload)
+	}
+	if payload["retry_of_task_id"] != "analysis-old" {
+		t.Fatalf("created event payload should keep retry source task id: %s", event.Payload)
 	}
 	for _, secret := range []string{"1680", "100", "medium"} {
 		if strings.Contains(event.Payload, secret) {

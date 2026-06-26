@@ -128,7 +128,7 @@ func handleClear(config Config) http.HandlerFunc {
 	}
 }
 
-// handleTest 执行数据源凭据本地预检，不触发真实网络请求。
+// handleTest 执行数据源凭据真实 HTTP 预检，响应只返回脱敏后的状态和说明。
 func handleTest(config Config) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		context := httpx.ContextFrom(request)

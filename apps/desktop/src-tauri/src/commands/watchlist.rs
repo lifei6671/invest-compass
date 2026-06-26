@@ -26,6 +26,11 @@ struct WatchlistDeleteRequest {
     id: i64,
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct WatchlistRefreshPayload {
+    symbols: Vec<String>,
+}
+
 /// 读取自选股列表，固定转发到 Go core `/api/watchlist/list`。
 #[tauri::command]
 pub fn watchlist_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
@@ -67,6 +72,18 @@ pub fn watchlist_delete(state: State<'_, CoreState>, id: i64) -> Result<serde_js
     let client = state.client().map_err(|error| error.to_string())?;
     client
         .post_api("/api/watchlist/delete", &WatchlistDeleteRequest { id })
+        .map_err(|error| error.to_string())
+}
+
+/// 提交自选股行情后台刷新请求，固定转发到 Go core `/api/watchlist/refresh`。
+#[tauri::command]
+pub fn watchlist_refresh(
+    state: State<'_, CoreState>,
+    payload: WatchlistRefreshPayload,
+) -> Result<serde_json::Value, String> {
+    let client = state.client().map_err(|error| error.to_string())?;
+    client
+        .post_api("/api/watchlist/refresh", &payload)
         .map_err(|error| error.to_string())
 }
 

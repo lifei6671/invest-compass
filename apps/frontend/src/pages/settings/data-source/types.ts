@@ -1,4 +1,4 @@
-export type MarketSource = "auto-fallback" | "akshare-eastmoney" | "eastmoney" | "sina" | "tencent" | "custom";
+export type MarketSource = "auto-fallback" | "akshare-eastmoney" | "eastmoney" | "tdx" | "sina" | "tencent" | "custom";
 export type NewsSource = "aggregated" | "cls" | "sina" | "custom";
 export type MarketScope = "CN" | "HK" | "US" | "ALL";
 export type KlineRange = "1y" | "3y" | "5y" | "all";

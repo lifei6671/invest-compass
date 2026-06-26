@@ -37,7 +37,8 @@ type Config struct {
 }
 
 type quoteRequest struct {
-	Symbol string `json:"symbol"`
+	Symbol       string `json:"symbol"`
+	ForceRefresh bool   `json:"force_refresh"`
 }
 
 type klineRequest struct {
@@ -56,21 +57,23 @@ type indicatorsRequest struct {
 }
 
 type quoteData struct {
-	Symbol        string    `json:"symbol"`
-	Price         float64   `json:"price"`
-	ChangeAmount  float64   `json:"change_amount"`
-	ChangePercent float64   `json:"change_percent"`
-	Open          float64   `json:"open"`
-	High          float64   `json:"high"`
-	Low           float64   `json:"low"`
-	PreClose      float64   `json:"pre_close"`
-	Volume        float64   `json:"volume"`
-	Amount        float64   `json:"amount"`
-	TurnoverRate  float64   `json:"turnover_rate"`
-	PE            float64   `json:"pe"`
-	PB            float64   `json:"pb"`
-	QuoteTime     time.Time `json:"quote_time"`
-	Provider      string    `json:"provider"`
+	Symbol         string    `json:"symbol"`
+	Price          float64   `json:"price"`
+	ChangeAmount   float64   `json:"change_amount"`
+	ChangePercent  float64   `json:"change_percent"`
+	Open           float64   `json:"open"`
+	High           float64   `json:"high"`
+	Low            float64   `json:"low"`
+	PreClose       float64   `json:"pre_close"`
+	Volume         float64   `json:"volume"`
+	Amount         float64   `json:"amount"`
+	TurnoverRate   float64   `json:"turnover_rate"`
+	PE             float64   `json:"pe"`
+	PB             float64   `json:"pb"`
+	TotalMarketCap float64   `json:"total_market_cap"`
+	FloatMarketCap float64   `json:"float_market_cap"`
+	QuoteTime      time.Time `json:"quote_time"`
+	Provider       string    `json:"provider"`
 }
 
 type klineData struct {
@@ -107,7 +110,7 @@ func Routes(config Config) []httpx.Route {
 	}
 }
 
-// handleQuote 处理行情快照请求，优先返回短缓存，缓存 miss 后才调用 Provider。
+// handleQuote 处理行情快照请求；首页/手动刷新可通过 force_refresh 绕过短缓存读取 Provider。
 func handleQuote(config Config) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		context := httpx.ContextFrom(request)
@@ -124,7 +127,7 @@ func handleQuote(config Config) http.HandlerFunc {
 			return
 		}
 
-		if config.Store != nil {
+		if config.Store != nil && !payload.ForceRefresh {
 			quote, hit, err := config.Store.LatestQuote(request.Context(), symbol.String(), quoteCacheTTL)
 			if err != nil {
 				writeCacheError(response, context, "行情快照缓存读取失败", err)
@@ -186,7 +189,8 @@ func handleKline(config Config) http.HandlerFunc {
 			return
 		}
 
-		if config.Store != nil {
+		shouldCache := shouldCacheKline(period)
+		if shouldCache && config.Store != nil {
 			klines, err := config.Store.ListKlines(request.Context(), symbol.String(), string(period), string(adjust), payload.Limit)
 			if err != nil {
 				writeCacheError(response, context, "K 线缓存读取失败", err)
@@ -213,7 +217,7 @@ func handleKline(config Config) http.HandlerFunc {
 			return
 		}
 		sortKlineBars(bars)
-		if config.Store != nil {
+		if shouldCache && config.Store != nil {
 			if err := config.Store.SaveKlines(request.Context(), modelKlinesFromMarket(bars)); err != nil {
 				writeCacheError(response, context, "K 线缓存写入失败", err)
 				return
@@ -292,7 +296,8 @@ func loadKlines(
 	adjust marketservice.Adjust,
 	limit int,
 ) ([]model.Kline, bool) {
-	if config.Store != nil {
+	shouldCache := shouldCacheKline(period)
+	if shouldCache && config.Store != nil {
 		klines, err := config.Store.ListKlines(request.Context(), symbol.String(), string(period), string(adjust), limit)
 		if err != nil {
 			writeCacheError(response, context, "K 线缓存读取失败", err)
@@ -319,7 +324,7 @@ func loadKlines(
 	}
 	sortKlineBars(bars)
 	klines := modelKlinesFromMarket(bars)
-	if config.Store != nil {
+	if shouldCache && config.Store != nil {
 		if err := config.Store.SaveKlines(request.Context(), klines); err != nil {
 			writeCacheError(response, context, "K 线缓存写入失败", err)
 			return nil, false
@@ -341,16 +346,37 @@ func parseSymbol(response http.ResponseWriter, raw string, context httpx.Request
 // parsePeriod 校验首版 K 线周期白名单。
 func parsePeriod(response http.ResponseWriter, raw string, context httpx.RequestContext) (marketservice.Period, bool) {
 	switch marketservice.Period(strings.TrimSpace(raw)) {
+	case marketservice.PeriodMinute:
+		return marketservice.PeriodMinute, true
+	case marketservice.Period1Minute:
+		return marketservice.Period1Minute, true
+	case marketservice.Period5Minute:
+		return marketservice.Period5Minute, true
+	case marketservice.Period15Minute:
+		return marketservice.Period15Minute, true
+	case marketservice.Period30Minute:
+		return marketservice.Period30Minute, true
+	case marketservice.Period60Minute:
+		return marketservice.Period60Minute, true
 	case marketservice.PeriodDay:
 		return marketservice.PeriodDay, true
 	case marketservice.PeriodWeek:
 		return marketservice.PeriodWeek, true
 	case marketservice.PeriodMonth:
 		return marketservice.PeriodMonth, true
+	case marketservice.PeriodQuarter:
+		return marketservice.PeriodQuarter, true
+	case marketservice.PeriodYear:
+		return marketservice.PeriodYear, true
 	default:
 		httpx.WriteError(response, http.StatusBadRequest, 40003, "invalid_period", context)
 		return "", false
 	}
+}
+
+// shouldCacheKline 判断 K 线周期是否可持久化复用；盘中数据必须实时读取，避免隔日复用旧曲线。
+func shouldCacheKline(period marketservice.Period) bool {
+	return !period.IsIntraday()
 }
 
 // parseAdjust 校验首版 K 线复权方式白名单。
@@ -398,64 +424,90 @@ func writeCacheError(response http.ResponseWriter, context httpx.RequestContext,
 
 // quoteDataFromMarket 转换 Provider quote 为 API 响应字段。
 func quoteDataFromMarket(quote marketservice.Quote) quoteData {
+	quote = marketservice.NormalizeQuote(quote)
 	return quoteData{
-		Symbol:        quote.Symbol.String(),
-		Price:         quote.Price,
-		ChangeAmount:  quote.ChangeAmount,
-		ChangePercent: quote.ChangePercent,
-		Open:          quote.Open,
-		High:          quote.High,
-		Low:           quote.Low,
-		PreClose:      quote.PreClose,
-		Volume:        quote.Volume,
-		Amount:        quote.Amount,
-		TurnoverRate:  quote.TurnoverRate,
-		PE:            quote.PE,
-		PB:            quote.PB,
-		QuoteTime:     quote.QuoteTime,
-		Provider:      quote.Provider,
+		Symbol:         quote.Symbol.String(),
+		Price:          quote.Price,
+		ChangeAmount:   quote.ChangeAmount,
+		ChangePercent:  quote.ChangePercent,
+		Open:           quote.Open,
+		High:           quote.High,
+		Low:            quote.Low,
+		PreClose:       quote.PreClose,
+		Volume:         quote.Volume,
+		Amount:         quote.Amount,
+		TurnoverRate:   quote.TurnoverRate,
+		PE:             quote.PE,
+		PB:             quote.PB,
+		TotalMarketCap: quote.TotalMarketCap,
+		FloatMarketCap: quote.FloatMarketCap,
+		QuoteTime:      quote.QuoteTime,
+		Provider:       quote.Provider,
 	}
 }
 
 // quoteDataFromModel 转换缓存 quote 为 API 响应字段。
 func quoteDataFromModel(quote model.Quote) quoteData {
+	normalized := marketservice.NormalizeQuote(marketservice.Quote{
+		Price:          quote.Price,
+		ChangeAmount:   quote.ChangeAmount,
+		ChangePercent:  quote.ChangePercent,
+		Open:           quote.Open,
+		High:           quote.High,
+		Low:            quote.Low,
+		PreClose:       quote.PreClose,
+		Volume:         quote.Volume,
+		Amount:         quote.Amount,
+		TurnoverRate:   quote.TurnoverRate,
+		PE:             quote.PE,
+		PB:             quote.PB,
+		TotalMarketCap: quote.TotalMarketCap,
+		FloatMarketCap: quote.FloatMarketCap,
+		QuoteTime:      quote.QuoteTime,
+		Provider:       quote.Provider,
+	})
 	return quoteData{
-		Symbol:        quote.Symbol,
-		Price:         quote.Price,
-		ChangeAmount:  quote.ChangeAmount,
-		ChangePercent: quote.ChangePercent,
-		Open:          quote.Open,
-		High:          quote.High,
-		Low:           quote.Low,
-		PreClose:      quote.PreClose,
-		Volume:        quote.Volume,
-		Amount:        quote.Amount,
-		TurnoverRate:  quote.TurnoverRate,
-		PE:            quote.PE,
-		PB:            quote.PB,
-		QuoteTime:     quote.QuoteTime,
-		Provider:      quote.Provider,
+		Symbol:         quote.Symbol,
+		Price:          normalized.Price,
+		ChangeAmount:   normalized.ChangeAmount,
+		ChangePercent:  normalized.ChangePercent,
+		Open:           normalized.Open,
+		High:           normalized.High,
+		Low:            normalized.Low,
+		PreClose:       normalized.PreClose,
+		Volume:         normalized.Volume,
+		Amount:         normalized.Amount,
+		TurnoverRate:   normalized.TurnoverRate,
+		PE:             normalized.PE,
+		PB:             normalized.PB,
+		TotalMarketCap: normalized.TotalMarketCap,
+		FloatMarketCap: normalized.FloatMarketCap,
+		QuoteTime:      normalized.QuoteTime,
+		Provider:       normalized.Provider,
 	}
 }
 
 // modelQuoteFromMarket 转换 Provider quote 为可持久化缓存模型。
 func modelQuoteFromMarket(quote marketservice.Quote) model.Quote {
+	quote = marketservice.NormalizeQuote(quote)
 	return model.Quote{
-		Symbol:        quote.Symbol.String(),
-		Price:         quote.Price,
-		ChangeAmount:  quote.ChangeAmount,
-		ChangePercent: quote.ChangePercent,
-		Open:          quote.Open,
-		High:          quote.High,
-		Low:           quote.Low,
-		PreClose:      quote.PreClose,
-		Volume:        quote.Volume,
-		Amount:        quote.Amount,
-		TurnoverRate:  quote.TurnoverRate,
-		PE:            quote.PE,
-		PB:            quote.PB,
-		QuoteTime:     quote.QuoteTime,
-		Provider:      quote.Provider,
+		Symbol:         quote.Symbol.String(),
+		Price:          quote.Price,
+		ChangeAmount:   quote.ChangeAmount,
+		ChangePercent:  quote.ChangePercent,
+		Open:           quote.Open,
+		High:           quote.High,
+		Low:            quote.Low,
+		PreClose:       quote.PreClose,
+		Volume:         quote.Volume,
+		Amount:         quote.Amount,
+		TurnoverRate:   quote.TurnoverRate,
+		PE:             quote.PE,
+		PB:             quote.PB,
+		TotalMarketCap: quote.TotalMarketCap,
+		FloatMarketCap: quote.FloatMarketCap,
+		QuoteTime:      quote.QuoteTime,
+		Provider:       quote.Provider,
 	}
 }
 

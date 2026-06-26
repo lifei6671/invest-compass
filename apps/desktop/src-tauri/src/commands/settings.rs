@@ -61,6 +61,11 @@ struct SettingsForwardPlan {
 struct WorkspaceGetRequest {}
 
 #[derive(Deserialize, Serialize)]
+pub struct ProxyConnectionTestPayload {
+    target: String,
+}
+
+#[derive(Deserialize, Serialize)]
 pub struct WorkspaceSetPayload {
     path: String,
 }
@@ -156,6 +161,17 @@ pub fn settings_set(
             Err(error.to_string())
         }
     }
+}
+
+/// 执行代理连通性测试，固定转发到 Go core `/api/proxy/test`。
+#[tauri::command]
+pub fn proxy_connection_test(
+    app_handle: AppHandle,
+    state: State<'_, CoreState>,
+    payload: ProxyConnectionTestPayload,
+) -> Result<serde_json::Value, String> {
+    validate_proxy_test_target(&payload.target)?;
+    post_settings_api(&app_handle, &state, "/api/proxy/test", &payload)
 }
 
 /// 读取工作区路径，固定转发到 Go core `/api/workspace/get`。
@@ -523,6 +539,14 @@ fn validate_workspace_path(path: &str) -> Result<(), String> {
         return Err("invalid workspace path".to_string());
     }
     Ok(())
+}
+
+/// 校验代理测试目标必须来自页面白名单，避免前端借命令访问任意 URL。
+fn validate_proxy_test_target(target: &str) -> Result<(), String> {
+    match target.trim() {
+        "baidu" | "google" | "openai" | "deepseek" => Ok(()),
+        _ => Err("invalid proxy test target".to_string()),
+    }
 }
 
 /// 从 Go core 读取持久化工作区路径；没有持久化时回退到当前平台默认目录。
@@ -1374,6 +1398,17 @@ mod tests {
             validate_workspace_path("relative/workspace")
                 .expect_err("relative workspace path should fail"),
             "invalid workspace path"
+        );
+    }
+
+    #[test]
+    /// 验证代理测试命令只接受固定目标标识，不能被用作任意 URL 访问代理。
+    fn validate_proxy_test_target_rejects_arbitrary_url() {
+        assert!(validate_proxy_test_target("baidu").is_ok());
+        assert_eq!(
+            validate_proxy_test_target("https://example.com")
+                .expect_err("arbitrary URL should fail"),
+            "invalid proxy test target"
         );
     }
 

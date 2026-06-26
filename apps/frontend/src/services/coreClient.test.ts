@@ -17,8 +17,10 @@ import {
   marketIndicators,
   marketKline,
   marketQuote,
+  newsHotTopics,
   newsList,
   newsMarket,
+  newsStats,
   notificationsClearRead,
   notificationsList,
   notificationsMarkAllRead,
@@ -30,14 +32,19 @@ import {
   promptTemplatesGet,
   promptTemplatesList,
   promptTemplatesUpdate,
+  reportBatchDelete,
   reportDelete,
+  reportExport,
   reportGet,
   reportList,
+  reportStats,
+  reportUpdate,
   cacheClean,
   cacheStats,
   checkUpdate,
   exportLogs,
   providersStatus,
+  proxyConnectionTest,
   schedulerJobTypes,
   schedulerJobsBackfill,
   schedulerJobsDelete,
@@ -355,18 +362,18 @@ describe("coreClient", () => {
     await expect(stockSearch("浦发")).resolves.toEqual([
       { symbol: "600000.SH", name: "浦发银行", code: "600000", market: "CN", exchange: "SH" },
     ]);
-    await expect(marketQuote("600000.SH")).resolves.toMatchObject({
+    await expect(marketQuote("600000.SH", { forceRefresh: true })).resolves.toMatchObject({
       symbol: "600000.SH",
       price: 7.12,
       provider: "sina",
     });
     expect(calls).toEqual([
       { command: "stock_search", payload: { keyword: "浦发" } },
-      { command: "market_quote", payload: { symbol: "600000.SH" } },
+      { command: "market_quote", payload: { symbol: "600000.SH", forceRefresh: true } },
     ]);
   });
 
-  test("marketKline、marketIndicators、newsList 和 newsMarket 通过固定 Tauri command 读取详情与资讯中心数据", async () => {
+  test("marketKline、marketIndicators、newsList、newsMarket 和新闻统计通过固定 Tauri command 读取数据", async () => {
     const calls: Array<{ command: string; payload?: unknown }> = [];
     mockIPC((command, payload) => {
       calls.push({ command, payload });
@@ -427,6 +434,29 @@ describe("coreClient", () => {
           },
         };
       }
+      if (command === "news_stats") {
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            total_count: 2,
+            source_count: 2,
+            latest_published_at: "2026-06-24T13:30:00Z",
+            sentiment_summary: "暂未接入情绪分类，当前仅展示新闻缓存数量、来源和标签统计。",
+          },
+        };
+      }
+      if (command === "news_hot_topics") {
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            industries: [{ name: "光模块", count: 2 }],
+            mentioned_stocks: [{ symbol: "CN:SZ:300308", count: 2 }],
+            updated_at: "2026-06-24T13:30:00Z",
+          },
+        };
+      }
       return {
         code: 0,
         message: "ok",
@@ -470,6 +500,15 @@ describe("coreClient", () => {
     await expect(newsMarket({ market: "CN", limit: 20 })).resolves.toMatchObject({
       items: [{ title: "市场新闻", url: "https://example.com/news/2" }],
     });
+    await expect(newsStats({ market: "CN", limit: 20 })).resolves.toMatchObject({
+      total_count: 2,
+      source_count: 2,
+      sentiment_summary: "暂未接入情绪分类，当前仅展示新闻缓存数量、来源和标签统计。",
+    });
+    await expect(newsHotTopics({ market: "CN", limit: 20 })).resolves.toMatchObject({
+      industries: [{ name: "光模块", count: 2 }],
+      mentioned_stocks: [{ symbol: "CN:SZ:300308", count: 2 }],
+    });
 
     expect(calls).toEqual([
       {
@@ -492,6 +531,14 @@ describe("coreClient", () => {
       },
       {
         command: "news_market",
+        payload: { market: "CN", limit: 20 },
+      },
+      {
+        command: "news_stats",
+        payload: { market: "CN", limit: 20 },
+      },
+      {
+        command: "news_hot_topics",
         payload: { market: "CN", limit: 20 },
       },
     ]);
@@ -541,7 +588,7 @@ describe("coreClient", () => {
         return {
           code: 0,
           message: "ok",
-          data: { ok: true, provider: "openai-compatible", model: "gpt-4.1-mini", message: "ok" },
+          data: { ok: true, provider: "openai-compatible", model: "gpt-4.1-mini", message: "ok", duration_ms: 128 },
         };
       }
       if (command === "ai_config_delete") {
@@ -598,6 +645,7 @@ describe("coreClient", () => {
       provider: "openai-compatible",
       model: "gpt-4.1-mini",
       message: "ok",
+      duration_ms: 128,
     });
     await expect(aiConfigDelete({ id: 1 })).resolves.toEqual({ deleted_id: 1 });
 
@@ -754,6 +802,7 @@ describe("coreClient", () => {
         ai_config_id: 1,
         api_key_ref: "local-vault://ai-config/openai-1",
         prompt_template_id: 7,
+        retry_of_task_id: "analysis-old",
         user_position: { cost_price: 7.01, shares: 100, risk_level: "稳健" },
       }),
     ).resolves.toEqual({ task_id: "analysis-1", status: "PENDING" });
@@ -770,6 +819,7 @@ describe("coreClient", () => {
             ai_config_id: 1,
             api_key_ref: "local-vault://ai-config/openai-1",
             prompt_template_id: 7,
+            retry_of_task_id: "analysis-old",
             user_position: { cost_price: 7.01, shares: 100, risk_level: "稳健" },
           },
         },
@@ -790,13 +840,31 @@ describe("coreClient", () => {
         case "task_get":
           return { code: 0, message: "ok", data: { id: "analysis-1", type: "ANALYSIS", status: "SUCCESS", title: "浦发分析", progress: 100 } };
         case "task_events":
-          return { code: 0, message: "ok", data: { items: [{ id: 2, event: "TASK_CHUNK", data: { content: "阶段观点" } }] } };
+          return { code: 0, message: "ok", data: { items: [{ id: 2, task_id: "analysis-1", event_type: "TASK_CHUNK", payload: "{\"content\":\"阶段观点\"}" }] } };
         case "report_list":
           return { code: 0, message: "ok", data: { items: [{ id: 3, task_id: "analysis-1", symbol: "600000.SH", title: "浦发分析", risk_summary: "波动风险" }] } };
         case "report_get":
           return { code: 0, message: "ok", data: { id: 3, task_id: "analysis-1", symbol: "600000.SH", title: "浦发分析", content_markdown: "## 结论", risk_summary: "波动风险" } };
         case "report_delete":
           return { code: 0, message: "ok", data: { id: 3 } };
+        case "report_update":
+          return { code: 0, message: "ok", data: { id: 3, task_id: "analysis-1", symbol: "600000.SH", title: "浦发分析", favorite: true } };
+        case "report_export":
+          return { saved: true, file_path: "/tmp/浦发分析.md", file_name: "浦发分析.md" };
+        case "report_stats":
+          return {
+            code: 0,
+            message: "ok",
+            data: {
+              total: 2,
+              unique_symbols: 2,
+              latest_created_at: "2026-06-24T12:00:00Z",
+              analysis_types: [{ name: "technical", count: 1 }],
+              top_models: [{ name: "deepseek-chat", count: 2 }],
+            },
+          };
+        case "report_batch_delete":
+          return { code: 0, message: "ok", data: { ids: [3, 4] } };
         default:
           throw new Error(`unexpected command ${command}`);
       }
@@ -804,10 +872,14 @@ describe("coreClient", () => {
 
     await expect(taskList(20)).resolves.toMatchObject({ items: [{ id: "analysis-1", status: "SUCCESS" }] });
     await expect(taskGet("analysis-1")).resolves.toMatchObject({ id: "analysis-1", title: "浦发分析" });
-    await expect(taskEvents("analysis-1", 1)).resolves.toMatchObject({ items: [{ event: "TASK_CHUNK" }] });
+    await expect(taskEvents("analysis-1", 1)).resolves.toMatchObject({ items: [{ event: "TASK_CHUNK", data: { content: "阶段观点" } }] });
     await expect(reportList()).resolves.toMatchObject({ items: [{ id: 3, title: "浦发分析" }] });
     await expect(reportGet(3)).resolves.toMatchObject({ id: 3, content_markdown: "## 结论" });
     await expect(reportDelete(3)).resolves.toEqual({ id: 3 });
+    await expect(reportUpdate(3, true)).resolves.toMatchObject({ id: 3, favorite: true });
+    await expect(reportExport(3)).resolves.toEqual({ saved: true, file_path: "/tmp/浦发分析.md", file_name: "浦发分析.md" });
+    await expect(reportStats()).resolves.toMatchObject({ total: 2, top_models: [{ name: "deepseek-chat", count: 2 }] });
+    await expect(reportBatchDelete([3, 4])).resolves.toEqual({ ids: [3, 4] });
 
     expect(calls).toEqual([
       { command: "task_list", payload: { limit: 20 } },
@@ -816,6 +888,10 @@ describe("coreClient", () => {
       { command: "report_list", payload: {} },
       { command: "report_get", payload: { id: 3 } },
       { command: "report_delete", payload: { id: 3 } },
+      { command: "report_update", payload: { id: 3, favorite: true } },
+      { command: "report_export", payload: { id: 3 } },
+      { command: "report_stats", payload: {} },
+      { command: "report_batch_delete", payload: { ids: [3, 4] } },
     ]);
   });
 
@@ -828,6 +904,21 @@ describe("coreClient", () => {
           return { code: 0, message: "ok", data: { items: [{ key: "proxy_url", value: "http://127.0.0.1:7890" }] } };
         case "settings_set":
           return { code: 0, message: "ok", data: { saved_keys: ["proxy_url", "proxy_credential_ref"] } };
+        case "proxy_connection_test":
+          return {
+            code: 0,
+            message: "ok",
+            data: {
+              result: {
+                ok: true,
+                target: "baidu",
+                status_code: 200,
+                duration_ms: 128,
+                checked_at: "2026-06-24T12:00:00Z",
+                message: "ok",
+              },
+            },
+          };
         case "workspace_get":
           return { code: 0, message: "ok", data: { path: "/Users/demo/InvestCompass" } };
         case "workspace_set":
@@ -846,6 +937,7 @@ describe("coreClient", () => {
         clear_proxy_credential: false,
       }),
     ).resolves.toEqual({ saved_keys: ["proxy_url", "proxy_credential_ref"] });
+    await expect(proxyConnectionTest({ target: "baidu" })).resolves.toMatchObject({ result: { ok: true, duration_ms: 128 } });
     await expect(workspaceGet()).resolves.toEqual({ path: "/Users/demo/InvestCompass" });
     await expect(workspaceSet("/Users/demo/InvestCompass2")).resolves.toEqual({ path: "/Users/demo/InvestCompass2" });
 
@@ -862,6 +954,7 @@ describe("coreClient", () => {
           },
         },
       },
+      { command: "proxy_connection_test", payload: { payload: { target: "baidu" } } },
       { command: "workspace_get", payload: {} },
       { command: "workspace_set", payload: { payload: { path: "/Users/demo/InvestCompass2" } } },
     ]);
@@ -879,7 +972,17 @@ describe("coreClient", () => {
         case "providers_status":
           return { code: 0, message: "ok", data: [{ name: "Market", source: "unconfigured", available: false, last_error: "未配置" }] };
         case "check_update":
-          return { code: 0, message: "ok", data: { current_version: "0.1.0", latest_version: "0.1.1", has_update: true, release_notes: "修复问题" } };
+          return {
+            code: 0,
+            message: "ok",
+            data: {
+              current_version: "0.1.0",
+              latest_version: "0.1.1",
+              has_new_version: true,
+              action: "PROMPT_ONLY",
+              release_notes_url: "https://updates.invest-compass.example/releases/0.1.1",
+            },
+          };
         case "export_logs":
           return { file_path: "/tmp/invest-compass.log", file_name: "invest-compass.log" };
         default:
@@ -890,7 +993,7 @@ describe("coreClient", () => {
     await expect(cacheStats()).resolves.toMatchObject({ total_bytes: 30 });
     await expect(cacheClean(["quote"])).resolves.toEqual({ cleaned_targets: ["quote"] });
     await expect(providersStatus()).resolves.toMatchObject({ items: [{ source: "unconfigured" }] });
-    await expect(checkUpdate()).resolves.toMatchObject({ has_update: true });
+    await expect(checkUpdate()).resolves.toMatchObject({ has_new_version: true, action: "PROMPT_ONLY" });
     await expect(exportLogs("/tmp")).resolves.toEqual({ file_path: "/tmp/invest-compass.log", file_name: "invest-compass.log" });
 
     expect(calls).toEqual([

@@ -1,22 +1,27 @@
-import { Button, Card, Empty, Progress, Spin, Table, Tag, Tooltip } from "antd";
+import { Button, Card, Empty, Progress, Spin, Table, Tag, Tooltip, type TableProps } from "antd";
 import { ArrowRightOutlined, FileDoneOutlined, InfoCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { useEffect, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { EChartView } from "../charts/EChartView";
+import { useAutoRefresh } from "../../hooks/useAutoRefresh";
 import { useDashboardStore, type DashboardQuoteState, type DashboardViewState, type DashboardWatchlistRow } from "../../stores/dashboardStore";
 import type { MarketKlineItem, MarketQuote } from "../../services/coreClient";
 import { APP_FONT, APP_NUMBER_FONT } from "../../styles/fonts";
-import { formatClock } from "./dashboardUtils";
+import { chinaMarketSessionLabel, chinaMarketSessionStatus, formatClock } from "./dashboardUtils";
 
 export function DashboardOverview() {
   const state = useDashboardStore((store) => store.state);
   const loading = useDashboardStore((store) => store.loading);
   const error = useDashboardStore((store) => store.error);
   const load = useDashboardStore((store) => store.load);
+  const hasCachedState = Boolean(state);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!hasCachedState) {
+      void load();
+    }
+  }, [hasCachedState, load]);
+  useAutoRefresh(() => load({ forceRefresh: true }));
 
   if (error) {
     return <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">总览读取失败：{error}</div>;
@@ -24,7 +29,7 @@ export function DashboardOverview() {
   if (!state) {
     return (
       <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-        正在连接本地核心服务 {loading ? <Spin className="ml-2" size="small" /> : null}
+        正在加载概览缓存数据 {loading ? <Spin className="ml-2" size="small" /> : null}
       </div>
     );
   }
@@ -59,27 +64,35 @@ function MarketIndexStrip(props: { state: DashboardViewState }) {
 function IndexQuoteCard(props: { item: DashboardQuoteState; trend: MarketKlineItem[] }) {
   const quote = props.item.quote;
   const tone = percentTone(quote?.change_percent);
+  const marketStatus = chinaMarketSessionLabel(chinaMarketSessionStatus(quote?.quote_time));
+  const displayName = indexDisplayName(props.item.symbol);
   return (
-    <Card className="dashboard-card dashboard-index-card min-h-[174px] rounded-lg border-[#dfe7f2] shadow-[0_4px_18px_rgba(15,23,42,0.05)]">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[16px] font-medium leading-6 text-slate-950">{indexDisplayName(props.item.symbol)}</div>
-          <div className="mt-0.5 text-[14px] leading-5 text-slate-500">{props.item.symbol}</div>
-          <div className={["app-number mt-4 text-[24px] font-medium leading-8", valueToneClass(tone)].join(" ")}>
-            {quote ? formatNumber(quote.price) : "--"}
+    <Link aria-label={`查看${displayName}K线图`} className="block text-inherit no-underline" state={{ from: "/" }} to={chartKlinePath(props.item.symbol)}>
+      <Card className="dashboard-card dashboard-index-card min-h-[174px] cursor-pointer rounded-lg border-[#dfe7f2] shadow-[0_4px_18px_rgba(15,23,42,0.05)] transition hover:border-[#9fc5ff] hover:shadow-[0_8px_22px_rgba(22,119,255,0.08)]">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-[16px] font-medium leading-6 text-slate-950">{displayName}</div>
+            <div className="mt-0.5 text-[14px] leading-5 text-slate-500">{props.item.symbol}</div>
+            <div className={["app-number mt-4 text-[24px] font-medium leading-8", valueToneClass(tone)].join(" ")}>
+              {quote ? formatNumber(quote.price) : "--"}
+            </div>
+            <div className={["app-number mt-1 flex items-center gap-3 text-[15px] font-medium", valueToneClass(tone)].join(" ")}>
+              <span>{formatSignedNumber(quoteChangeAmount(quote))}</span>
+              <span>{formatPercent(quote?.change_percent)}</span>
+            </div>
           </div>
-          <div className={["app-number mt-1 flex items-center gap-3 text-[15px] font-medium", valueToneClass(tone)].join(" ")}>
-            <span>{formatSignedNumber(quoteChangeAmount(quote))}</span>
-            <span>{formatPercent(quote?.change_percent)}</span>
-          </div>
+          <MiniTrendChart items={props.trend} tone={tone} />
         </div>
-        <MiniTrendChart items={props.trend} tone={tone} />
-      </div>
-      <div className="mt-4 text-[14px] text-slate-500">
-        {formatClock(quote?.quote_time) || "--:--:--"} <span className="ml-2">已收盘</span>
-      </div>
-    </Card>
+        <div className="mt-4 text-[14px] text-slate-500">
+          {formatClock(quote?.quote_time) || "--:--:--"} <span className="ml-2">{marketStatus}</span>
+        </div>
+      </Card>
+    </Link>
   );
+}
+
+function chartKlinePath(symbol: string) {
+  return `/chart/kline?symbol=${encodeURIComponent(symbol)}&period=day&adjust=qfq`;
 }
 
 function WatchlistDistributionCard(props: { state: DashboardViewState }) {
@@ -93,29 +106,31 @@ function WatchlistDistributionCard(props: { state: DashboardViewState }) {
     { label: "平盘", value: flatCount, percent: watchlistPercent(total, flatCount), tone: "flat" },
   ];
   return (
-    <DashboardCard className="h-[270px] overflow-hidden" title="自选股涨跌分布" action={<InfoCircleTooltip title="基于自选股最新行情统计，未读取到行情的股票不计入涨跌分布。" />}>
-      <div className="grid min-h-[190px] grid-cols-[minmax(148px,1fr)_128px_minmax(116px,0.8fr)] items-center gap-3">
+    <DashboardCard className="min-h-[270px]" title="自选股涨跌分布" action={<InfoCircleTooltip title="基于自选股最新行情统计，未读取到行情的股票不计入涨跌分布。" />}>
+      <div className="dashboard-watchlist-distribution-body dashboard-watchlist-distribution-stack flex min-h-[190px] flex-wrap items-center gap-x-6 gap-y-5">
         <DistributionDonut rows={rows} total={total} />
-        <div className="space-y-3">
-          {rows.map((row) => (
-            <div key={row.label} className="grid grid-cols-[1fr_36px_58px] items-center gap-3 text-[14px]">
-              <div className="flex items-center gap-3 text-slate-700">
-                <span className={["h-2.5 w-2.5 rounded-full", dotClass(row.tone)].join(" ")} />
-                {row.label}
+        <div className="dashboard-watchlist-distribution-stats flex min-w-[min(100%,360px)] flex-1 flex-wrap items-start gap-x-6 gap-y-4">
+          <div className="min-w-[150px] flex-[0_1_170px] space-y-3">
+            {rows.map((row) => (
+              <div key={row.label} className="grid grid-cols-[48px_28px_minmax(46px,1fr)] items-center gap-1.5 text-[14px]">
+                <div className="flex min-w-0 items-center gap-2 text-slate-700">
+                  <span className={["h-2.5 w-2.5 shrink-0 rounded-full", dotClass(row.tone)].join(" ")} />
+                  <span className="whitespace-nowrap">{row.label}</span>
+                </div>
+                <div className="app-number text-right text-[16px] font-medium text-slate-950">{row.value}</div>
+                <div className="app-number whitespace-nowrap text-right text-slate-500">{row.percent}</div>
               </div>
-              <div className="app-number text-right text-[16px] font-medium text-slate-950">{row.value}</div>
-              <div className="app-number text-right text-slate-500">{row.percent}</div>
-            </div>
-          ))}
-        </div>
-        <div className="min-w-0 border-l border-[#e7edf5] pl-4">
-          <div className="mb-3 flex min-w-0 items-center gap-1 text-[14px] font-medium text-slate-800">
-            <span className="truncate">今日总体表现</span>
-            <InfoCircleOutlined className="shrink-0 text-[14px] text-slate-400" />
+            ))}
           </div>
-          <MetricLine label="平均涨跌幅" value={averageWatchlistChange(props.state.watchlistRows)} tone={percentTone(averageWatchlistChangeNumber(props.state.watchlistRows))} />
-          <MetricLine label="上涨概率" value={total > 0 ? `${((upCount / total) * 100).toFixed(2)}%` : "--"} tone="up" />
-          <MetricLine label="统计样本" value={total > 0 ? `${total} 只` : "--"} tone="flat" />
+          <div className="dashboard-watchlist-distribution-metrics min-w-[170px] flex-1 border-l border-[#e7edf5] px-4">
+            <div className="mb-3 flex min-w-0 items-center gap-1 text-[14px] font-medium text-slate-800">
+              <span className="truncate">今日总体表现</span>
+              <InfoCircleOutlined className="shrink-0 text-[14px] text-slate-400" />
+            </div>
+            <MetricLine label="平均涨跌幅" value={averageWatchlistChange(props.state.watchlistRows)} tone={percentTone(averageWatchlistChangeNumber(props.state.watchlistRows))} />
+            <MetricLine label="上涨概率" value={total > 0 ? `${((upCount / total) * 100).toFixed(2)}%` : "--"} tone="up" />
+            <MetricLine label="统计样本" value={total > 0 ? `${total} 只` : "--"} tone="flat" />
+          </div>
         </div>
       </div>
     </DashboardCard>
@@ -136,13 +151,14 @@ function RecentReportsCard(props: { state: DashboardViewState }) {
   return (
     <DashboardCard className="dashboard-card-fill h-[260px] overflow-hidden" title="最近分析报告">
       {rows.length > 0 ? (
-        <div className="min-h-0 flex-1">
+        <div className="dashboard-summary-table-body min-h-0 flex-1 overflow-hidden">
           <Table
             className="dashboard-table"
             rowKey="id"
             size="small"
             tableLayout="fixed"
             pagination={false}
+            scroll={{ y: 142 }}
             dataSource={rows}
             columns={[
               { title: "报告标题", dataIndex: "title", width: 210, ellipsis: true, render: (value: string) => <span className="block truncate font-medium text-slate-800">{value}</span> },
@@ -150,7 +166,7 @@ function RecentReportsCard(props: { state: DashboardViewState }) {
               { title: "分析类型", dataIndex: "analysis_type", width: 100, render: (value?: string) => <AnalysisTypeTag value={value} /> },
               { title: "模型", dataIndex: "model_name", width: 86, ellipsis: true, render: (value?: string) => value || "--" },
               { title: "生成时间", dataIndex: "created_at", width: 112, render: (value?: string) => formatShortDateTime(value) },
-              { title: "操作", key: "action", width: 64, render: (_: unknown, record: { id: number }) => <Link className="text-[#1677ff]" to={`/reports?id=${record.id}`}>查看</Link> },
+              { title: "操作", key: "action", width: 64, render: (_: unknown, record: { id: number }) => <Link className="text-[#1677ff]" to={`/reports/${record.id}`}>查看</Link> },
             ]}
           />
         </div>
@@ -164,24 +180,26 @@ function RecentReportsCard(props: { state: DashboardViewState }) {
 
 function RecentTasksCard(props: { state: DashboardViewState }) {
   const rows = props.state.summary.recent_tasks.slice(0, 5);
+  const columns: TableProps<DashboardViewState["summary"]["recent_tasks"][number]>["columns"] = [
+    { title: "任务标题", dataIndex: "title", width: 180, ellipsis: true, render: (value: string) => <span className="block truncate font-medium text-slate-800">{value}</span> },
+    { title: "类型", key: "type", width: 92, ellipsis: true, render: (_: unknown, record) => taskTypeText(record.type ?? record.task_type) },
+    { title: "状态", dataIndex: "status", width: 92, render: (value: string) => <TaskStatusTag status={value} /> },
+    { title: "进度", dataIndex: "progress", width: 108, render: (value?: number) => <Progress percent={value ?? 0} size="small" showInfo={false} strokeColor="#1677ff" railColor="#e5e7eb" /> },
+    { title: "结果摘要", key: "summary", ellipsis: true, render: (_: unknown, record) => <span className="block truncate">{taskResultText(record)}</span> },
+  ];
   return (
     <DashboardCard className="dashboard-card-fill h-[260px] overflow-hidden" title="最近任务状态">
       {rows.length > 0 ? (
-        <div className="min-h-0 flex-1">
-          <Table
+        <div className="dashboard-summary-table-body min-h-0 flex-1 overflow-hidden">
+          <Table<DashboardViewState["summary"]["recent_tasks"][number]>
             className="dashboard-table"
             rowKey="id"
             size="small"
             tableLayout="fixed"
             pagination={false}
+            scroll={{ y: 142 }}
             dataSource={rows}
-            columns={[
-              { title: "任务标题", dataIndex: "title", width: 180, ellipsis: true, render: (value: string) => <span className="block truncate font-medium text-slate-800">{value}</span> },
-              { title: "类型", dataIndex: "type", width: 108, ellipsis: true, render: (value?: string) => taskTypeText(value) },
-              { title: "状态", dataIndex: "status", width: 92, render: (value: string) => <TaskStatusTag status={value} /> },
-              { title: "进度", dataIndex: "progress", width: 118, render: (value?: number) => <Progress percent={value ?? 0} size="small" showInfo={false} strokeColor="#1677ff" railColor="#e5e7eb" /> },
-              { title: "结果摘要", key: "summary", ellipsis: true, render: (_: unknown, record: { status: string; error_message?: string; progress?: number }) => <span className="block truncate">{taskResultText(record)}</span> },
-            ]}
+            columns={columns}
           />
         </div>
       ) : (
@@ -230,7 +248,7 @@ function DashboardCard(props: { title: string; action?: ReactNode; className?: s
 
 function CardAction(props: { label: string; to: string }) {
   return (
-    <div className="mt-3 flex h-8 shrink-0 items-center justify-center border-t border-[#eef3f8] pt-3 text-center">
+    <div className="dashboard-card-action mt-3 flex h-8 shrink-0 items-center justify-center border-t border-[#eef3f8] pt-3 text-center">
       <Link to={props.to}>
         <Button type="link" className="h-auto px-0 text-[14px] font-medium text-[#1677ff]" iconPlacement="end" icon={<ArrowRightOutlined />}>
           {props.label}
@@ -364,7 +382,7 @@ function ComplianceBanner(props: { tips: string[] }) {
 
 function MetricLine(props: { label: string; value: string; tone: string }) {
   return (
-    <div className="mb-4">
+    <div className="mb-3 last:mb-0">
       <div className="text-[14px] text-slate-500">{props.label}</div>
       <div className={["app-number mt-1 text-[17px] font-medium", valueToneClass(props.tone)].join(" ")}>{props.value}</div>
     </div>
@@ -488,8 +506,10 @@ function taskTypeText(value?: string) {
       return "AI 分析报告";
     case "MARKET":
       return "市场分析";
+    case "SEARCH_REBUILD":
+      return "索引重建";
     default:
-      return value || "AI 分析报告";
+      return value || "--";
   }
 }
 

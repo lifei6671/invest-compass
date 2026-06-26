@@ -103,6 +103,7 @@ func TestValidateSettingAcceptsKnownSettingValues(t *testing.T) {
 		{Key: SettingKeyDataSourceDefaultMarketSource, Value: DataSourceMarketSourceAutoFallback},
 		{Key: SettingKeyDataSourceDefaultMarketSource, Value: DataSourceMarketSourceSina},
 		{Key: SettingKeyDataSourceDefaultMarketSource, Value: DataSourceMarketSourceTencent},
+		{Key: SettingKeyDataSourceDefaultMarketSource, Value: DataSourceMarketSourceTdx},
 	} {
 		if err := ValidateSetting(setting); err != nil {
 			t.Fatalf("ValidateSetting(%+v) returned error: %v", setting, err)

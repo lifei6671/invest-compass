@@ -2,10 +2,7 @@ import {
   CompressOutlined,
   DownOutlined,
   FullscreenOutlined,
-  RedoOutlined,
   SearchOutlined,
-  ToolOutlined,
-  UndoOutlined,
 } from "@ant-design/icons";
 import { Button, Input, Select } from "antd";
 import type { ReactNode } from "react";
@@ -16,7 +13,9 @@ type PromptTemplateEditorProps = {
   templateTypeOptions: Array<{ label: string; value: PromptTemplateCategoryType }>;
   readOnly?: boolean;
   onChange: (value: PromptEditorState) => void;
-  onToolAction: (action: string) => void;
+  onSearch: () => void;
+  onInsertVariable: () => void;
+  onValidate: () => void;
   onFormat: () => void;
   onFullscreen: () => void;
 };
@@ -63,12 +62,9 @@ export function PromptTemplateEditor(props: PromptTemplateEditorProps) {
       <div className="prompt-editor-shell prompt-editor-shell-aligned">
         <div className="prompt-editor-toolbar">
           <div className="prompt-editor-tool-group">
-            <ToolButton label="撤销" icon={<UndoOutlined />} onClick={() => props.onToolAction("撤销待接入")} />
-            <ToolButton label="重做" icon={<RedoOutlined />} onClick={() => props.onToolAction("重做待接入")} />
-            <ToolButton label="搜索" icon={<SearchOutlined />} onClick={() => props.onToolAction("搜索待接入")} />
-            <ToolButton label="插入变量" icon={<CompressOutlined />} onClick={() => props.onToolAction("插入变量待接入")} />
-            <ToolButton label="格式检查" icon={<DownOutlined />} onClick={() => props.onToolAction("格式检查待接入")} />
-            <ToolButton label="变量符号" text="{}" onClick={() => props.onToolAction("变量符号待接入")} />
+            <ToolButton label="搜索" icon={<SearchOutlined />} onClick={props.onSearch} />
+            <ToolButton label="插入变量" icon={<CompressOutlined />} onClick={props.onInsertVariable} />
+            <ToolButton label="格式检查" icon={<DownOutlined />} onClick={props.onValidate} />
           </div>
           <div className="prompt-editor-tool-group">
             <Button size="small" className="prompt-format-button" onClick={props.onFormat}>

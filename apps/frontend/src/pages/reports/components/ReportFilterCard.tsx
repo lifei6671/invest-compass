@@ -6,17 +6,17 @@ import type { FormEvent } from "react";
 
 type ReportFilterCardProps = {
   filters: ReportFilters;
+  modelOptions: string[];
   onChange: (patch: Partial<ReportFilters>) => void;
   onReset: () => void;
   onQuery: () => void;
 };
 
 const analysisTypeOptions = ["全部类型", "个股综合分析", "技术面分析", "财务分析", "持仓分析"];
-const modelOptions = ["全部模型", "DeepSeek-V3", "Qwen2.5-72B", "OpenAI GPT-4o", "DeepSeek-R1", "Claude 3.7 Sonnet"];
 const statusOptions = ["全部状态", "成功", "失败", "生成中"];
 const { RangePicker } = DatePicker;
 
-export function ReportFilterCard({ filters, onChange, onReset, onQuery }: ReportFilterCardProps) {
+export function ReportFilterCard({ filters, modelOptions, onChange, onReset, onQuery }: ReportFilterCardProps) {
   const updateDateRange = (start: string, end: string) => {
     onChange({
       dateRangeStart: start,

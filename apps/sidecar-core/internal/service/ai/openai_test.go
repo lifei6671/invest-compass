@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -99,6 +100,37 @@ func TestOpenAIConfigTesterUsesResolvedAPIKey(t *testing.T) {
 	}
 }
 
+// TestOpenAIConfigTesterUsesInjectedHTTPClient 验证模型连通性测试可复用运行时代理 HTTP client。
+func TestOpenAIConfigTesterUsesInjectedHTTPClient(t *testing.T) {
+	var called bool
+	tester := OpenAIConfigTester{
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			called = true
+			if request.URL.Host != "ai.example.test" {
+				t.Fatalf("unexpected host: %s", request.URL.Host)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"id":"chatcmpl-test","choices":[{"message":{"content":"ok"}}]}`)),
+			}, nil
+		})},
+	}
+
+	result, err := tester.TestAIConfig(context.Background(), Config{
+		Provider:       ProviderOpenAICompatible,
+		BaseURL:        "https://ai.example.test",
+		ModelName:      "gpt-connectivity",
+		TimeoutSeconds: 1,
+	}, "sk-runtime-secret")
+	if err != nil {
+		t.Fatalf("TestAIConfig returned error: %v", err)
+	}
+	if !called || !result.OK {
+		t.Fatalf("expected injected HTTP client to be used, called=%v result=%+v", called, result)
+	}
+}
+
 // TestOpenAIConfigTesterSupportsDeepSeekProvider 验证 DeepSeek Provider 复用 OpenAI-compatible 连通性测试协议。
 func TestOpenAIConfigTesterSupportsDeepSeekProvider(t *testing.T) {
 	var gotPath string
@@ -126,6 +158,13 @@ func TestOpenAIConfigTesterSupportsDeepSeekProvider(t *testing.T) {
 	if !result.OK || result.Provider != ProviderDeepSeek || result.Model != "deepseek-chat" || result.Message != "ok" {
 		t.Fatalf("unexpected safe test result: %+v", result)
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+// RoundTrip 让测试以函数形式替换 HTTP transport，验证请求头和路径。
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
 }
 
 // TestOpenAIConfigTesterRejectsMissingRuntimeKey 验证连通性测试必须由 Rust 注入运行期密钥。

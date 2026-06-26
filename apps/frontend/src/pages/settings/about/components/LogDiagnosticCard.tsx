@@ -4,6 +4,7 @@ type LogDiagnosticCardProps = {
   description: string;
   actionText: string;
   onAction: () => void;
+  loading?: boolean;
 };
 
 export function LogDiagnosticCard(props: LogDiagnosticCardProps) {
@@ -14,8 +15,8 @@ export function LogDiagnosticCard(props: LogDiagnosticCardProps) {
         <h3>日志与诊断</h3>
       </header>
       <p>{props.description}</p>
-      <button type="button" onClick={props.onAction}>
-        {props.actionText}
+      <button type="button" disabled={props.loading} onClick={props.onAction}>
+        {props.loading ? "导出中..." : props.actionText}
         <ExportOutlined />
       </button>
     </section>

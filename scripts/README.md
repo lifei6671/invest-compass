@@ -91,16 +91,29 @@ checks:
 ```bash
 pnpm --dir apps provider:smoke
 pnpm --dir apps provider:smoke -- --allow-network --confirm-provider-terms
+pnpm --dir apps provider:credential-smoke -- --workspace "$HOME/Documents/Invest Compass" --providers all --allow-network --confirm-provider-terms
 ```
 
 The default command is a dry run and does not access the network. Live smoke
 checks require both `--allow-network` and `--confirm-provider-terms` so the
 operator explicitly confirms data source terms, authorization, and rate-limit
-boundaries before touching third-party endpoints. Live checks require each
-endpoint to return the expected provider-specific body shape, not just a non-empty
-HTTP 200 response; this still does not prove data source authorization,
-redistribution rights, or production availability.
+boundaries before touching third-party endpoints. `provider:smoke` live checks
+require each endpoint to return the expected provider-specific body shape, not
+just a non-empty HTTP 200 response; this still does not prove data source
+authorization, redistribution rights, or production availability.
 
 Live failure output includes a stable `failureReason` so operators can
 distinguish HTTP rejection (`http_status_<code>`), provider body shape mismatch
 (`body_shape_mismatch`), and request transport errors (`request_error`).
+
+Use `provider:credential-smoke` when validating the credential-backed Provider
+chain against a real local user workspace. It opens the workspace SQLite
+database, reads the data-source vault key, reuses the Go core credential service
+and settings-backed proxy HTTP client, then writes only provider id, provider
+name, target, status, response time, tested time, and sanitized messages to
+stdout. It intentionally omits the local workspace path. The command must not
+print encrypted credentials, plaintext credentials, Cookie, `Authorization`, or
+`Proxy-Authorization` values. It validates the
+credential-backed connection path and treats missing credentials as `untested`;
+in live mode, `untested` is a non-passing result rather than a successful
+Provider check.

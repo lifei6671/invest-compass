@@ -1,5 +1,4 @@
 import { InfoCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { App as AntApp } from "antd";
 import { AIContextExplanationCard } from "./components/AIContextExplanationCard";
 import { DataComplianceBoundaryCard } from "./components/DataComplianceBoundaryCard";
 import { DataFAQCard } from "./components/DataFAQCard";
@@ -23,8 +22,6 @@ type DataSourceDescriptionPageProps = {
 };
 
 export function DataSourceDescriptionPage({ onViewOverview, onViewCredentials }: DataSourceDescriptionPageProps) {
-  const { message } = AntApp.useApp();
-
   return (
     <>
       <div className="data-description-workspace">
@@ -34,8 +31,8 @@ export function DataSourceDescriptionPage({ onViewOverview, onViewCredentials }:
           <DataFreshnessCard items={freshnessItems} />
           <AIContextExplanationCard dataTypes={aiContextDataTypes} outputNatures={aiOutputNatures} onViewCredentials={onViewCredentials} />
           <DataComplianceBoundaryCard />
-          <FieldDescriptionCard items={fieldDescriptions} onViewMore={() => message.info("字段说明待接入")} />
-          <DataFAQCard items={faqItems} onOpenFAQ={() => message.info("FAQ 详情待接入")} onViewMore={() => message.info("更多 FAQ 待接入")} />
+          <FieldDescriptionCard items={fieldDescriptions} />
+          <DataFAQCard items={faqItems} />
         </div>
       </div>
       <DataDescriptionRiskNotice />

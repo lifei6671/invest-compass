@@ -70,6 +70,7 @@ const runningTask: TaskItem = {
   status: "RUNNING",
   progress: 62,
   startedAt: "2025-05-20 15:28:34",
+  startedDate: "2025-05-20",
   duration: "00:03:12",
   model: "DeepSeek-V3",
 };
@@ -149,10 +150,13 @@ function detailFor(id: number): TaskLogDetail {
   };
 }
 
-function renderDrawer(task: TaskItem = runningTask) {
+function renderDrawer(
+  task: TaskItem = runningTask,
+  actions: { onRetryTask?: (task: TaskItem) => void; onOpenProxySettings?: () => void } = {},
+) {
   return render(
     <AntApp>
-      <TaskLogDrawer open task={task} onClose={vi.fn()} />
+      <TaskLogDrawer open task={task} onClose={vi.fn()} onRetryTask={actions.onRetryTask} onOpenProxySettings={actions.onOpenProxySettings} />
     </AntApp>,
   );
 }
@@ -322,6 +326,21 @@ describe("TaskLogDrawer", () => {
     expect(await screen.findByText("可能原因")).toBeInTheDocument();
     expect(screen.getByText("代理配置异常")).toBeInTheDocument();
     expect(screen.getAllByText("检查代理设置").length).toBeGreaterThan(0);
+  });
+
+  test("诊断操作接到真实重试和代理设置回调", async () => {
+    const onRetryTask = vi.fn();
+    const onOpenProxySettings = vi.fn();
+    renderDrawer(failedTask, { onRetryTask, onOpenProxySettings });
+
+    expect(await screen.findByText(/错误摘要：模型服务响应超时/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("错误诊断"));
+
+    fireEvent.click(await screen.findByRole("button", { name: /重新分析/ }));
+    fireEvent.click(screen.getByRole("button", { name: /检查代理设置/ }));
+
+    expect(onRetryTask).toHaveBeenCalledWith(failedTask);
+    expect(onOpenProxySettings).toHaveBeenCalledTimes(1);
   });
 
   test("renders context summary", async () => {

@@ -1,6 +1,7 @@
-import { App as AntApp, Button, ConfigProvider, Input, Pagination, Select, Table, Tag, Tooltip, type TableColumnsType } from "antd";
+import { Button, ConfigProvider, Input, Pagination, Select, Table, Tag, Tooltip, type TableColumnsType } from "antd";
 import { DeleteOutlined, EditOutlined, EyeOutlined, FilterOutlined, ReloadOutlined, RobotOutlined, SearchOutlined, SettingOutlined, StarOutlined } from "@ant-design/icons";
 import { appAntdLocale } from "../../lib/antdLocale";
+import { PAGE_SIZE_OPTIONS } from "../../lib/pagination";
 import type { WatchlistItem } from "./types";
 
 type FilterOption = {
@@ -16,11 +17,15 @@ type WatchlistTableCardProps = {
   onDelete: (item: WatchlistItem) => void;
   onEdit: (item: WatchlistItem) => void;
   onView: (item: WatchlistItem) => void;
+  onAnalyze: (item: WatchlistItem) => void;
   onRefresh: () => void;
   onSearch: () => void;
   isSearching?: boolean;
   emptyDescription?: string;
   totalCount: number;
+  currentPage: number;
+  pageSize: number;
+  onPageChange: (page: number, pageSize: number) => void;
   marketFilter: string;
   tagFilter: string;
   marketOptions: FilterOption[];
@@ -42,7 +47,6 @@ const tagClassByName: Record<string, string> = {
 };
 
 export function WatchlistTableCard(props: WatchlistTableCardProps) {
-  const { message } = AntApp.useApp();
   const columns: TableColumnsType<WatchlistItem> = [
     {
       title: "",
@@ -92,7 +96,7 @@ export function WatchlistTableCard(props: WatchlistTableCardProps) {
             <Button aria-label={`查看 ${record.name}`} type="text" size="small" icon={<EyeOutlined />} onClick={() => props.onView(record)} />
           </Tooltip>
           <Tooltip title="AI 分析">
-            <Button aria-label={`AI 分析 ${record.name}`} type="text" size="small" className="text-[#1677ff]" icon={<RobotOutlined />} onClick={() => message.info("进入 AI 分析待接入")} />
+            <Button aria-label={`AI 分析 ${record.name}`} type="text" size="small" className="text-[#1677ff]" icon={<RobotOutlined />} onClick={() => props.onAnalyze(record)} />
           </Tooltip>
           <Tooltip title="编辑">
             <Button aria-label={`编辑 ${record.name}`} type="text" size="small" icon={<EditOutlined />} onClick={() => props.onEdit(record)} />
@@ -143,7 +147,16 @@ export function WatchlistTableCard(props: WatchlistTableCardProps) {
       <div className="flex shrink-0 items-center justify-between px-4 py-4">
         <span className="text-[14px] text-slate-700">共 {props.totalCount} 条</span>
         <ConfigProvider locale={appAntdLocale}>
-          <Pagination className="watchlist-pagination" current={1} total={props.totalCount} pageSize={10} showQuickJumper showSizeChanger pageSizeOptions={[10]} onChange={() => undefined} />
+          <Pagination
+            className="watchlist-pagination"
+            current={props.currentPage}
+            total={props.totalCount}
+            pageSize={props.pageSize}
+            showQuickJumper
+            showSizeChanger
+            pageSizeOptions={[...PAGE_SIZE_OPTIONS]}
+            onChange={props.onPageChange}
+          />
         </ConfigProvider>
       </div>
     </section>

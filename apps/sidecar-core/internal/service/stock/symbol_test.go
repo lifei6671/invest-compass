@@ -19,8 +19,11 @@ func TestParseSymbolAcceptsSupportedMarkets(t *testing.T) {
 	}{
 		{name: "shanghai a share", raw: "CN:SH:600519", canonical: "CN:SH:600519", market: "CN", exchange: "SH", code: "600519"},
 		{name: "shenzhen a share normalizes case", raw: "cn:sz:300750", canonical: "CN:SZ:300750", market: "CN", exchange: "SZ", code: "300750"},
+		{name: "eastmoney style shanghai code", raw: "600000.SH", canonical: "CN:SH:600000", market: "CN", exchange: "SH", code: "600000"},
+		{name: "eastmoney style shenzhen index", raw: "399001.SZ", canonical: "CN:SZ:399001", market: "CN", exchange: "SZ", code: "399001"},
 		{name: "hong kong stock", raw: "HK:00700", canonical: "HK:00700", market: "HK", exchange: "", code: "00700"},
 		{name: "us stock normalizes case", raw: "us:aapl", canonical: "US:AAPL", market: "US", exchange: "", code: "AAPL"},
+		{name: "us stock allows ticker dot", raw: "US:BRK.B", canonical: "US:BRK.B", market: "US", exchange: "", code: "BRK.B"},
 	}
 
 	for _, tt := range tests {

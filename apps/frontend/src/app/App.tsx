@@ -27,10 +27,12 @@ import {
   type MarketKlineItem,
   type MarketQuote,
   type NewsItem,
+  type NewsListResult,
   type ProviderStatusItem,
   type StockProfile,
   type StockSearchResult,
   type WatchlistItem,
+  type WatchlistList,
 } from "../services/coreClient";
 import type { BasicInfoItem, KlineItem, StockDetail, StockNewsItem, TechnicalIndicator } from "../components/stock-detail/types";
 import {
@@ -55,6 +57,7 @@ import { APP_FONT } from "../styles/fonts";
 import { appAntdLocale } from "../lib/antdLocale";
 import { AppShell } from "./AppShell";
 import { AppInitializationPage } from "../pages/initialization/AppInitializationPage";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 const DashboardPage = lazy(() =>
   import("../pages/dashboard/DashboardPage").then((module) => ({
@@ -104,6 +107,11 @@ const NewsCenterPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("../pages/settings/SettingsPage").then((module) => ({
     default: module.SettingsPage,
+  })),
+);
+const FullscreenKlinePage = lazy(() =>
+  import("../pages/chart/FullscreenKlinePage").then((module) => ({
+    default: module.FullscreenKlinePage,
   })),
 );
 
@@ -172,6 +180,7 @@ const APP_ROUTES = {
   tasks: "/tasks",
   settings: "/settings",
   aiSettings: "/ai-settings",
+  chartKline: "/chart/kline",
 } as const;
 
 export const APP_NAV_ITEMS = [
@@ -291,6 +300,7 @@ export function App(props: AppProps = {}) {
                     <Route path={APP_ROUTES.tasks} element={<TaskHistoryPage />} />
                     <Route path={APP_ROUTES.settings} element={<SettingsPage />} />
                     <Route path={APP_ROUTES.aiSettings} element={<SettingsPage initialActiveTab="model-config" />} />
+                    <Route path={APP_ROUTES.chartKline} element={<FullscreenKlinePage />} />
                     <Route path="*" element={<Alert title="页面不存在" type="warning" showIcon />} />
                   </Routes>
                 </Suspense>
@@ -378,6 +388,7 @@ type StockDetailViewState = {
   kline: MarketKlineItem[];
   indicators: MarketIndicatorsResult;
   news: NewsItem[];
+  watchlistItem?: WatchlistItem;
 };
 
 type StockDetailPeriod = "day" | "week" | "month";
@@ -389,6 +400,7 @@ type StockDetailSettings = {
 };
 
 const stockDetailSettingsKeys = ["kline.default_period", "kline.default_adjust"];
+const stockDetailIndicatorKeys = ["ma", "rsi", "macd", "kdj", "boll"];
 
 function WatchlistRoute() {
   const [state, setState] = useState<WatchlistViewState | null>(null);
@@ -476,8 +488,8 @@ function WatchlistRoute() {
     watchlistUpdate({
       id: item.id,
       sort_order: Number(item.sort_order) || 0,
-      tags: item.tags,
-      note: item.note,
+      tags: normalizeWatchlistTags(item.tags),
+      note: normalizeWatchlistNote(item.note),
     })
       .then((updated) => {
         updateDraft(updated.id, updated);
@@ -665,7 +677,7 @@ function WatchlistRow(props: {
         <input
           aria-label={`标签 ${props.item.symbol}`}
           className="rounded border border-slate-300 px-2 py-1"
-          value={props.item.tags.join(",")}
+          value={normalizeWatchlistTags(props.item.tags).join(",")}
           onChange={(event) => props.onDraftChange(props.item.id, { tags: splitTags(event.target.value) })}
         />
       </label>
@@ -675,7 +687,7 @@ function WatchlistRow(props: {
           <input
             aria-label={`备注 ${props.item.symbol}`}
             className="rounded border border-slate-300 px-2 py-1"
-            value={props.item.note}
+            value={normalizeWatchlistNote(props.item.note)}
             onChange={(event) => props.onDraftChange(props.item.id, { note: event.target.value })}
           />
         </label>
@@ -709,6 +721,17 @@ function splitTags(value: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeWatchlistTags(tags: WatchlistItem["tags"]): string[] {
+  if (!Array.isArray(tags)) {
+    return [];
+  }
+  return tags.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean);
+}
+
+function normalizeWatchlistNote(note: WatchlistItem["note"]): string {
+  return typeof note === "string" ? note : "";
 }
 
 function formatNumber(value: number): string {
@@ -748,7 +771,7 @@ function normalizeNewsItems(items: NewsItem[]) {
 }
 
 async function loadStockDetailState(normalizedSymbol: string, period: string, adjust: string): Promise<StockDetailViewState> {
-  const [quote, profile, kline, indicators, news] = await Promise.all([
+  const [quote, profile, kline, indicators, news, watchlist] = await Promise.all([
     marketQuote(normalizedSymbol),
     stockProfile(normalizedSymbol),
     marketKline({ symbol: normalizedSymbol, period, adjust, limit: 120 }),
@@ -757,9 +780,10 @@ async function loadStockDetailState(normalizedSymbol: string, period: string, ad
       period,
       adjust,
       limit: 120,
-      indicators: ["ma", "rsi", "macd"],
+      indicators: stockDetailIndicatorKeys,
     }),
-    newsList({ symbol: normalizedSymbol, limit: 20 }),
+    newsList({ symbol: normalizedSymbol, limit: 20 }).catch((): NewsListResult => ({ items: [] })),
+    watchlistList().catch((): WatchlistList => ({ items: [] })),
   ]);
   return {
     quote,
@@ -767,10 +791,29 @@ async function loadStockDetailState(normalizedSymbol: string, period: string, ad
     kline: kline.items,
     indicators,
     news: normalizeNewsItems(news.items),
+    watchlistItem: watchlist.items.find((item) => symbolsReferToSameStock(item.symbol, normalizedSymbol)),
   };
 }
 
-function StockDetailRoute() {
+function symbolsReferToSameStock(left: string, right: string) {
+  return normalizeComparableStockSymbol(left) === normalizeComparableStockSymbol(right);
+}
+
+function normalizeComparableStockSymbol(symbol: string) {
+  const value = symbol.trim().toUpperCase();
+  const cnSymbol = /^CN:(SH|SZ|BJ):(\d+)$/.exec(value);
+  if (cnSymbol) {
+    return `${cnSymbol[2]}.${cnSymbol[1]}`;
+  }
+  const dotSymbol = /^(\d+)\.(SH|SZ|BJ)$/.exec(value);
+  if (dotSymbol) {
+    return `${dotSymbol[1]}.${dotSymbol[2]}`;
+  }
+  return value;
+}
+
+export function StockDetailRoute() {
+  const { message } = AntApp.useApp();
   const params = useParams();
   const normalizedSymbol = (params.symbol ?? "").trim();
   const [settingsReady, setSettingsReady] = useState(false);
@@ -779,6 +822,8 @@ function StockDetailRoute() {
   const [state, setState] = useState<StockDetailViewState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [savingWatchlistNote, setSavingWatchlistNote] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -832,11 +877,37 @@ function StockDetailRoute() {
     return () => {
       cancelled = true;
     };
-  }, [adjust, normalizedSymbol, period, settingsReady]);
+  }, [adjust, normalizedSymbol, period, refreshVersion, settingsReady]);
+  useAutoRefresh(() => {
+    if (settingsReady && normalizedSymbol) {
+      setRefreshVersion((version) => version + 1);
+    }
+  });
 
   if (!normalizedSymbol) {
     return <StockDetailPage error="未选择股票" />;
   }
+
+  const saveWatchlistNote = async (value: { tags: string[]; note: string }) => {
+    if (!state?.watchlistItem) {
+      return;
+    }
+    setSavingWatchlistNote(true);
+    try {
+      const updated = await watchlistUpdate({
+        id: state.watchlistItem.id,
+        sort_order: state.watchlistItem.sort_order,
+        tags: value.tags,
+        note: value.note,
+      });
+      setState((current) => (current ? { ...current, watchlistItem: updated } : current));
+      message.success("自选股备注已更新");
+    } catch (cause) {
+      message.error(cause instanceof Error ? cause.message : "自选股备注更新失败");
+    } finally {
+      setSavingWatchlistNote(false);
+    }
+  };
 
   return (
     <StockDetailPage
@@ -845,12 +916,16 @@ function StockDetailRoute() {
       klineItems={state ? toKlineItems(state.kline) : []}
       technicalIndicators={state ? toTechnicalIndicators(state.indicators.indicators, period) : []}
       newsItems={state ? toStockNewsItems(state.news) : []}
+      watchlistNote={state?.watchlistItem ? { tags: normalizeWatchlistTags(state.watchlistItem.tags), note: normalizeWatchlistNote(state.watchlistItem.note), editable: true } : { tags: [], note: "", editable: false }}
       loading={loading || !settingsReady}
       error={loadError}
       period={period}
       adjust={adjust}
       onPeriodChange={setPeriod}
       onAdjustChange={setAdjust}
+      onRefresh={() => setRefreshVersion((version) => version + 1)}
+      onSaveWatchlistNote={state?.watchlistItem ? saveWatchlistNote : undefined}
+      savingWatchlistNote={savingWatchlistNote}
     />
   );
 }
@@ -950,10 +1025,28 @@ function toKlineItems(items: MarketKlineItem[]): KlineItem[] {
 }
 
 function toTechnicalIndicators(indicators: Record<string, unknown>, period: StockDetailPeriod): TechnicalIndicator[] {
-  return indicatorRows(indicators).slice(0, 6).map((item) => ({
+  const orderedRows = [
+    indicatorRowFromPaths("MA.MA5", indicators, ["ma.ma5", "ma5"]),
+    indicatorRowFromPaths("MA.MA10", indicators, ["ma.ma10", "ma10"]),
+    indicatorRowFromPaths("MA.MA20", indicators, ["ma.ma20", "ma20"]),
+    indicatorRowFromPaths("MACD.BAR", indicators, ["macd.bar", "macd_bar"]),
+    indicatorRowFromPaths("MACD.DEA", indicators, ["macd.dea", "macd_dea"]),
+    indicatorRowFromPaths("MACD.DIF", indicators, ["macd.dif", "macd_dif"]),
+    indicatorRowFromPaths("RSI.RSI6", indicators, ["rsi.rsi6", "rsi6"]),
+    indicatorRowFromPaths("KDJ.K", indicators, ["kdj.k", "kdj_k"]),
+    indicatorRowFromPaths("KDJ.D", indicators, ["kdj.d", "kdj_d"]),
+    indicatorRowFromPaths("KDJ.J", indicators, ["kdj.j", "kdj_j"]),
+    indicatorRowFromPaths("BOLL.MID", indicators, ["boll.middle", "boll.mid", "boll_middel", "boll_middle"]),
+    indicatorRowFromPaths("BOLL.UPPER", indicators, ["boll.upper", "boll_upper"]),
+    indicatorRowFromPaths("BOLL.LOWER", indicators, ["boll.lower", "boll_lower"]),
+  ].filter((item): item is { name: string; value: string; numericValue: number | null } => Boolean(item));
+  const rows = orderedRows.length > 0
+    ? orderedRows
+    : indicatorRows(indicators).map((item) => ({ ...item, numericValue: numericIndicatorValue(item.value) }));
+  return rows.map((item) => ({
     name: item.name.toUpperCase(),
     value: item.value,
-    direction: "flat",
+    direction: indicatorDirection(item.numericValue),
     desc: `${periodLabel(period)}最新值`,
   }));
 }
@@ -1062,13 +1155,13 @@ function indicatorRows(indicators: Record<string, unknown>) {
   return Object.entries(indicators).flatMap(([key, value]) => flattenIndicatorValue(key, value));
 }
 
-function flattenIndicatorValue(name: string, value: unknown): Array<{ name: string; value: string }> {
+function flattenIndicatorValue(name: string, value: unknown): Array<{ name: string; value: string; numericValue: number | null }> {
   if (Array.isArray(value)) {
     const latest = latestPrimitive(value);
-    return latest === null ? [] : [{ name, value: formatIndicatorValue(latest) }];
+    return latest === null ? [] : [{ name, value: formatIndicatorValue(latest), numericValue: typeof latest === "number" ? latest : null }];
   }
-  if (typeof value === "number" || typeof value === "string" || typeof value === "boolean") {
-    return [{ name, value: formatIndicatorValue(value) }];
+  if ((typeof value === "number" && Number.isFinite(value)) || typeof value === "string" || typeof value === "boolean") {
+    return [{ name, value: formatIndicatorValue(value), numericValue: typeof value === "number" ? value : numericIndicatorValue(value) }];
   }
   if (value && typeof value === "object") {
     return Object.entries(value).flatMap(([key, child]) => flattenIndicatorValue(`${name}.${key}`, child));
@@ -1076,10 +1169,39 @@ function flattenIndicatorValue(name: string, value: unknown): Array<{ name: stri
   return [];
 }
 
+function indicatorRowFromPaths(name: string, indicators: Record<string, unknown>, paths: string[]) {
+  for (const path of paths) {
+    const value = latestIndicatorValue(readIndicatorPath(indicators, path));
+    if (value !== null) {
+      return { name, value: formatIndicatorValue(value), numericValue: typeof value === "number" ? value : numericIndicatorValue(value) };
+    }
+  }
+  return null;
+}
+
+function readIndicatorPath(indicators: Record<string, unknown>, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, key) => {
+    if (current && typeof current === "object" && key in current) {
+      return (current as Record<string, unknown>)[key];
+    }
+    return undefined;
+  }, indicators);
+}
+
+function latestIndicatorValue(value: unknown): number | string | boolean | null {
+  if (Array.isArray(value)) {
+    return latestPrimitive(value);
+  }
+  if ((typeof value === "number" && Number.isFinite(value)) || typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  return null;
+}
+
 function latestPrimitive(values: unknown[]) {
   for (let index = values.length - 1; index >= 0; index -= 1) {
     const value = values[index];
-    if (typeof value === "number" || typeof value === "string" || typeof value === "boolean") {
+    if ((typeof value === "number" && Number.isFinite(value)) || typeof value === "string" || typeof value === "boolean") {
       return value;
     }
   }
@@ -1088,6 +1210,21 @@ function latestPrimitive(values: unknown[]) {
 
 function formatIndicatorValue(value: number | string | boolean) {
   return typeof value === "number" ? formatNumber(value) : String(value);
+}
+
+function numericIndicatorValue(value: string | boolean) {
+  if (typeof value === "boolean") {
+    return null;
+  }
+  const parsed = Number(value.replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function indicatorDirection(value: number | null): TechnicalIndicator["direction"] {
+  if (value === null || value === 0) {
+    return "flat";
+  }
+  return value > 0 ? "up" : "down";
 }
 
 function SchedulerRoute() {

@@ -16,6 +16,12 @@ struct NewsMarketRequest {
     limit: i32,
 }
 
+#[derive(Serialize)]
+struct NewsStatsRequest {
+    market: String,
+    limit: i32,
+}
+
 /// 获取个股新闻，固定转发到 Go core `/api/news/list`。
 #[tauri::command]
 pub fn news_list(
@@ -41,6 +47,34 @@ pub fn news_market(
     let client = state.client().map_err(|error| error.to_string())?;
     client
         .post_api("/api/news/market", &NewsMarketRequest { market, limit })
+        .map_err(|error| error.to_string())
+}
+
+/// 获取资讯缓存统计，固定转发到 Go core `/api/news/stats`。
+#[tauri::command]
+pub fn news_stats(
+    state: State<'_, CoreState>,
+    market: String,
+    limit: i32,
+) -> Result<serde_json::Value, String> {
+    validate_news_limit(limit)?;
+    let client = state.client().map_err(|error| error.to_string())?;
+    client
+        .post_api("/api/news/stats", &NewsStatsRequest { market, limit })
+        .map_err(|error| error.to_string())
+}
+
+/// 获取资讯缓存热点统计，固定转发到 Go core `/api/news/hot-topics`。
+#[tauri::command]
+pub fn news_hot_topics(
+    state: State<'_, CoreState>,
+    market: String,
+    limit: i32,
+) -> Result<serde_json::Value, String> {
+    validate_news_limit(limit)?;
+    let client = state.client().map_err(|error| error.to_string())?;
+    client
+        .post_api("/api/news/hot-topics", &NewsStatsRequest { market, limit })
         .map_err(|error| error.to_string())
 }
 

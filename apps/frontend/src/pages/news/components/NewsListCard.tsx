@@ -1,18 +1,17 @@
-import { Button, Empty, Pagination, Select } from "antd";
-import { UnorderedListOutlined } from "@ant-design/icons";
+import { Empty, Pagination, Select } from "antd";
 import type { NewsItem } from "../types";
 import { NewsListItem } from "./NewsListItem";
+import { PAGE_SIZE_OPTIONS } from "../../../lib/pagination";
 
 type NewsListCardProps = {
   items: NewsItem[];
   totalCount: number;
   sortMode: string;
   currentPage: number;
+  pageSize: number;
   onSortModeChange: (value: string) => void;
-  onViewSwitch: () => void;
-  onPageChange: (page: number) => void;
+  onPageChange: (page: number, pageSize: number) => void;
   onOpenOriginal: (item: NewsItem) => void;
-  onAddContext: (item: NewsItem) => void;
   onCopySummary: (item: NewsItem) => void;
   emptyDescription?: string;
 };
@@ -29,10 +28,9 @@ export function NewsListCard(props: NewsListCardProps) {
           <Select
             value={props.sortMode}
             className="news-sort-select"
-            options={["按最新", "按热度", "按相关性"].map((value) => ({ value, label: value }))}
+            options={[{ value: "按最新", label: "按最新" }]}
             onChange={props.onSortModeChange}
           />
-          <Button aria-label="切换资讯视图" icon={<UnorderedListOutlined />} onClick={props.onViewSwitch} />
         </div>
       </header>
       <div className="news-list-body">
@@ -42,7 +40,6 @@ export function NewsListCard(props: NewsListCardProps) {
               key={item.id}
               item={item}
               onOpenOriginal={props.onOpenOriginal}
-              onAddContext={props.onAddContext}
               onCopySummary={props.onCopySummary}
             />
           ))
@@ -52,9 +49,16 @@ export function NewsListCard(props: NewsListCardProps) {
       </div>
       <footer className="news-pagination-row">
         <span>共 {props.totalCount} 条</span>
-        <Pagination current={props.currentPage} total={props.totalCount} pageSize={10} size="small" showSizeChanger={false} onChange={props.onPageChange} />
-        <span>10 条/页</span>
-        <span>跳至 1 页</span>
+        <Pagination
+          current={props.currentPage}
+          total={props.totalCount}
+          pageSize={props.pageSize}
+          size="small"
+          showSizeChanger
+          pageSizeOptions={[...PAGE_SIZE_OPTIONS]}
+          showQuickJumper={{ goButton: "页" }}
+          onChange={props.onPageChange}
+        />
       </footer>
     </section>
   );

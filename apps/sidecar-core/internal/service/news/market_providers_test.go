@@ -19,6 +19,9 @@ func TestCailianpressProviderFetchesTelegraphs(t *testing.T) {
 		if !strings.Contains(request.Header.Get("Referer"), "cls.cn") {
 			t.Fatalf("expected cls referer, got %q", request.Header.Get("Referer"))
 		}
+		if request.URL.Query().Get("name") != "telegraphList" {
+			t.Fatalf("expected telegraphList endpoint, got query %s", request.URL.RawQuery)
+		}
 		_, _ = writer.Write([]byte(`{
 			"errno": 0,
 			"data": {
@@ -27,7 +30,7 @@ func TestCailianpressProviderFetchesTelegraphs(t *testing.T) {
 						"id": 123,
 						"ctime": 1781805600,
 						"title": "重大事项",
-						"content": "A股市场出现重要消息",
+						"brief": "A股市场出现重要消息",
 						"shareurl": "",
 						"level": "B",
 						"subjects": [{"subject_name": "半导体"}, {"subject_name": "AI"}]
@@ -48,14 +51,42 @@ func TestCailianpressProviderFetchesTelegraphs(t *testing.T) {
 		t.Fatalf("expected one item, got %+v", items)
 	}
 	item := items[0]
-	if item.Source != "财联社电报" || item.Title != "重大事项" || item.URL != "https://www.cls.cn/telegraph/123" {
+	if item.Source != "财联社电报" || item.Title != "重大事项" || item.URL != "https://www.cls.cn/detail/123" {
 		t.Fatalf("unexpected item: %+v", item)
+	}
+	if item.Summary != "A股市场出现重要消息" {
+		t.Fatalf("unexpected summary: %s", item.Summary)
 	}
 	if item.PublishedAt.Format(time.RFC3339) != "2026-06-18T18:00:00Z" {
 		t.Fatalf("unexpected published time: %s", item.PublishedAt.Format(time.RFC3339))
 	}
 	if len(item.Tags) != 2 || item.Tags[0] != "半导体" || item.Tags[1] != "AI" {
 		t.Fatalf("unexpected tags: %+v", item.Tags)
+	}
+}
+
+// TestCailianpressProviderPrefersShareURL 验证财联社返回原文链接时优先使用 shareurl。
+func TestCailianpressProviderPrefersShareURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte(`{
+			"errno": 0,
+			"data": {
+				"roll_data": [
+					{"id": 456, "ctime": 1781805600, "title": "原文链接", "brief": "带 shareurl", "shareurl": "https://www.cls.cn/detail/456"}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := newTestCailianpressProvider(t, CailianpressConfig{TelegraphURL: server.URL})
+
+	items, err := provider.Market(context.Background(), MarketRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("Market returned error: %v", err)
+	}
+	if len(items) != 1 || items[0].URL != "https://www.cls.cn/detail/456" {
+		t.Fatalf("unexpected items: %+v", items)
 	}
 }
 

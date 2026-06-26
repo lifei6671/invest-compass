@@ -1,8 +1,12 @@
-import { BarChart, CandlestickChart, LineChart, PieChart } from "echarts/charts";
+import { BarChart, CandlestickChart, LineChart, PieChart, ScatterChart } from "echarts/charts";
 import {
+  AxisPointerComponent,
   DataZoomComponent,
+  GraphicComponent,
   GridComponent,
   LegendComponent,
+  MarkLineComponent,
+  MarkPointComponent,
   TooltipComponent,
 } from "echarts/components";
 import { init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
@@ -15,10 +19,15 @@ use([
   LineChart,
   BarChart,
   CandlestickChart,
+  ScatterChart,
+  AxisPointerComponent,
   GridComponent,
   TooltipComponent,
   LegendComponent,
   DataZoomComponent,
+  GraphicComponent,
+  MarkLineComponent,
+  MarkPointComponent,
 ]);
 
 type EChartViewProps = {
@@ -26,6 +35,7 @@ type EChartViewProps = {
   style?: CSSProperties;
   className?: string;
   "aria-label"?: string;
+  onClick?: (params: unknown) => void;
 };
 
 export function EChartView(props: EChartViewProps) {
@@ -57,6 +67,17 @@ export function EChartView(props: EChartViewProps) {
   useEffect(() => {
     chartRef.current?.setOption(props.option, true);
   }, [props.option]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !props.onClick) {
+      return undefined;
+    }
+    chart.on("click", props.onClick);
+    return () => {
+      chart.off("click", props.onClick);
+    };
+  }, [props.onClick]);
 
   if (isJSDOM()) {
     return <div aria-label={props["aria-label"]} className={props.className} style={props.style} />;

@@ -1,6 +1,6 @@
 export type CredentialAuthType = "none" | "api_key" | "cookie" | "bearer_token" | "custom_header";
 
-export type CredentialStatus = "normal" | "not_configured" | "expired" | "expiring" | "failed";
+export type CredentialStatus = "normal" | "not_configured" | "expired" | "expiring" | "limited" | "failed";
 
 export type DataSourceProvider = {
   id: string;
@@ -32,7 +32,7 @@ export type CredentialTestTarget = {
 };
 
 export type CredentialTestResult = {
-  status: "success" | "failed" | "untested";
+  status: "success" | "failed" | "untested" | "limited";
   responseTimeMs?: number;
   testedAt?: string;
   messages: string[];

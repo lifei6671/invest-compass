@@ -2,3 +2,7 @@ packages:
   - "desktop"
   - "frontend"
   - "packages/*"
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild

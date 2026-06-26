@@ -1,22 +1,64 @@
 import { InfoCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { App as AntApp } from "antd";
+import { useState } from "react";
+import { checkUpdate as checkUpdateRequest, exportLogs as exportLogsRequest, selectDirectory } from "../../../services/coreClient";
 import { AboutHeroCard } from "./components/AboutHeroCard";
 import { AppInfoCard } from "./components/AppInfoCard";
 import { CheckUpdateCard } from "./components/CheckUpdateCard";
 import { LicenseStatusCard } from "./components/LicenseStatusCard";
 import { LogDiagnosticCard } from "./components/LogDiagnosticCard";
 import { OpenSourceLicenseCard } from "./components/OpenSourceLicenseCard";
+import { StaticDocumentModal } from "./components/StaticDocumentModal";
 import { UserManualCard } from "./components/UserManualCard";
 import { appInfoItems, licenseInfo, resourceLinks, updateInfo } from "./types";
+import type { StaticDocumentKey } from "./components/StaticDocumentModal";
+import type { UpdateInfo } from "./types";
 
 export function AboutAppPage() {
   const { message } = AntApp.useApp();
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [exportingLogs, setExportingLogs] = useState(false);
+  const [currentUpdateInfo, setCurrentUpdateInfo] = useState<UpdateInfo>(updateInfo);
+  const [activeDocument, setActiveDocument] = useState<StaticDocumentKey | null>(null);
   const licenseLink = resourceLinks.find((item) => item.type === "license")!;
   const manualLink = resourceLinks.find((item) => item.type === "manual")!;
   const logsLink = resourceLinks.find((item) => item.type === "logs")!;
 
-  const checkUpdate = () => {
-    message.info("检查更新待接入");
+  const checkUpdate = async () => {
+    setCheckingUpdate(true);
+    try {
+      const result = await checkUpdateRequest();
+      setCurrentUpdateInfo({
+        currentVersion: result.current_version || updateInfo.currentVersion,
+        latestVersion: result.latest_version || "—",
+        updateStatus: result.has_new_version ? "available" : "latest",
+        releaseDate: "—",
+        releaseNoteStatus: result.release_notes_url ? "发布说明可用" : "—",
+      });
+      message.success(result.has_new_version ? "发现新版本" : "当前已是最新版本");
+    } catch (error) {
+      setCurrentUpdateInfo((current) => ({ ...current, updateStatus: "failed" }));
+      message.error(error instanceof Error ? error.message : "检查更新失败");
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const exportLogs = async () => {
+    setExportingLogs(true);
+    try {
+      const targetDir = await selectDirectory();
+      if (!targetDir) {
+        message.info("已取消导出日志");
+        return;
+      }
+      const result = await exportLogsRequest(targetDir);
+      message.success(`脱敏日志已导出：${result.file_name}`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "日志导出失败");
+    } finally {
+      setExportingLogs(false);
+    }
   };
 
   return (
@@ -25,10 +67,10 @@ export function AboutAppPage() {
       <div className="settings-about-info-grid">
         <AppInfoCard items={appInfoItems} />
         <CheckUpdateCard
-          value={updateInfo}
-          checking={false}
+          value={currentUpdateInfo}
+          checking={checkingUpdate}
           onCheck={checkUpdate}
-          onViewReleaseNote={() => message.info("发布说明待接入")}
+          onViewReleaseNote={() => setActiveDocument("release-notes")}
         />
         <LicenseStatusCard value={licenseInfo} />
       </div>
@@ -36,20 +78,22 @@ export function AboutAppPage() {
         <OpenSourceLicenseCard
           description={licenseLink.description}
           actionText={licenseLink.actionText}
-          onAction={() => message.info("LICENSE 查看待接入")}
+          onAction={() => setActiveDocument("license")}
         />
         <UserManualCard
           description={manualLink.description}
           actionText={manualLink.actionText}
-          onAction={() => message.info("用户手册待接入")}
+          onAction={() => setActiveDocument("manual")}
         />
         <LogDiagnosticCard
           description={logsLink.description}
           actionText={logsLink.actionText}
-          onAction={() => message.info("日志导出待接入")}
+          loading={exportingLogs}
+          onAction={exportLogs}
         />
       </div>
       <AboutRiskNotice />
+      <StaticDocumentModal documentKey={activeDocument} onClose={() => setActiveDocument(null)} />
     </>
   );
 }

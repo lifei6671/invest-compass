@@ -1,4 +1,5 @@
-export type ProxyMode = "system" | "http" | "socks5";
+export type ProxyMode = "system" | "none" | "custom";
+export type CustomProxyProtocol = "http" | "socks5";
 
 export type ProxyModeOption = {
   mode: ProxyMode;
@@ -56,6 +57,7 @@ export type Socks5ProxyConfig = {
 
 export type ProxySettingsState = {
   proxyMode: ProxyMode;
+  customProtocol: CustomProxyProtocol;
   testTarget: ProxyTestTarget;
   bypassRules: string;
   testing: boolean;
@@ -74,15 +76,20 @@ export const proxyModeOptions: ProxyModeOption[] = [
     current: true,
   },
   {
-    mode: "http",
-    title: "HTTP 代理",
-    description: "通过 HTTP 代理服务器访问外部网络",
+    mode: "none",
+    title: "不使用代理",
+    description: "外部数据请求直连，忽略系统代理和手动代理",
   },
   {
-    mode: "socks5",
-    title: "SOCKS5 代理",
-    description: "通过 SOCKS5 代理服务器访问外部网络",
+    mode: "custom",
+    title: "手动代理",
+    description: "配置 HTTP 或 SOCKS 代理服务器访问外部网络",
   },
+];
+
+export const customProxyProtocolOptions: Array<{ label: string; value: CustomProxyProtocol }> = [
+  { label: "HTTP", value: "http" },
+  { label: "SOCKS", value: "socks5" },
 ];
 
 export const testTargetOptions: Array<{ label: ProxyTestTarget; value: ProxyTestTarget }> = [
@@ -127,6 +134,7 @@ export const initialSocks5ProxyConfig: Socks5ProxyConfig = {
 
 export const initialProxyState: ProxySettingsState = {
   proxyMode: "system",
+  customProtocol: "http",
   testTarget: "baidu",
   bypassRules: "",
   testing: false,
@@ -136,7 +144,7 @@ export const initialProxyState: ProxySettingsState = {
     pacMode: "自动检测",
     proxyAddress: "根据系统设置",
     bypassAddress: "根据系统设置",
-    lastCheckedAt: "2025-05-20 15:30:00",
+    lastCheckedAt: "读取 settings 后刷新",
   },
   httpProxyConfig: initialHttpProxyConfig,
   socks5ProxyConfig: initialSocks5ProxyConfig,

@@ -229,7 +229,7 @@ function contextItemsFromRemote(value: TaskLogContextSummary | null, task: TaskI
   ].map(([label, itemValue]) => ({ label, value: itemValue }));
 }
 
-export function TaskLogDrawer({ open, task, onClose }: TaskLogDrawerProps) {
+export function TaskLogDrawer({ open, task, onClose, onRetryTask, onOpenProxySettings }: TaskLogDrawerProps) {
   const { message } = AntApp.useApp();
   const screens = Grid.useBreakpoint();
   const [activeTab, setActiveTab] = useState<TaskLogTab>("logs");
@@ -487,7 +487,14 @@ export function TaskLogDrawer({ open, task, onClose }: TaskLogDrawerProps) {
                 onSelectRecord={(record) => void loadRawDetail(record.id)}
               />
             ) : null}
-            {activeTab === "diagnosis" && diagnosisView ? <DiagnosisTab diagnosis={diagnosisView} /> : null}
+            {activeTab === "diagnosis" && diagnosisView ? (
+              <DiagnosisTab
+                diagnosis={diagnosisView}
+                task={task}
+                onRetryTask={onRetryTask}
+                onOpenProxySettings={onOpenProxySettings}
+              />
+            ) : null}
             {activeTab === "context" ? <ContextTab items={contextItems} /> : null}
           </div>
 
@@ -629,9 +636,17 @@ function EventTimeline({ events }: { events: TaskLogEvent[] }) {
   );
 }
 
-function DiagnosisTab({ diagnosis }: { diagnosis: TaskLogDiagnosisView }) {
-  const { message } = AntApp.useApp();
-
+function DiagnosisTab({
+  diagnosis,
+  task,
+  onRetryTask,
+  onOpenProxySettings,
+}: {
+  diagnosis: TaskLogDiagnosisView;
+  task: TaskItem;
+  onRetryTask?: (task: TaskItem) => void;
+  onOpenProxySettings?: () => void;
+}) {
   return (
     <section className="task-log-diagnosis">
       <Alert type={diagnosis.retryable ? "warning" : "info"} showIcon title={diagnosis.summary} />
@@ -651,14 +666,20 @@ function DiagnosisTab({ diagnosis }: { diagnosis: TaskLogDiagnosisView }) {
           ))}
         </ol>
       </div>
-      <div className="task-log-diagnosis-actions">
-        <Button type="primary" icon={<ReloadOutlined />} onClick={() => message.info("重新分析待接入")}>
-          重新分析
-        </Button>
-        <Button icon={<SettingOutlined />} onClick={() => message.info("代理设置待接入")}>
-          检查代理设置
-        </Button>
-      </div>
+      {onRetryTask || onOpenProxySettings ? (
+        <div className="task-log-diagnosis-actions">
+          {onRetryTask ? (
+            <Button type="primary" icon={<ReloadOutlined />} onClick={() => onRetryTask(task)}>
+              重新分析
+            </Button>
+          ) : null}
+          {onOpenProxySettings ? (
+            <Button icon={<SettingOutlined />} onClick={onOpenProxySettings}>
+              检查代理设置
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

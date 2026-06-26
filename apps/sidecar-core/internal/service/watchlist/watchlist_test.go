@@ -40,18 +40,18 @@ func TestCreateItemAllowsReaddAfterSoftDelete(t *testing.T) {
 	}
 }
 
-// TestListActiveFiltersDeletedAndSorts 验证自选列表不返回软删除数据，并按 sort_order 稳定排序。
+// TestListActiveFiltersDeletedAndSorts 验证自选列表不返回软删除数据，并按添加时间倒序稳定排序。
 func TestListActiveFiltersDeletedAndSorts(t *testing.T) {
 	now := time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC)
 	first, err := CreateItem(nil, CreateRequest{ID: 1, Symbol: "US:AAPL", SortOrder: 20}, now)
 	if err != nil {
 		t.Fatalf("CreateItem returned error: %v", err)
 	}
-	second, err := CreateItem([]Item{first}, CreateRequest{ID: 2, Symbol: "CN:SH:600519", SortOrder: 10}, now)
+	second, err := CreateItem([]Item{first}, CreateRequest{ID: 2, Symbol: "CN:SH:600519", SortOrder: 10}, now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("CreateItem returned error: %v", err)
 	}
-	deleted, err := CreateItem([]Item{first, second}, CreateRequest{ID: 3, Symbol: "HK:00700", SortOrder: 1}, now)
+	deleted, err := CreateItem([]Item{first, second}, CreateRequest{ID: 3, Symbol: "HK:00700", SortOrder: 1}, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("CreateItem returned error: %v", err)
 	}

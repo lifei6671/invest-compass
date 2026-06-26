@@ -25,7 +25,7 @@ const (
 type Status string
 
 const (
-	// StatusNormal 表示凭据已配置且本地预检正常。
+	// StatusNormal 表示凭据已配置且真实连接测试正常。
 	StatusNormal Status = "normal"
 	// StatusNotConfigured 表示凭据尚未配置。
 	StatusNotConfigured Status = "not_configured"
@@ -33,7 +33,9 @@ const (
 	StatusExpired Status = "expired"
 	// StatusExpiring 表示凭据即将过期。
 	StatusExpiring Status = "expiring"
-	// StatusFailed 表示凭据配置或本地预检失败。
+	// StatusLimited 表示 Provider 部分能力可用但存在已知受限项。
+	StatusLimited Status = "limited"
+	// StatusFailed 表示凭据配置或真实连接测试失败。
 	StatusFailed Status = "failed"
 )
 
@@ -80,13 +82,13 @@ type RuntimeCredential struct {
 	HeaderValue string
 }
 
-// TestRequest 是本地连接预检输入，不触发真实网络请求。
+// TestRequest 是真实连接测试输入，会向 Provider 发起受控 HTTP 预检。
 type TestRequest struct {
 	ProviderID string `json:"providerId"`
 	Target     string `json:"target"`
 }
 
-// TestResult 描述凭据本地预检结果。
+// TestResult 描述凭据真实连接测试结果。
 type TestResult struct {
 	Status         string   `json:"status"`
 	ResponseTimeMS int      `json:"responseTimeMs,omitempty"`
@@ -128,7 +130,7 @@ type ListView struct {
 	OperationLogs    []OperationLog    `json:"operationLogs"`
 }
 
-// TestTarget 描述凭据页可选的本地预检目标。
+// TestTarget 描述凭据页可选的真实连接测试目标。
 type TestTarget struct {
 	Label string `json:"label"`
 	Value string `json:"value"`
@@ -147,7 +149,7 @@ func (SystemClock) Now() time.Time {
 	return time.Now().UTC()
 }
 
-// HTTPDoer 是真实连接预检依赖的最小 HTTP client 边界，便于单元测试替换。
+// HTTPDoer 是真实连接测试依赖的最小 HTTP client 边界，便于单元测试替换。
 type HTTPDoer interface {
 	Do(request *http.Request) (*http.Response, error)
 }

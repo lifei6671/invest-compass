@@ -5,6 +5,7 @@ export const settingsKey = {
   appLanguage: "app.language",
   marketDefault: "market.default",
   quoteRefreshInterval: "quote.refresh_interval",
+  dataSourceQuoteRefreshInterval: "data_source.quote_refresh_interval",
   klineDefaultPeriod: "kline.default_period",
   klineDefaultAdjust: "kline.default_adjust",
   notificationsInAppEnabled: "notifications.in_app_enabled",

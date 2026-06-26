@@ -1,5 +1,4 @@
-import { App as AntApp, Button } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import { Button } from "antd";
 import Claude from "@lobehub/icons/es/Claude/components/Mono";
 import DeepSeek from "@lobehub/icons/es/DeepSeek/components/Mono";
 import Doubao from "@lobehub/icons/es/Doubao/components/Mono";
@@ -31,12 +30,10 @@ const providerIconMap: Record<ProviderIconKey, ReactNode> = {
 };
 
 export function ProviderListPanel(props: ProviderListPanelProps) {
-  const { message } = AntApp.useApp();
   return (
     <section className="settings-card flex min-h-0 flex-col p-3">
       <div className="mb-3 flex h-8 items-center justify-between px-1">
         <h2 className="m-0 text-[15px] font-semibold text-[#111827]">Provider 列表</h2>
-        <Button aria-label="新增 Provider" size="small" className="h-7 w-7 rounded-md p-0 text-[#1677ff]" icon={<PlusOutlined />} onClick={() => message.info("新增 Provider 待接入")} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {providers.map((item) => {

@@ -1,11 +1,10 @@
 import { Button, Tag } from "antd";
-import { CopyOutlined, ExportOutlined, PlusSquareOutlined } from "@ant-design/icons";
+import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { NewsItem } from "../types";
 
 type NewsListItemProps = {
   item: NewsItem;
   onOpenOriginal: (item: NewsItem) => void;
-  onAddContext: (item: NewsItem) => void;
   onCopySummary: (item: NewsItem) => void;
 };
 
@@ -21,7 +20,7 @@ const sourceInitialMap: Record<string, string> = {
   证券日报: "日",
 };
 
-export function NewsListItem({ item, onOpenOriginal, onAddContext, onCopySummary }: NewsListItemProps) {
+export function NewsListItem({ item, onOpenOriginal, onCopySummary }: NewsListItemProps) {
   return (
     <article className="news-list-item">
       <div className="news-source-cell">
@@ -44,9 +43,6 @@ export function NewsListItem({ item, onOpenOriginal, onAddContext, onCopySummary
         <Button type="link" icon={<ExportOutlined />} onClick={() => onOpenOriginal(item)}>
           查看原文
         </Button>
-        <Button type="link" icon={<PlusSquareOutlined />} onClick={() => onAddContext(item)}>
-          加入上下文
-        </Button>
         <Button type="text" icon={<CopyOutlined />} onClick={() => onCopySummary(item)}>
           复制摘要
         </Button>
@@ -54,4 +50,3 @@ export function NewsListItem({ item, onOpenOriginal, onAddContext, onCopySummary
     </article>
   );
 }
-

@@ -25,6 +25,7 @@ export type TaskStep = {
 export type TaskLogEventType =
   | "TASK_STARTED"
   | "TASK_PROGRESS"
+  | "TASK_LOG"
   | "TASK_CHUNK"
   | "TASK_SUCCESS"
   | "TASK_FAILED"

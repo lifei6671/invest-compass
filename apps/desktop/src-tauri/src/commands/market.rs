@@ -17,6 +17,7 @@ struct StockProfileRequest {
 #[derive(Serialize)]
 struct MarketQuoteRequest {
     symbol: String,
+    force_refresh: bool,
 }
 
 #[derive(Serialize)]
@@ -67,10 +68,17 @@ pub fn stock_profile(
 pub fn market_quote(
     state: State<'_, CoreState>,
     symbol: String,
+    force_refresh: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
     client
-        .post_api("/api/market/quote", &MarketQuoteRequest { symbol })
+        .post_api(
+            "/api/market/quote",
+            &MarketQuoteRequest {
+                symbol,
+                force_refresh: force_refresh.unwrap_or(false),
+            },
+        )
         .map_err(|error| error.to_string())
 }
 

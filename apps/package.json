@@ -18,6 +18,7 @@
     "sidecar:check-targets": "pnpm sidecar:build -- --all-targets && pnpm sidecar:verify-targets",
     "package:verify": "node ../scripts/verify-desktop-package.mjs",
     "provider:smoke": "node ../scripts/provider-smoke.mjs",
+    "provider:credential-smoke": "cd sidecar-core && go run -mod=readonly -tags sqlite_fts5 ./cmd/provider-credential-smoke",
     "sidecar:smoke": "node ../scripts/verify-sidecar-runtime.mjs -- --platform=darwin --target=aarch64-apple-darwin \"desktop/src-tauri/target/release/bundle/macos/投研罗盘.app\"",
     "scripts:test": "node --test ../scripts/*.test.mjs",
     "sqlite:upgrade-rehearsal": "cd sidecar-core && go test -mod=readonly -tags sqlite_fts5 ./internal/dao -run TestBackupBeforeMigrationBackupCanBeRestoredAndMigrated -count=1",

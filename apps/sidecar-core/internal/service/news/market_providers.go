@@ -111,7 +111,7 @@ func (provider *CailianpressProvider) Market(ctx context.Context, request Market
 		URL: provider.telegraphURL,
 		Query: map[string]string{
 			"app":  "CailianpressWeb",
-			"name": "telegraph",
+			"name": "telegraphList",
 			"os":   "web",
 			"sv":   "8.7.9",
 		},
@@ -132,6 +132,9 @@ func (provider *CailianpressProvider) Market(ctx context.Context, request Market
 	for _, row := range response.Data.RollData {
 		title := strings.TrimSpace(row.Title)
 		summary := strings.TrimSpace(row.Content)
+		if summary == "" {
+			summary = strings.TrimSpace(row.Brief)
+		}
 		if title == "" {
 			title = summary
 		}
@@ -140,7 +143,7 @@ func (provider *CailianpressProvider) Market(ctx context.Context, request Market
 		}
 		newsURL := strings.TrimSpace(row.ShareURL)
 		if newsURL == "" && row.ID != 0 {
-			newsURL = fmt.Sprintf("https://www.cls.cn/telegraph/%d", row.ID)
+			newsURL = fmt.Sprintf("https://www.cls.cn/detail/%d", row.ID)
 		}
 		publishedAt := result.FetchedAt
 		if row.CTime > 0 {
@@ -288,6 +291,7 @@ type clsTelegraphRow struct {
 	CTime    int64  `json:"ctime"`
 	Title    string `json:"title"`
 	Content  string `json:"content"`
+	Brief    string `json:"brief"`
 	ShareURL string `json:"shareurl"`
 	Subjects []struct {
 		Name string `json:"subject_name"`

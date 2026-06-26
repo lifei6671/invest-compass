@@ -26,6 +26,13 @@ type memoryStore struct {
 	next  int64
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+// Do 让测试用函数直接满足 HTTPDoer，便于断言预检是否真的发起了 HTTP 请求。
+func (do roundTripFunc) Do(request *http.Request) (*http.Response, error) {
+	return do(request)
+}
+
 // SaveDataSourceCredential 保存凭据模型，模拟 DAO 的 provider_id upsert 行为。
 func (store *memoryStore) SaveDataSourceCredential(_ context.Context, credential *model.DataSourceCredential) error {
 	if store.items == nil {
@@ -69,6 +76,39 @@ func (store *memoryStore) ClearDataSourceCredential(_ context.Context, providerI
 	item.MaskedCredential = ""
 	store.items[providerID] = item
 	return nil
+}
+
+// TestListIncludesTdxProvider 验证凭据管理目录会展示通达信无凭据 Provider。
+func TestListIncludesTdxProvider(t *testing.T) {
+	store := &memoryStore{items: map[string]model.DataSourceCredential{}}
+	service := Service{
+		Store:       store,
+		KeyProvider: StaticKeyProvider([]byte("12345678901234567890123456789012")),
+		Clock:       fakeClock{now: time.Date(2026, 6, 25, 16, 29, 0, 0, time.UTC)},
+	}
+
+	view, err := service.List(context.Background())
+	if err != nil {
+		t.Fatalf("list credentials: %v", err)
+	}
+
+	config, ok := view.Configs["tdx"]
+	if !ok {
+		t.Fatalf("tdx provider should be listed, configs=%+v", view.Configs)
+	}
+	if config.ProviderName != "通达信" || config.AuthType != AuthTypeNone {
+		t.Fatalf("unexpected tdx config: %+v", config)
+	}
+	foundProvider := false
+	for _, provider := range view.Providers {
+		if provider.ID == "tdx" {
+			foundProvider = provider.Name == "通达信" && provider.IconType == "tdx" && provider.AuthType == AuthTypeNone
+			break
+		}
+	}
+	if !foundProvider {
+		t.Fatalf("tdx provider should be visible in provider list: %+v", view.Providers)
+	}
 }
 
 // TestSaveEncryptsCredentialAndReturnsMaskedConfig 验证凭据保存只落密文并只返回脱敏值。
@@ -243,6 +283,109 @@ func TestTestCredentialFailsOnRemoteError(t *testing.T) {
 	}
 }
 
+// TestTestCredentialSendsProviderPreflightHeaders 验证真实预检按 Provider 补充必要来源头。
+func TestTestCredentialSendsProviderPreflightHeaders(t *testing.T) {
+	var receivedReferer string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		receivedReferer = request.Header.Get("Referer")
+		_, _ = writer.Write([]byte(`var hq_str_sh000001="上证指数,1,2";`))
+	}))
+	defer server.Close()
+
+	service := Service{
+		Store:      &memoryStore{items: map[string]model.DataSourceCredential{}},
+		HTTPClient: server.Client(),
+	}
+	_, err := service.Save(context.Background(), SaveRequest{Config: Config{
+		ProviderID:         "sina",
+		ProviderName:       "新浪财经",
+		Capability:         "股票搜索 / 实时行情",
+		AuthType:           AuthTypeNone,
+		BaseURL:            server.URL,
+		CredentialStatus:   StatusNormal,
+		TimeoutSeconds:     15,
+		RateLimitPerMinute: 60,
+	}})
+	if err != nil {
+		t.Fatalf("save sina test config: %v", err)
+	}
+	result, err := service.Test(context.Background(), TestRequest{ProviderID: "sina", Target: "quote"})
+	if err != nil {
+		t.Fatalf("test sina credentialless provider: %v", err)
+	}
+	if result.Status != testStatusSuccess {
+		t.Fatalf("result status = %s", result.Status)
+	}
+	if receivedReferer != "https://finance.sina.com.cn/" {
+		t.Fatalf("received referer = %q", receivedReferer)
+	}
+}
+
+// TestCredentiallessProviderTestPersistsResultWithoutExistingRow 验证无凭据 Provider 首次真实测试后也会保存测试结果。
+func TestCredentiallessProviderTestPersistsResultWithoutExistingRow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte(`var hq_str_sh000001="上证指数,1,2";`))
+	}))
+	defer server.Close()
+
+	originalCatalog := providerCatalog
+	providerCatalog = append([]Config(nil), providerCatalog...)
+	for index := range providerCatalog {
+		if providerCatalog[index].ProviderID == "sina" {
+			providerCatalog[index].BaseURL = server.URL
+		}
+	}
+	defer func() {
+		providerCatalog = originalCatalog
+	}()
+
+	store := &memoryStore{items: map[string]model.DataSourceCredential{}}
+	service := Service{
+		Store:      store,
+		HTTPClient: server.Client(),
+		Clock:      fakeClock{now: time.Date(2026, 6, 22, 15, 28, 41, 0, time.UTC)},
+	}
+
+	result, err := service.Test(context.Background(), TestRequest{ProviderID: "sina", Target: "quote"})
+	if err != nil {
+		t.Fatalf("test credentialless provider: %v", err)
+	}
+	if result.Status != testStatusSuccess {
+		t.Fatalf("result status = %s", result.Status)
+	}
+	stored, ok := store.items["sina"]
+	if !ok || stored.LastTestStatus != testStatusSuccess || stored.LastTestedAt == nil {
+		t.Fatalf("test result should be persisted for first-time credentialless provider: ok=%v item=%+v", ok, stored)
+	}
+}
+
+// TestTestCredentialMarksTdxAsLimitedWithoutHTTPPreflight 验证 TDX 不走错误的 HTTP 凭据预检路径。
+func TestTestCredentialMarksTdxAsLimitedWithoutHTTPPreflight(t *testing.T) {
+	httpCalled := false
+	service := Service{
+		Store: &memoryStore{items: map[string]model.DataSourceCredential{}},
+		HTTPClient: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			httpCalled = true
+			return nil, errors.New("tdx should not use HTTP preflight")
+		}),
+		Clock: fakeClock{now: time.Date(2026, 6, 25, 16, 29, 0, 0, time.UTC)},
+	}
+
+	result, err := service.Test(context.Background(), TestRequest{ProviderID: "tdx", Target: "connectivity"})
+	if err != nil {
+		t.Fatalf("test tdx provider: %v", err)
+	}
+	if result.Status != string(StatusLimited) {
+		t.Fatalf("tdx test status = %s", result.Status)
+	}
+	if httpCalled {
+		t.Fatalf("tdx should not issue HTTP preflight")
+	}
+	if !strings.Contains(strings.Join(result.Messages, " "), "TDX") {
+		t.Fatalf("tdx result should explain the non-HTTP boundary: %+v", result.Messages)
+	}
+}
+
 // TestResolveReturnsEmptyCredentialForCredentiallessProvider 验证无需凭据的 Provider 可直接进入运行时链路。
 func TestResolveReturnsEmptyCredentialForCredentiallessProvider(t *testing.T) {
 	service := Service{
@@ -305,6 +448,82 @@ func TestListIncludesSplitSinaAndTencentStockProviders(t *testing.T) {
 	}
 }
 
+// TestListExcludesHiddenCustomHTTPProvider 验证本期隐藏的自定义 HTTP 数据源不会被旧存量配置重新暴露。
+func TestListExcludesHiddenCustomHTTPProvider(t *testing.T) {
+	service := Service{
+		Store: &memoryStore{items: map[string]model.DataSourceCredential{
+			"custom-http": {
+				ProviderID:          "custom-http",
+				ProviderName:        "Custom HTTP",
+				Capability:          "自定义接口",
+				AuthType:            string(AuthTypeBearerToken),
+				BaseURL:             "https://api.example.test",
+				CredentialStatus:    string(StatusNormal),
+				EncryptedCredential: "cipher",
+				CredentialNonce:     "nonce",
+				MaskedCredential:    "Bearer ****",
+			},
+		}},
+		KeyProvider: StaticKeyProvider([]byte("12345678901234567890123456789012")),
+	}
+
+	view, err := service.List(context.Background())
+	if err != nil {
+		t.Fatalf("list credentials: %v", err)
+	}
+	if _, ok := view.Configs["custom-http"]; ok {
+		t.Fatalf("custom-http config should be hidden: %#v", view.Configs["custom-http"])
+	}
+	for _, provider := range view.Providers {
+		if provider.ID == "custom-http" {
+			t.Fatalf("custom-http provider should be hidden: %#v", provider)
+		}
+	}
+	if got := joinProviderIDs(providerIDs(view.Providers)); strings.Contains(got, "custom-http") {
+		t.Fatalf("provider ids should not include custom-http: %s", got)
+	}
+}
+
+// TestListMarksEastMoneyCapabilitiesAsLimited 验证东财当前只展示行情列表可用，K 线能力仍保持受限说明。
+func TestListMarksEastMoneyCapabilitiesAsLimited(t *testing.T) {
+	service := Service{
+		Store:       &memoryStore{items: map[string]model.DataSourceCredential{}},
+		KeyProvider: StaticKeyProvider([]byte("12345678901234567890123456789012")),
+	}
+
+	view, err := service.List(context.Background())
+	if err != nil {
+		t.Fatalf("list credentials: %v", err)
+	}
+
+	config := view.Configs["eastmoney"]
+	if config.CredentialStatus != StatusLimited {
+		t.Fatalf("eastmoney credential status = %s", config.CredentialStatus)
+	}
+	if config.Capability != "基础证券列表可访问 / K线受限" {
+		t.Fatalf("eastmoney capability = %q", config.Capability)
+	}
+	for _, provider := range view.Providers {
+		if provider.ID == "eastmoney" && (provider.Status != StatusLimited || provider.Capability != config.Capability) {
+			t.Fatalf("unexpected eastmoney provider: %#v", provider)
+		}
+	}
+}
+
+// providerIDs 提取 Provider ID，便于测试输出可读的失败信息。
+func providerIDs(providers []Provider) []string {
+	ids := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		ids = append(ids, provider.ID)
+	}
+	return ids
+}
+
+// joinProviderIDs 将 Provider ID 拼成稳定字符串，避免测试失败时输出大对象。
+func joinProviderIDs(providerIDs []string) string {
+	return strings.Join(providerIDs, ",")
+}
+
 // TestPreflightURLSupportsSplitSinaAndTencentTargets 验证股票行情源预检分别命中新浪和腾讯渠道。
 func TestPreflightURLSupportsSplitSinaAndTencentTargets(t *testing.T) {
 	tests := []struct {
@@ -336,6 +555,64 @@ func TestPreflightURLSupportsSplitSinaAndTencentTargets(t *testing.T) {
 				t.Fatalf("preflight url = %q", targetURL)
 			}
 		})
+	}
+}
+
+// TestPreflightURLSupportsCredentialedProviderTargets 验证凭据型和补充数据源预检命中各自真实端点。
+func TestPreflightURLSupportsCredentialedProviderTargets(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		target   string
+		expected string
+	}{
+		{
+			name:     "eastmoney security list",
+			config:   Config{ProviderID: "eastmoney", BaseURL: "https://quote.eastmoney.com"},
+			target:   "security_list",
+			expected: "https://datacenter-web.eastmoney.com/api/data/v1/get?sortColumns=SECURITY_CODE&sortTypes=1&pageSize=1&pageNumber=1&reportName=RPT_VALUEANALYSIS_DET&columns=SECURITY_CODE,SECURITY_NAME_ABBR",
+		},
+		{
+			name:     "alpha vantage global quote",
+			config:   Config{ProviderID: "alpha-vantage", BaseURL: "https://www.alphavantage.co"},
+			target:   "quote",
+			expected: "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM",
+		},
+		{
+			name:     "xueqiu hot stock",
+			config:   Config{ProviderID: "xueqiu", BaseURL: "https://xueqiu.com"},
+			target:   "hot_stock",
+			expected: "https://stock.xueqiu.com/v5/stock/hot_stock/list.json?page=1&size=1&_type=10&type=10",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetURL, err := preflightURL(tt.config, tt.target)
+			if err != nil {
+				t.Fatalf("build preflight url: %v", err)
+			}
+			if targetURL != tt.expected {
+				t.Fatalf("preflight url = %q", targetURL)
+			}
+		})
+	}
+}
+
+// TestApplyCredentialHeadersUsesAlphaVantageQueryKey 验证 Alpha Vantage 按官方查询参数注入 API Key。
+func TestApplyCredentialHeadersUsesAlphaVantageQueryKey(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM", nil)
+
+	applyCredentialHeaders(request, RuntimeCredential{
+		ProviderID: "alpha-vantage",
+		AuthType:   AuthTypeAPIKey,
+		APIKey:     "alpha-secret",
+	})
+
+	if got := request.URL.Query().Get("apikey"); got != "alpha-secret" {
+		t.Fatalf("apikey query = %q", got)
+	}
+	if got := request.Header.Get("X-API-Key"); got != "" {
+		t.Fatalf("alpha vantage should not use X-API-Key header, got %q", got)
 	}
 }
 

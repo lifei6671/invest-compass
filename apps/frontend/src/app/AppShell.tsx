@@ -16,7 +16,12 @@ import {
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useDashboardStore, type DashboardViewState } from "../stores/dashboardStore";
-import { formatClock, latestDashboardQuoteTime } from "../components/dashboard/dashboardUtils";
+import {
+  chinaMarketSessionLabel,
+  chinaMarketSessionStatus,
+  formatClock,
+  latestDashboardQuoteTime,
+} from "../components/dashboard/dashboardUtils";
 import {
   coreHealth,
   notificationsClearRead,
@@ -36,6 +41,7 @@ import {
   type DesktopNotificationKind,
   type DesktopNotificationSettings,
 } from "../services/desktopNotification";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import appIconUrl from "../assets/invest-compass-icon.png";
 
 const { Content, Header, Sider } = Layout;
@@ -52,6 +58,7 @@ type AppRouteMap = {
   tasks: string;
   settings: string;
   aiSettings: string;
+  chartKline: string;
 };
 
 type AppNavItem = {
@@ -73,6 +80,7 @@ const navIconByLabel = {
 
 const notificationPollIntervalMs = 30_000;
 const lockedActionMessage = "系统初始化中，请稍候";
+const watchlistRefreshEvent = "invest-compass:watchlist-refresh";
 const initializationNavItems = [
   { path: "/", label: "总览" },
   { path: "/watchlist", label: "自选股" },
@@ -96,9 +104,19 @@ export function AppShell(props: { routes: AppRouteMap; navItems: readonly AppNav
   const { message } = AntdApp.useApp();
   const locked = Boolean(props.locked);
   const navItems = locked ? initializationNavItems : props.navItems;
+  const isChartFullscreenRoute = !locked && location.pathname.startsWith("/chart/");
   const showLockedMessage = () => {
     void message.info(lockedActionMessage);
   };
+
+  if (isChartFullscreenRoute) {
+    return (
+      <Layout className="h-screen overflow-hidden bg-[#f6f8fb]">
+        <Content className="h-screen overflow-hidden">{props.children}</Content>
+      </Layout>
+    );
+  }
+
   return (
     <Layout className="app-glass-root h-screen overflow-hidden">
       <Sider width={224} className="app-glass-sidebar !fixed bottom-0 left-0 top-0 z-20 h-screen shadow-[1px_0_0_#dfe7f2]">
@@ -193,6 +211,13 @@ function TopBar(props: { locked?: boolean }) {
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const previousUnreadCountRef = useRef<number | null>(null);
   const desktopNotifiedIdsRef = useRef<Set<number>>(new Set());
+
+  useAutoRefresh(() => {
+    if (locked || location.pathname === "/") {
+      return;
+    }
+    return load();
+  });
 
   const sendUnreadDesktopNotifications = useCallback(async () => {
     const result = await notificationsList({ unread_only: true, limit: 5, offset: 0 });
@@ -342,6 +367,18 @@ function TopBar(props: { locked?: boolean }) {
     }
   };
 
+  const handleRefreshClick = () => {
+    if (locked) {
+      showLockedMessage();
+      return;
+    }
+    if (location.pathname.startsWith("/watchlist")) {
+      window.dispatchEvent(new CustomEvent(watchlistRefreshEvent));
+      return;
+    }
+    void load({ forceRefresh: true });
+  };
+
   const notificationContent = (
     <div className="w-[360px] overflow-hidden rounded-[10px] bg-white">
       <div className="flex items-center justify-between border-b border-[#edf1f7] px-1 pb-3">
@@ -413,13 +450,13 @@ function TopBar(props: { locked?: boolean }) {
           disabled={locked || searching}
         />
       </Tooltip>
-      <Tag className="m-0 flex h-9 shrink-0 items-center rounded-md border-[#d8e7ff] bg-[#edf5ff] px-4 text-[14px] font-medium leading-9 text-[#1677ff]">{quoteStatus.marketLabel}</Tag>
+      <Tag className={["app-market-status-tag", `app-market-status-tag-${quoteStatus.badge}`].join(" ")}>{quoteStatus.marketLabel}</Tag>
       <div className="flex min-w-[190px] shrink-0 items-center gap-3 whitespace-nowrap text-[14px] text-slate-500">
         <span>{locked ? "更新于" : "数据更新："}</span>
         <span>{quoteStatus.timeLabel}</span>
       </div>
       <Space className="ml-auto shrink-0" size={12} separator={<span className="h-5 w-px bg-[#e3e9f2]" />}>
-        <Button className="h-9 px-4 text-[14px]" icon={<ReloadOutlined />} onClick={locked ? showLockedMessage : () => void load()}>
+        <Button className="h-9 px-4 text-[14px]" icon={<ReloadOutlined />} onClick={handleRefreshClick}>
           刷新
         </Button>
         {locked ? (
@@ -527,7 +564,12 @@ function dashboardQuoteStatus(state: DashboardViewState | null): { badge: "defau
   }
   const latestQuoteTime = latestDashboardQuoteTime(state);
   if (latestQuoteTime) {
-    return { badge: "success", marketLabel: "A股 已收盘", timeLabel: formatDateTime(latestQuoteTime) || formatClock(latestQuoteTime) || "--:--:--" };
+    const marketSession = chinaMarketSessionStatus(latestQuoteTime);
+    return {
+      badge: marketSession === "trading" ? "success" : "default",
+      marketLabel: `A股 ${chinaMarketSessionLabel(marketSession)}`,
+      timeLabel: formatDateTime(latestQuoteTime) || formatClock(latestQuoteTime) || "--:--:--",
+    };
   }
   const hasQuoteError = state.indexQuotes.some((item) => item.error) || state.watchlistRows.some((item) => item.error);
   if (hasQuoteError) {

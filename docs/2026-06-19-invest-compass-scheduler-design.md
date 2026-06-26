@@ -586,6 +586,12 @@ UI 必须明确展示数据来源和频率限制，不得把未配置 Provider �
 首版默认创建但不自动启用：
 
 ```text
+股票基础资料刷新
+cron_type: stock_profile_refresh
+cron: 0 8 * * 1-5
+trade_window: any_time
+catchup_enabled: false
+
 自选股实时行情刷新
 cron_type: cn_a_share_quote_refresh
 cron: 30 9 * * 1-5

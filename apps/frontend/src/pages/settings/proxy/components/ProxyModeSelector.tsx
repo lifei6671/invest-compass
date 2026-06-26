@@ -1,4 +1,4 @@
-import { AimOutlined, GlobalOutlined, HddOutlined } from "@ant-design/icons";
+import { DisconnectOutlined, GlobalOutlined, HddOutlined } from "@ant-design/icons";
 import { Radio } from "antd";
 import type { ReactNode } from "react";
 import { proxyModeOptions, type ProxyMode } from "../types";
@@ -17,6 +17,7 @@ export function ProxyModeSelector(props: ProxyModeSelectorProps) {
           <button
             key={item.mode}
             type="button"
+            aria-label={item.title}
             className={["settings-proxy-mode-option", selected ? "settings-proxy-mode-option-active" : ""].join(" ")}
             onClick={() => props.onChange(item.mode)}
           >
@@ -37,11 +38,11 @@ export function ProxyModeSelector(props: ProxyModeSelectorProps) {
 }
 
 function modeIcon(mode: ProxyMode): ReactNode {
-  if (mode === "http") {
+  if (mode === "custom") {
     return <HddOutlined />;
   }
-  if (mode === "socks5") {
-    return <AimOutlined />;
+  if (mode === "none") {
+    return <DisconnectOutlined />;
   }
   return <GlobalOutlined />;
 }

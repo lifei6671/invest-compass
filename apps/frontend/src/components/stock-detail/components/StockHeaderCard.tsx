@@ -5,7 +5,10 @@ import type { StockDetail } from "../types";
 
 type StockHeaderCardProps = {
   stock: StockDetail;
+  isWatchlisted: boolean;
   onBack: () => void;
+  onRefresh?: () => void;
+  onAnalyze: () => void;
 };
 
 export function StockHeaderCard(props: StockHeaderCardProps) {
@@ -36,7 +39,7 @@ export function StockHeaderCard(props: StockHeaderCardProps) {
             <Button className="h-8 rounded-md px-3 text-[13px]" icon={<ArrowLeftOutlined />} onClick={props.onBack}>
               返回
             </Button>
-            <Button className="h-8 rounded-md px-3 text-[13px]" icon={<ReloadOutlined />} onClick={() => message.info("行情刷新待接入")}>
+            <Button className="h-8 rounded-md px-3 text-[13px]" icon={<ReloadOutlined />} onClick={props.onRefresh}>
               刷新行情
             </Button>
           </div>
@@ -63,10 +66,10 @@ export function StockHeaderCard(props: StockHeaderCardProps) {
             <span>{formatPercent(stock.changePercent)}</span>
           </div>
           <div className="flex shrink-0 items-center justify-end gap-2 whitespace-nowrap">
-            <Button className="h-9 rounded-md px-3.5 text-[#1677ff]" icon={<StarOutlined />} onClick={() => message.info("该股票已在自选列表中")}>
-              已在自选
+            <Button className="h-9 rounded-md px-3.5 text-[#1677ff]" icon={<StarOutlined />} disabled={!props.isWatchlisted}>
+              {props.isWatchlisted ? "已在自选" : "未加入自选"}
             </Button>
-            <Button type="primary" className="h-9 rounded-md bg-[#1677ff] px-4" icon={<RobotOutlined />} onClick={() => message.info("发起 AI 分析待接入")}>
+            <Button type="primary" className="h-9 rounded-md bg-[#1677ff] px-4" icon={<RobotOutlined />} onClick={props.onAnalyze}>
               发起 AI 分析
             </Button>
           </div>

@@ -15,6 +15,8 @@ export type WatchlistItem = {
   industry: string;
   tags: string[];
   note: string;
+  createdAt?: string;
   updatedAt: string;
   trend: "up" | "down";
+  trendPoints?: number[];
 };

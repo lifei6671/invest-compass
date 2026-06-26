@@ -5,9 +5,10 @@ type HotObservationCardProps = {
   industries: HotIndustry[];
   mentionedStocks: MentionedStock[];
   sentiment: SentimentSummary;
+  updatedAt?: string;
 };
 
-export function HotObservationCard({ industries, mentionedStocks, sentiment }: HotObservationCardProps) {
+export function HotObservationCard({ industries, mentionedStocks, sentiment, updatedAt }: HotObservationCardProps) {
   return (
     <section className="news-side-card">
       <header className="news-side-header">
@@ -15,32 +16,40 @@ export function HotObservationCard({ industries, mentionedStocks, sentiment }: H
           <FireFilled className="news-hot-icon" />
           <h3>热点观察</h3>
         </div>
-        <span>15:30 更新</span>
+        <span>{updatedAt ? `${updatedAt} 更新` : "暂无更新时间"}</span>
       </header>
       <div className="news-hot-section">
-        <h4>今日热点行业 TOP5</h4>
+        <h4>缓存热点标签 TOP5</h4>
         <div className="news-hot-industry-list">
-          {industries.map((item) => (
-            <div key={item.name} className="news-hot-industry-row">
-              <span className={item.rank <= 2 ? "news-hot-rank news-hot-rank-red" : "news-hot-rank"}>{item.rank}</span>
-              <span className="news-hot-name">{item.name}</span>
-              <span className="news-hot-value">热度 {item.heat}</span>
-              <span className="news-hot-bar">
-                <i className={item.rank <= 2 ? "news-hot-bar-red" : undefined} style={{ width: `${item.heat}%` }} />
-              </span>
-            </div>
-          ))}
+          {industries.length > 0 ? (
+            industries.map((item) => (
+              <div key={item.name} className="news-hot-industry-row">
+                <span className={item.rank <= 2 ? "news-hot-rank news-hot-rank-red" : "news-hot-rank"}>{item.rank}</span>
+                <span className="news-hot-name">{item.name}</span>
+                <span className="news-hot-value">热度 {item.heat}</span>
+                <span className="news-hot-bar">
+                  <i className={item.rank <= 2 ? "news-hot-bar-red" : undefined} style={{ width: `${item.heat}%` }} />
+                </span>
+              </div>
+            ))
+          ) : (
+            <p className="news-side-empty">暂无缓存热点标签</p>
+          )}
         </div>
       </div>
       <div className="news-hot-section">
-        <h4>高频提及股票（近 24h）</h4>
+        <h4>缓存高频提及股票</h4>
         <div className="news-mentioned-grid">
-          {mentionedStocks.map((stock, index) => (
-            <span key={stock.name} className="news-mentioned-tag">
-              {stock.name}
-              <strong className={index < 4 ? "news-mentioned-red" : undefined}>{stock.count}</strong>
-            </span>
-          ))}
+          {mentionedStocks.length > 0 ? (
+            mentionedStocks.map((stock, index) => (
+              <span key={stock.name} className="news-mentioned-tag">
+                {stock.name}
+                <strong className={index < 4 ? "news-mentioned-red" : undefined}>{stock.count}</strong>
+              </span>
+            ))
+          ) : (
+            <p className="news-side-empty">暂无缓存提及股票</p>
+          )}
         </div>
       </div>
       <div className="news-hot-section">
@@ -55,4 +64,3 @@ export function HotObservationCard({ industries, mentionedStocks, sentiment }: H
     </section>
   );
 }
-

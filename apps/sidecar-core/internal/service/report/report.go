@@ -20,6 +20,7 @@ type Report struct {
 	InputSnapshot    string
 	ContentMarkdown  string
 	RiskSummary      string
+	Favorite         bool
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	DeletedAt        *time.Time

@@ -19,12 +19,20 @@ type StockDetailPageProps = {
   klineItems?: KlineItem[];
   technicalIndicators?: TechnicalIndicator[];
   newsItems?: StockNewsItem[];
+  watchlistNote?: {
+    tags: string[];
+    note: string;
+    editable: boolean;
+  };
   loading?: boolean;
   error?: string | null;
   period?: StockDetailPeriod;
   adjust?: AdjustType;
   onPeriodChange?: (period: StockDetailPeriod) => void;
   onAdjustChange?: (adjust: AdjustType) => void;
+  onRefresh?: () => void;
+  onSaveWatchlistNote?: (value: { tags: string[]; note: string }) => Promise<void> | void;
+  savingWatchlistNote?: boolean;
 };
 
 const fallbackStockDetail: StockDetail = {
@@ -55,28 +63,51 @@ export function StockDetailPage(props: StockDetailPageProps) {
     const from = routeState?.from;
     navigate(from && from !== location.pathname ? from : "/watchlist");
   };
+  const stock = props.stock ?? fallbackStockDetail;
+  const period = props.period ?? "day";
+  const adjust = props.adjust ?? "qfq";
 
   return (
     <section className="flex min-h-[calc(100vh-120px)] min-w-[1140px] flex-col gap-4">
       {props.error ? <Alert title="个股详情读取失败" description={props.error} type="error" showIcon /> : null}
       {props.loading ? <Alert title="正在读取个股详情" description={<Spin size="small" />} type="info" showIcon /> : null}
-      <StockHeaderCard stock={props.stock ?? fallbackStockDetail} onBack={backToSource} />
+      <StockHeaderCard
+        stock={stock}
+        isWatchlisted={props.watchlistNote?.editable ?? false}
+        onBack={backToSource}
+        onRefresh={props.onRefresh}
+        onAnalyze={() => navigate(`/analysis?symbol=${encodeURIComponent(stock.symbol)}`)}
+      />
       <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_360px] gap-4">
         <main className="min-w-0 space-y-4">
           <KlineChartCard
             items={props.klineItems ?? []}
-            period={props.period ?? "day"}
-            adjust={props.adjust ?? "qfq"}
+            period={period}
+            adjust={adjust}
             onPeriodChange={props.onPeriodChange}
             onAdjustChange={props.onAdjustChange}
+            onFullscreen={() =>
+              navigate(`/chart/kline?symbol=${encodeURIComponent(stock.symbol)}&period=${period}&adjust=${adjust}`, {
+                state: { from: `${location.pathname}${location.search}` },
+              })
+            }
           />
           <TechnicalIndicatorCard items={props.technicalIndicators ?? []} />
-          <StockNewsTabsCard items={props.newsItems ?? []} />
+          <StockNewsTabsCard items={props.newsItems ?? []} onViewMore={() => navigate("/news")} />
         </main>
         <aside className="min-w-0 space-y-3">
           <StockInfoCard items={props.basicInfo ?? []} concepts={props.stock?.concepts ?? []} />
-          <StockTagsNoteCard tags={[]} />
-          <ResearchEntryCard />
+          <StockTagsNoteCard
+            tags={props.watchlistNote?.tags ?? []}
+            note={props.watchlistNote?.note ?? ""}
+            editable={Boolean(props.watchlistNote?.editable && props.onSaveWatchlistNote)}
+            saving={props.savingWatchlistNote}
+            onSave={props.onSaveWatchlistNote}
+          />
+          <ResearchEntryCard
+            onStartFull={() => navigate(`/analysis?symbol=${encodeURIComponent(stock.symbol)}&analysisType=stock_full`)}
+            onStartTechnical={() => navigate(`/analysis?symbol=${encodeURIComponent(stock.symbol)}&analysisType=technical`)}
+          />
         </aside>
       </div>
       <StockDetailRiskNotice />

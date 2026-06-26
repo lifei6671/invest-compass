@@ -43,24 +43,26 @@ type Watchlist struct {
 
 // Quote 是行情快照缓存表，保留 Provider 返回的最新可展示行情字段。
 type Quote struct {
-	ID            int64  `gorm:"primaryKey;autoIncrement"`
-	Symbol        string `gorm:"not null;index"`
-	Price         float64
-	ChangeAmount  float64
-	ChangePercent float64
-	Open          float64
-	High          float64
-	Low           float64
-	PreClose      float64
-	Volume        float64
-	Amount        float64
-	TurnoverRate  float64
-	PE            float64
-	PB            float64
-	QuoteTime     time.Time
-	Provider      string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID             int64  `gorm:"primaryKey;autoIncrement"`
+	Symbol         string `gorm:"not null;index"`
+	Price          float64
+	ChangeAmount   float64
+	ChangePercent  float64
+	Open           float64
+	High           float64
+	Low            float64
+	PreClose       float64
+	Volume         float64
+	Amount         float64
+	TurnoverRate   float64
+	PE             float64
+	PB             float64
+	TotalMarketCap float64
+	FloatMarketCap float64
+	QuoteTime      time.Time
+	Provider       string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // Kline 是 K 线缓存表，同一股票、周期、复权和交易日只能保留一条记录。
@@ -174,6 +176,7 @@ type AnalysisReport struct {
 	InputSnapshot    string
 	ContentMarkdown  string
 	RiskSummary      string
+	Favorite         bool `gorm:"not null;default:false"`
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	DeletedAt        gorm.DeletedAt

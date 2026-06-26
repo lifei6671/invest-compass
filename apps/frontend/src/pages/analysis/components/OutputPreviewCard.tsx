@@ -1,5 +1,6 @@
 import { FullscreenOutlined } from "@ant-design/icons";
-import { Button, Empty, Select } from "antd";
+import { Button, Empty, Modal, Select } from "antd";
+import { useState } from "react";
 import type { OutputFormat } from "../types";
 
 type OutputPreviewCardProps = {
@@ -7,10 +8,12 @@ type OutputPreviewCardProps = {
   plainText: string;
   format: OutputFormat;
   onFormatChange: (format: OutputFormat) => void;
-  onFullscreen: () => void;
 };
 
 export function OutputPreviewCard(props: OutputPreviewCardProps) {
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  const preview = props.format === "Markdown" ? <MarkdownPreview markdown={props.markdown} /> : <PlainTextPreview text={props.plainText} />;
+
   return (
     <section className="analysis-card analysis-output-card">
       <header className="analysis-output-header">
@@ -27,12 +30,16 @@ export function OutputPreviewCard(props: OutputPreviewCardProps) {
             ]}
             onChange={props.onFormatChange}
           />
-          <Button aria-label="全屏预览" className="analysis-icon-button" icon={<FullscreenOutlined />} onClick={props.onFullscreen} />
+          <Button aria-label="全屏预览" className="analysis-icon-button" icon={<FullscreenOutlined />} onClick={() => setFullscreenOpen(true)} />
         </div>
       </header>
       <div className="analysis-output-body">
-        {props.format === "Markdown" ? <MarkdownPreview markdown={props.markdown} /> : <PlainTextPreview text={props.plainText} />}
+        {preview}
       </div>
+      <Modal aria-label="全屏预览" title={null} open={fullscreenOpen} footer={null} width={1120} centered destroyOnHidden onCancel={() => setFullscreenOpen(false)}>
+        <h2 className="analysis-output-modal-title">全屏预览</h2>
+        <div className="analysis-output-modal-body">{preview}</div>
+      </Modal>
     </section>
   );
 }

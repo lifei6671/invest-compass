@@ -1,7 +1,7 @@
 import { InfoCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { App as AntApp } from "antd";
 import { useCallback, useEffect, useState } from "react";
-import { settingsGet, settingsSet, type SettingItem, type SettingsSetPayload } from "../../../services/coreClient";
+import { proxyConnectionTest, settingsGet, settingsSet, type SettingItem, type SettingsSetPayload } from "../../../services/coreClient";
 import { ProxyBypassRulesCard } from "./components/ProxyBypassRulesCard";
 import { ProxyConfigCard } from "./components/ProxyConfigCard";
 import { ProxyConnectionTestCard } from "./components/ProxyConnectionTestCard";
@@ -10,6 +10,7 @@ import {
   initialHttpProxyConfig,
   initialProxyState,
   initialSocks5ProxyConfig,
+  type CustomProxyProtocol,
   type HttpProxyConfig,
   type ProxyMode,
   type ProxySettingsState,
@@ -59,12 +60,47 @@ export function ProxySettingsPage() {
   };
 
   const changeProxyMode = (proxyMode: ProxyMode) => {
-    setState((current) => ({ ...current, proxyMode }));
+    setState((current) => ({ ...current, proxyMode, systemProxyStatus: systemProxyStatusFromState({ ...current, proxyMode }) }));
+    if (proxyMode === "none") {
+      void saveProxyPayload(buildNoProxyPayload());
+      return;
+    }
+    if (proxyMode === "custom") {
+      void saveProxyPayload({
+        items: [
+          { key: "proxy.mode", value: "custom" },
+          { key: "proxy.username", value: "" },
+        ],
+        clear_proxy_credential: true,
+      });
+      return;
+    }
     void saveProxyPayload({ items: [{ key: "proxy.mode", value: proxyMode }] });
   };
 
-  const testConnection = () => {
-    message.info("代理连接测试待接入");
+  const testConnection = async () => {
+    setState((current) => ({ ...current, testing: true }));
+    try {
+      const data = await proxyConnectionTest({ target: state.testTarget });
+      setState((current) => ({
+        ...current,
+        testResult: {
+          status: data.result.ok ? "success" : "failed",
+          responseTimeMs: data.result.duration_ms,
+          checkedAt: data.result.checked_at,
+        },
+      }));
+      if (data.result.ok) {
+        message.success("代理连接测试完成");
+      } else {
+        message.error("代理连接测试失败");
+      }
+    } catch (error) {
+      setState((current) => ({ ...current, testResult: { status: "failed" } }));
+      message.error(error instanceof Error ? error.message : "代理连接测试失败");
+    } finally {
+      setState((current) => ({ ...current, testing: false }));
+    }
   };
 
   return (
@@ -73,35 +109,29 @@ export function ProxySettingsPage() {
       <div className="settings-proxy-content-grid">
         <ProxyConfigCard
           mode={state.proxyMode}
+          customProtocol={state.customProtocol}
           value={state.systemProxyStatus}
           httpConfig={state.httpProxyConfig}
           socks5Config={state.socks5ProxyConfig}
+          onCustomProtocolChange={(customProtocol) => setState((current) => ({ ...current, customProtocol }))}
           onHttpConfigChange={(httpProxyConfig) => setState((current) => ({ ...current, httpProxyConfig }))}
           onSocks5ConfigChange={(socks5ProxyConfig) => setState((current) => ({ ...current, socks5ProxyConfig }))}
-          onRefresh={() => message.info("代理状态刷新待接入")}
+          onRefresh={() => void loadProxySettings()}
           onSaveHttpConfig={() => void saveProxyPayload(buildHttpProxyPayload(state))}
           onClearHttpConfig={() => {
-            setState((current) => ({ ...current, httpProxyConfig: initialHttpProxyConfig, proxyMode: "system" }));
-            void saveProxyPayload({
-              items: [
-                { key: "proxy.mode", value: "system" },
-                { key: "proxy.http_url", value: "" },
-                { key: "proxy.username", value: "" },
-              ],
-              clear_proxy_credential: true,
+            setState((current) => {
+              const nextState = { ...current, httpProxyConfig: initialHttpProxyConfig, proxyMode: "none" as const, customProtocol: "http" as const };
+              return { ...nextState, systemProxyStatus: systemProxyStatusFromState(nextState) };
             });
+            void saveProxyPayload(buildNoProxyPayload());
           }}
           onSaveSocks5Config={() => void saveProxyPayload(buildSocks5ProxyPayload(state))}
           onClearSocks5Config={() => {
-            setState((current) => ({ ...current, socks5ProxyConfig: initialSocks5ProxyConfig, proxyMode: "system" }));
-            void saveProxyPayload({
-              items: [
-                { key: "proxy.mode", value: "system" },
-                { key: "proxy.socks5_url", value: "" },
-                { key: "proxy.username", value: "" },
-              ],
-              clear_proxy_credential: true,
+            setState((current) => {
+              const nextState = { ...current, socks5ProxyConfig: initialSocks5ProxyConfig, proxyMode: "none" as const, customProtocol: "socks5" as const };
+              return { ...nextState, systemProxyStatus: systemProxyStatusFromState(nextState) };
             });
+            void saveProxyPayload(buildNoProxyPayload());
           }}
         />
         <div className="settings-proxy-side-column">
@@ -110,7 +140,7 @@ export function ProxySettingsPage() {
             result={state.testResult}
             testing={state.testing}
             onTargetChange={(testTarget: ProxyTestTarget) => setState((current) => ({ ...current, testTarget }))}
-            onTest={testConnection}
+            onTest={() => void testConnection()}
           />
           <ProxyBypassRulesCard
             value={state.bypassRules}
@@ -126,31 +156,62 @@ export function ProxySettingsPage() {
 
 function proxyStateFromItems(current: ProxySettingsState, items: SettingItem[]): ProxySettingsState {
   const values = new Map(items.map((item) => [item.key, item.value]));
-  const proxyMode = readProxyMode(values.get("proxy.mode")) ?? current.proxyMode;
+  const rawProxyMode = values.get("proxy.mode");
+  const proxyMode = readProxyMode(rawProxyMode) ?? current.proxyMode;
+  const customProtocol = customProtocolFromItems(rawProxyMode, values.get("proxy.http_url"), values.get("proxy.socks5_url"), current.customProtocol);
   const httpProxyConfig = proxyConfigFromURL(current.httpProxyConfig, values.get("proxy.http_url"), "http");
   const socks5ProxyConfig = proxyConfigFromURL(current.socks5ProxyConfig, values.get("proxy.socks5_url"), "socks5");
   const username = values.get("proxy.username");
   const hasSavedPassword = Boolean(values.get("proxy_credential_ref"));
-  if (username !== undefined) {
-    httpProxyConfig.username = username;
-    socks5ProxyConfig.username = username;
+  if (username !== undefined || hasSavedPassword) {
+    httpProxyConfig.username = "";
+    socks5ProxyConfig.username = "";
   }
-  httpProxyConfig.authenticationEnabled = hasSavedPassword || Boolean(httpProxyConfig.username);
-  socks5ProxyConfig.authenticationEnabled = hasSavedPassword || Boolean(socks5ProxyConfig.username);
-  httpProxyConfig.hasSavedPassword = hasSavedPassword;
-  socks5ProxyConfig.hasSavedPassword = hasSavedPassword;
+  httpProxyConfig.authenticationEnabled = false;
+  socks5ProxyConfig.authenticationEnabled = false;
+  httpProxyConfig.hasSavedPassword = false;
+  socks5ProxyConfig.hasSavedPassword = false;
 
-  return {
+  const nextState = {
     ...current,
     proxyMode,
+    customProtocol,
     bypassRules: values.get("proxy.no_proxy") ?? current.bypassRules,
     httpProxyConfig,
     socks5ProxyConfig,
   };
+  return {
+    ...nextState,
+    systemProxyStatus: systemProxyStatusFromState(nextState),
+  };
 }
 
 function readProxyMode(value: string | undefined): ProxyMode | undefined {
-  return value === "system" || value === "http" || value === "socks5" ? value : undefined;
+  if (value === "http" || value === "socks5") {
+    return "custom";
+  }
+  return value === "system" || value === "none" || value === "custom" ? value : undefined;
+}
+
+function customProtocolFromItems(
+  rawMode: string | undefined,
+  httpURL: string | undefined,
+  socks5URL: string | undefined,
+  fallback: CustomProxyProtocol,
+): CustomProxyProtocol {
+  if (rawMode === "http") {
+    return "http";
+  }
+  if (rawMode === "socks5") {
+    return "socks5";
+  }
+  if (socks5URL && !httpURL) {
+    return "socks5";
+  }
+  if (httpURL) {
+    return "http";
+  }
+  return fallback;
 }
 
 function proxyConfigFromURL<Config extends HttpProxyConfig | Socks5ProxyConfig>(fallback: Config, value: string | undefined, defaultScheme: string): Config {
@@ -177,36 +238,75 @@ function proxyConfigFromURL<Config extends HttpProxyConfig | Socks5ProxyConfig>(
 }
 
 function buildHttpProxyPayload(state: ProxySettingsState): SettingsSetPayload {
-  return withOptionalProxyPassword(
-    {
-      items: [
-        { key: "proxy.mode", value: "http" },
-        { key: "proxy.http_url", value: `http://${state.httpProxyConfig.host}:${state.httpProxyConfig.port}` },
-        { key: "proxy.no_proxy", value: state.bypassRules },
-        { key: "proxy.username", value: state.httpProxyConfig.username },
-      ],
-    },
-    state.httpProxyConfig.password,
-  );
+  return {
+    items: [
+      { key: "proxy.mode", value: "custom" },
+      { key: "proxy.http_url", value: `http://${state.httpProxyConfig.host}:${state.httpProxyConfig.port}` },
+      { key: "proxy.socks5_url", value: "" },
+      { key: "proxy.no_proxy", value: state.bypassRules },
+      { key: "proxy.username", value: "" },
+    ],
+    clear_proxy_credential: true,
+  };
 }
 
 function buildSocks5ProxyPayload(state: ProxySettingsState): SettingsSetPayload {
-  return withOptionalProxyPassword(
-    {
-      items: [
-        { key: "proxy.mode", value: "socks5" },
-        { key: "proxy.socks5_url", value: `${state.socks5ProxyConfig.version}://${state.socks5ProxyConfig.host}:${state.socks5ProxyConfig.port}` },
-        { key: "proxy.no_proxy", value: state.bypassRules },
-        { key: "proxy.username", value: state.socks5ProxyConfig.username },
-      ],
-    },
-    state.socks5ProxyConfig.password,
-  );
+  return {
+    items: [
+      { key: "proxy.mode", value: "custom" },
+      { key: "proxy.http_url", value: "" },
+      { key: "proxy.socks5_url", value: `${state.socks5ProxyConfig.version}://${state.socks5ProxyConfig.host}:${state.socks5ProxyConfig.port}` },
+      { key: "proxy.no_proxy", value: state.bypassRules },
+      { key: "proxy.username", value: "" },
+    ],
+    clear_proxy_credential: true,
+  };
 }
 
-function withOptionalProxyPassword(payload: SettingsSetPayload, password: string): SettingsSetPayload {
-  const trimmed = password.trim();
-  return trimmed ? { ...payload, proxy_password: trimmed } : payload;
+function buildNoProxyPayload(): SettingsSetPayload {
+  return {
+    items: [
+      { key: "proxy.mode", value: "none" },
+      { key: "proxy.http_url", value: "" },
+      { key: "proxy.socks5_url", value: "" },
+      { key: "proxy.username", value: "" },
+    ],
+    clear_proxy_credential: true,
+  };
+}
+
+function systemProxyStatusFromState(state: ProxySettingsState) {
+  if (state.proxyMode === "none") {
+    return {
+      source: "应用设置",
+      enabled: false,
+      pacMode: "不使用",
+      proxyAddress: "直连",
+      bypassAddress: "全部外部请求直连",
+      lastCheckedAt: "已从 settings 读取",
+    };
+  }
+  if (state.proxyMode === "custom") {
+    const address = state.customProtocol === "http"
+      ? `${state.httpProxyConfig.host}:${state.httpProxyConfig.port}`
+      : `${state.socks5ProxyConfig.host}:${state.socks5ProxyConfig.port}`;
+    return {
+      source: "应用手动配置",
+      enabled: true,
+      pacMode: state.customProtocol === "http" ? "HTTP" : "SOCKS",
+      proxyAddress: address,
+      bypassAddress: state.bypassRules || "未配置",
+      lastCheckedAt: "已从 settings 读取",
+    };
+  }
+  return {
+    source: "操作系统",
+    enabled: true,
+    pacMode: "由系统决定",
+    proxyAddress: "根据系统设置",
+    bypassAddress: state.bypassRules || "根据系统设置",
+    lastCheckedAt: "已从 settings 读取",
+  };
 }
 
 function ProxyRiskNotice() {

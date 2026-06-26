@@ -2,18 +2,22 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/actions/httpx"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
+	netproxyservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/netproxy"
 	settingsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/settings"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/xerr"
 )
 
 const workspacePathKey = "workspace_path"
+const proxyTestTimeout = 10 * time.Second
 
 // Store 是 settings action 依赖的数据访问边界。
 type Store interface {
@@ -21,10 +25,16 @@ type Store interface {
 	GetSettings(ctx context.Context, keys []string) ([]model.Setting, error)
 }
 
+// ProxyTester 是代理连通性测试的运行时边界，便于 action 单测不访问公网。
+type ProxyTester interface {
+	TestConnection(ctx context.Context, target string) (netproxyservice.ConnectionTestResult, error)
+}
+
 // Config 是 settings action 的运行期依赖。
 type Config struct {
-	Security httpx.SecurityConfig
-	Store    Store
+	Security    httpx.SecurityConfig
+	Store       Store
+	ProxyTester ProxyTester
 }
 
 type getRequest struct {
@@ -56,6 +66,14 @@ type workspaceData struct {
 	Path string `json:"path"`
 }
 
+type proxyTestRequest struct {
+	Target string `json:"target"`
+}
+
+type proxyTestData struct {
+	Result netproxyservice.ConnectionTestResult `json:"result"`
+}
+
 // Routes 返回 settings 和 workspace 相关路由定义，不直接注册到 Gin。
 func Routes(config Config) []httpx.Route {
 	return []httpx.Route{
@@ -63,6 +81,7 @@ func Routes(config Config) []httpx.Route {
 		{Method: http.MethodPost, Path: "/api/settings/set", Handler: handleSet(config)},
 		{Method: http.MethodPost, Path: "/api/workspace/get", Handler: handleWorkspaceGet(config)},
 		{Method: http.MethodPost, Path: "/api/workspace/set", Handler: handleWorkspaceSet(config)},
+		{Method: http.MethodPost, Path: "/api/proxy/test", Handler: handleProxyTest(config)},
 	}
 }
 
@@ -169,6 +188,32 @@ func handleWorkspaceSet(config Config) http.HandlerFunc {
 	}
 }
 
+// handleProxyTest 使用当前 settings 中的代理模式访问固定白名单目标。
+func handleProxyTest(config Config) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		context := httpx.ContextFrom(request)
+		if !requireStore(response, request, config, context) {
+			return
+		}
+
+		var payload proxyTestRequest
+		if !httpx.DecodeJSON(response, request, context, &payload) {
+			return
+		}
+		tester := proxyTester(config)
+		result, err := tester.TestConnection(request.Context(), payload.Target)
+		if errors.Is(err, netproxyservice.ErrUnsupportedTestTarget) {
+			httpx.WriteError(response, http.StatusBadRequest, 40003, "invalid_proxy_test_target", context)
+			return
+		}
+		if err != nil {
+			writeStoreError(response, context, "代理连接测试失败", err)
+			return
+		}
+		httpx.WriteOK(response, proxyTestData{Result: result}, context)
+	}
+}
+
 // requireStore 校验 ready/token 和 settings store 注入。
 func requireStore(response http.ResponseWriter, request *http.Request, config Config, context httpx.RequestContext) bool {
 	if !httpx.RequireReadyToken(response, request, config.Security, context) {
@@ -179,6 +224,23 @@ func requireStore(response http.ResponseWriter, request *http.Request, config Co
 		return false
 	}
 	return true
+}
+
+// proxyTester 返回注入 tester 或默认 settings 驱动 tester。
+func proxyTester(config Config) ProxyTester {
+	if config.ProxyTester != nil {
+		return config.ProxyTester
+	}
+	return settingsProxyTester{store: config.Store}
+}
+
+type settingsProxyTester struct {
+	store Store
+}
+
+// TestConnection 通过 netproxy service 读取 settings 并执行固定目标连通性测试。
+func (tester settingsProxyTester) TestConnection(ctx context.Context, target string) (netproxyservice.ConnectionTestResult, error) {
+	return netproxyservice.TestConnection(ctx, tester.store, target, proxyTestTimeout)
 }
 
 // validateSetting 复用 settings service 的安全规则，并为代理 URL 补充边界校验。

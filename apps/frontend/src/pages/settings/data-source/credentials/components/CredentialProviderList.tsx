@@ -1,3 +1,4 @@
+import tdxFaviconUrl from "../../../../../assets/tdx-favicon.ico";
 import type { DataSourceProvider } from "../types";
 import { authTypeText, CredentialStatusTag } from "./CredentialStatusTag";
 
@@ -42,6 +43,13 @@ function ProviderIcon({ type }: { type: string }) {
   }
   if (type === "tencent") {
     return <span className="credential-provider-icon credential-provider-icon-tencent">T</span>;
+  }
+  if (type === "tdx") {
+    return (
+      <span className="credential-provider-icon credential-provider-icon-tdx" aria-label="通达信">
+        <img src={tdxFaviconUrl} alt="" />
+      </span>
+    );
   }
   if (type === "alpha") {
     return <span className="credential-provider-icon credential-provider-icon-alpha">AV</span>;

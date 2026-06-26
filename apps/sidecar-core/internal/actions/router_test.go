@@ -1,9 +1,11 @@
 package actions
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -22,6 +24,7 @@ import (
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/dashboard"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/logexport"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
+	netproxyservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/netproxy"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
 	promptservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/prompt"
 	searchservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/search"
@@ -475,6 +478,50 @@ func TestMarketQuoteReturnsAndCachesProviderResult(t *testing.T) {
 	}
 }
 
+// TestMarketQuoteAcceptsDotIndexSymbol 验证首页概览使用的点号指数代码能被行情 API 标准化后传给 Provider。
+func TestMarketQuoteAcceptsDotIndexSymbol(t *testing.T) {
+	symbol, err := stock.ParseSymbol("CN:SH:000001")
+	if err != nil {
+		t.Fatalf("parse symbol: %v", err)
+	}
+	quoteSymbols := []string{}
+	handler := NewHandler(Config{
+		Version:     "0.1.0",
+		Token:       "test-token",
+		DBStatus:    "not_configured",
+		Ready:       true,
+		MarketStore: newMemoryMarketStore(),
+		MarketProvider: fakeMarketProvider{
+			quoteSymbols: &quoteSymbols,
+			quoteResult: market.Quote{
+				Symbol:        symbol,
+				Price:         4110.81,
+				ChangeAmount:  4.56,
+				ChangePercent: 0.11,
+				QuoteTime:     time.Date(2026, 6, 24, 15, 30, 39, 0, time.UTC),
+				Provider:      "fake",
+			},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/market/quote", strings.NewReader(`{"symbol":"000001.SH"}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if len(quoteSymbols) != 1 || quoteSymbols[0] != "CN:SH:000001" {
+		t.Fatalf("expected provider to receive normalized index symbol, got %+v", quoteSymbols)
+	}
+	data := decodeResponseData(t, recorder.Body.Bytes())
+	if data["symbol"] != "CN:SH:000001" || data["price"] != 4110.81 {
+		t.Fatalf("unexpected quote data: %#v", data)
+	}
+}
+
 // TestMarketQuoteUsesFreshCacheBeforeProvider 验证短周期行情缓存命中时不会重复调用 Provider。
 func TestMarketQuoteUsesFreshCacheBeforeProvider(t *testing.T) {
 	quoteCalls := 0
@@ -511,6 +558,58 @@ func TestMarketQuoteUsesFreshCacheBeforeProvider(t *testing.T) {
 	}
 	if quoteCalls != 0 {
 		t.Fatalf("expected provider quote not called on cache hit, got %d", quoteCalls)
+	}
+}
+
+// TestMarketQuoteForceRefreshBypassesFreshCache 验证首页和手动刷新可显式绕过短缓存读取真实 Provider。
+func TestMarketQuoteForceRefreshBypassesFreshCache(t *testing.T) {
+	symbol, err := stock.ParseSymbol("CN:SH:600519")
+	if err != nil {
+		t.Fatalf("parse symbol: %v", err)
+	}
+	quoteCalls := 0
+	store := newMemoryMarketStore()
+	store.quotes["CN:SH:600519"] = model.Quote{
+		Symbol:        "CN:SH:600519",
+		Price:         1700,
+		ChangePercent: 1.2,
+		QuoteTime:     time.Date(2026, 6, 18, 10, 31, 0, 0, time.UTC),
+		Provider:      "cache",
+		UpdatedAt:     time.Now().UTC(),
+	}
+	handler := NewHandler(Config{
+		Version:     "0.1.0",
+		Token:       "test-token",
+		DBStatus:    "not_configured",
+		Ready:       true,
+		MarketStore: store,
+		MarketProvider: fakeMarketProvider{
+			quoteCalls: &quoteCalls,
+			quoteResult: market.Quote{
+				Symbol:        symbol,
+				Price:         1718.5,
+				ChangePercent: 2.1,
+				QuoteTime:     time.Date(2026, 6, 18, 10, 32, 0, 0, time.UTC),
+				Provider:      "fake",
+			},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/market/quote", strings.NewReader(`{"symbol":"CN:SH:600519","force_refresh":true}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	data := decodeResponseData(t, recorder.Body.Bytes())
+	if data["price"] != float64(1718.5) || data["provider"] != "fake" {
+		t.Fatalf("expected force refresh provider response, got %#v", data)
+	}
+	if quoteCalls != 1 {
+		t.Fatalf("expected provider quote called once on force refresh, got %d", quoteCalls)
 	}
 }
 
@@ -766,6 +865,49 @@ func TestNewsListNormalizesDeduplicatesAndCachesProviderItems(t *testing.T) {
 	}
 }
 
+// TestNewsListReturnsCachedEmptyForUnsupportedStockProvider 验证生产市场快讯 Provider 不支持个股新闻时不会让详情页收到 502。
+func TestNewsListReturnsCachedEmptyForUnsupportedStockProvider(t *testing.T) {
+	newsCalls := 0
+	store := newMemoryNewsStore()
+	handler := NewHandler(Config{
+		Version:   "0.1.0",
+		Token:     "test-token",
+		DBStatus:  "not_configured",
+		Ready:     true,
+		NewsStore: store,
+		NewsProvider: fakeNewsProvider{
+			listCalls: &newsCalls,
+			listError: newsservice.NewProviderError(
+				"fake-news",
+				"list_unsupported",
+				errors.New("stock news list is unsupported"),
+			),
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/news/list",
+		strings.NewReader(`{"symbol":"CN:SH:600519","limit":5}`),
+	)
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	data := decodeResponseData(t, recorder.Body.Bytes())
+	items, ok := data["items"].([]any)
+	if !ok || len(items) != 0 {
+		t.Fatalf("expected empty cached news list, got %#v", data)
+	}
+	if newsCalls != 1 {
+		t.Fatalf("expected provider list called once, got %d", newsCalls)
+	}
+}
+
 // TestNewsMarketReturnsSortedCachedItems 验证市场新闻 API 优先读取缓存并按发布时间倒序返回。
 func TestNewsMarketReturnsSortedCachedItems(t *testing.T) {
 	marketCalls := 0
@@ -805,6 +947,84 @@ func TestNewsMarketReturnsSortedCachedItems(t *testing.T) {
 	}
 	if marketCalls != 0 {
 		t.Fatalf("expected provider market not called when cache is enough, got %d", marketCalls)
+	}
+}
+
+// TestNewsStatsAndHotTopicsUseCachedNews 验证资讯统计和热点只从本地新闻缓存派生，不伪造情绪判断。
+func TestNewsStatsAndHotTopicsUseCachedNews(t *testing.T) {
+	store := newMemoryNewsStore()
+	if err := store.SaveNewsItems(context.Background(), []model.NewsItem{
+		{
+			Title:       "AI 算力需求延续",
+			URL:         "https://example.com/ai",
+			ContentHash: "news-ai",
+			PublishedAt: time.Date(2026, 6, 24, 9, 0, 0, 0, time.UTC),
+			UpdatedAt:   time.Now().UTC(),
+			Source:      "财联社",
+			Market:      "CN",
+			Symbols:     `["CN:SH:600000","CN:SZ:300308"]`,
+			Tags:        `["AI 算力","光模块"]`,
+		},
+		{
+			Title:       "光模块订单增长",
+			URL:         "https://example.com/optical",
+			ContentHash: "news-optical",
+			PublishedAt: time.Date(2026, 6, 24, 10, 0, 0, 0, time.UTC),
+			UpdatedAt:   time.Now().UTC(),
+			Source:      "同花顺资讯",
+			Market:      "CN",
+			Symbols:     `["CN:SZ:300308"]`,
+			Tags:        `["光模块"]`,
+		},
+	}); err != nil {
+		t.Fatalf("seed news cache: %v", err)
+	}
+	handler := NewHandler(Config{
+		Version:   "0.1.0",
+		Token:     "test-token",
+		DBStatus:  "not_configured",
+		Ready:     true,
+		NewsStore: store,
+	})
+
+	statsRecorder := httptest.NewRecorder()
+	statsRequest := httptest.NewRequest(http.MethodPost, "/api/news/stats", strings.NewReader(`{"market":"CN","limit":20}`))
+	statsRequest.Header.Set("X-Invest-Compass-Token", "test-token")
+	handler.ServeHTTP(statsRecorder, statsRequest)
+	if statsRecorder.Code != http.StatusOK {
+		t.Fatalf("expected stats status %d, got %d, body %s", http.StatusOK, statsRecorder.Code, statsRecorder.Body.String())
+	}
+	stats := decodeResponseData(t, statsRecorder.Body.Bytes())
+	if stats["total_count"] != float64(2) || stats["source_count"] != float64(2) {
+		t.Fatalf("unexpected stats: %#v", stats)
+	}
+	if stats["sentiment_summary"] != "暂未接入情绪分类，当前仅展示新闻缓存数量、来源和标签统计。" {
+		t.Fatalf("unexpected sentiment summary: %#v", stats["sentiment_summary"])
+	}
+
+	hotRecorder := httptest.NewRecorder()
+	hotRequest := httptest.NewRequest(http.MethodPost, "/api/news/hot-topics", strings.NewReader(`{"market":"CN","limit":5}`))
+	hotRequest.Header.Set("X-Invest-Compass-Token", "test-token")
+	handler.ServeHTTP(hotRecorder, hotRequest)
+	if hotRecorder.Code != http.StatusOK {
+		t.Fatalf("expected hot topics status %d, got %d, body %s", http.StatusOK, hotRecorder.Code, hotRecorder.Body.String())
+	}
+	hot := decodeResponseData(t, hotRecorder.Body.Bytes())
+	industries, ok := hot["industries"].([]any)
+	if !ok || len(industries) == 0 {
+		t.Fatalf("expected hot industries, got %#v", hot)
+	}
+	firstIndustry := industries[0].(map[string]any)
+	if firstIndustry["name"] != "光模块" || firstIndustry["count"] != float64(2) {
+		t.Fatalf("unexpected first industry: %#v", firstIndustry)
+	}
+	stocks, ok := hot["mentioned_stocks"].([]any)
+	if !ok || len(stocks) == 0 {
+		t.Fatalf("expected mentioned stocks, got %#v", hot)
+	}
+	firstStock := stocks[0].(map[string]any)
+	if firstStock["symbol"] != "CN:SZ:300308" || firstStock["count"] != float64(2) {
+		t.Fatalf("unexpected first stock: %#v", firstStock)
 	}
 }
 
@@ -1076,6 +1296,12 @@ func TestTasksAPIListsGetsAndReplaysEvents(t *testing.T) {
 		UpdatedAt: base,
 		CreatedAt: base,
 	}
+	store.reports["task-old"] = model.AnalysisReport{
+		ID:     88,
+		TaskID: "task-old",
+		Symbol: "CN:SH:600519",
+		Title:  "旧任务报告",
+	}
 	store.tasks["task-new"] = model.Task{
 		ID:           "task-new",
 		Type:         "ANALYSIS",
@@ -1114,6 +1340,10 @@ func TestTasksAPIListsGetsAndReplaysEvents(t *testing.T) {
 	first, ok := items[0].(map[string]any)
 	if !ok || first["id"] != "task-new" || first["status"] != "FAILED" {
 		t.Fatalf("expected newest task first, got %#v", items[0])
+	}
+	second, ok := items[1].(map[string]any)
+	if !ok || second["id"] != "task-old" || second["report_id"] != float64(88) {
+		t.Fatalf("expected successful task to include report id, got %#v", items[1])
 	}
 
 	recorder = httptest.NewRecorder()
@@ -1574,6 +1804,187 @@ func TestReportsAPIListsGetsAndSoftDeletes(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected deleted report get status %d, got %d, body %s", http.StatusNotFound, recorder.Code, recorder.Body.String())
+	}
+}
+
+// TestReportsAPIStatsAndBatchDelete 验证报告统计和批量删除只基于可见报告计算，不暴露报告正文或输入快照。
+func TestReportsAPIStatsAndBatchDelete(t *testing.T) {
+	store := newMemoryReportStore()
+	base := time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC)
+	store.items[1] = model.AnalysisReport{
+		ID:              1,
+		TaskID:          "task-a",
+		Symbol:          "CN:SH:600519",
+		Title:           "贵州茅台综合分析",
+		AnalysisType:    "stock_full",
+		ModelName:       "deepseek-chat",
+		InputSnapshot:   `{"userPosition":"满仓"}`,
+		ContentMarkdown: "正文不应出现在统计",
+		CreatedAt:       base,
+		UpdatedAt:       base.Add(3 * time.Hour),
+	}
+	store.items[2] = model.AnalysisReport{
+		ID:           2,
+		TaskID:       "task-b",
+		Symbol:       "CN:SH:600000",
+		Title:        "浦发银行技术分析",
+		AnalysisType: "technical",
+		ModelName:    "deepseek-chat",
+		CreatedAt:    base.Add(time.Hour),
+		UpdatedAt:    base.Add(2 * time.Hour),
+	}
+	store.items[3] = model.AnalysisReport{
+		ID:           3,
+		TaskID:       "task-c",
+		Symbol:       "US:AAPL",
+		Title:        "苹果综合分析",
+		AnalysisType: "stock_full",
+		ModelName:    "gpt-4o",
+		CreatedAt:    base.Add(2 * time.Hour),
+		UpdatedAt:    base.Add(time.Hour),
+	}
+
+	handler := NewHandler(Config{
+		Version:     "0.1.0",
+		Token:       "test-token",
+		DBStatus:    "not_configured",
+		Ready:       true,
+		ReportStore: store,
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/reports/stats", strings.NewReader(`{}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected stats status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	data := decodeResponseData(t, recorder.Body.Bytes())
+	if data["total"] != float64(3) || data["unique_symbols"] != float64(3) {
+		t.Fatalf("unexpected stats summary: %#v", data)
+	}
+	if strings.Contains(recorder.Body.String(), "满仓") || strings.Contains(recorder.Body.String(), "正文不应出现在统计") {
+		t.Fatalf("stats response must not expose snapshot or content: %s", recorder.Body.String())
+	}
+	analysisTypes, ok := data["analysis_types"].([]any)
+	if !ok || len(analysisTypes) != 2 {
+		t.Fatalf("expected analysis type stats, got %#v", data["analysis_types"])
+	}
+	topModels, ok := data["top_models"].([]any)
+	if !ok || len(topModels) != 2 {
+		t.Fatalf("expected top model stats, got %#v", data["top_models"])
+	}
+
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/reports/batch-delete", strings.NewReader(`{"ids":[1,3]}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected batch delete status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	deleted := decodeResponseData(t, recorder.Body.Bytes())
+	ids, ok := deleted["ids"].([]any)
+	if !ok || len(ids) != 2 {
+		t.Fatalf("expected deleted ids, got %#v", deleted)
+	}
+	if store.deleted[1] == nil || store.deleted[3] == nil || store.deleted[2] != nil {
+		t.Fatalf("unexpected deleted store state: %#v", store.deleted)
+	}
+}
+
+// TestReportsAPIUpdatesFavorite 验证报告收藏状态持久化，并随列表和详情返回。
+func TestReportsAPIUpdatesFavorite(t *testing.T) {
+	store := newMemoryReportStore()
+	base := time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC)
+	store.items[1] = model.AnalysisReport{
+		ID:              1,
+		TaskID:          "task-visible",
+		Symbol:          "CN:SH:600519",
+		Title:           "贵州茅台综合分析",
+		AnalysisType:    "stock_full",
+		ContentMarkdown: "正文内容",
+		CreatedAt:       base,
+		UpdatedAt:       base,
+	}
+
+	handler := NewHandler(Config{
+		Version:     "0.1.0",
+		Token:       "test-token",
+		DBStatus:    "not_configured",
+		Ready:       true,
+		ReportStore: store,
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/reports/update", strings.NewReader(`{"id":1,"favorite":true}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected update status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	data := decodeResponseData(t, recorder.Body.Bytes())
+	if data["favorite"] != true {
+		t.Fatalf("expected favorite true in update response, got %#v", data)
+	}
+
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/reports/list", strings.NewReader(`{}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+	handler.ServeHTTP(recorder, request)
+	listData := decodeResponseData(t, recorder.Body.Bytes())
+	items, ok := listData["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one report item, got %#v", listData)
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok || item["favorite"] != true {
+		t.Fatalf("expected favorite true in list response, got %#v", items[0])
+	}
+}
+
+// TestReportsAPIExportsMarkdownWithoutInputSnapshot 验证报告导出默认不回显完整输入快照和一次性持仓。
+func TestReportsAPIExportsMarkdownWithoutInputSnapshot(t *testing.T) {
+	store := newMemoryReportStore()
+	base := time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC)
+	store.items[1] = model.AnalysisReport{
+		ID:              1,
+		TaskID:          "task-export",
+		Symbol:          "CN:SH:600519",
+		Title:           "贵州茅台综合分析",
+		AnalysisType:    "stock_full",
+		InputSnapshot:   `{"userPosition":"成本价 100 元"}`,
+		ContentMarkdown: "## 结论\n\n仅供研究参考。",
+		RiskSummary:     "风险摘要",
+		CreatedAt:       base,
+		UpdatedAt:       base,
+	}
+
+	handler := NewHandler(Config{
+		Version:     "0.1.0",
+		Token:       "test-token",
+		DBStatus:    "not_configured",
+		Ready:       true,
+		ReportStore: store,
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/reports/export", strings.NewReader(`{"id":1}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected export status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	data := decodeResponseData(t, recorder.Body.Bytes())
+	content, ok := data["content"].(string)
+	if !ok || !strings.Contains(content, "仅供研究参考。") {
+		t.Fatalf("expected markdown content, got %#v", data)
+	}
+	if strings.Contains(content, "userPosition") || strings.Contains(content, "成本价 100 元") {
+		t.Fatalf("export content must not include input snapshot, got %s", content)
+	}
+	fileName, ok := data["file_name"].(string)
+	if !ok || fileName == "" || strings.Contains(fileName, "/") {
+		t.Fatalf("expected safe file name, got %#v", data)
 	}
 }
 
@@ -2350,7 +2761,13 @@ func TestAIConfigSaveListAndDeleteUseSafeMetadata(t *testing.T) {
 // TestAIConfigTestUsesResolvedKeyWithoutLeakingSecret 验证模型测试只在运行期使用密钥且响应不泄露明文。
 func TestAIConfigTestUsesResolvedKeyWithoutLeakingSecret(t *testing.T) {
 	store := newMemoryAIConfigStore()
-	tester := &recordingAIConfigTester{}
+	tester := &recordingAIConfigTester{result: aiservice.TestResult{
+		OK:         true,
+		Provider:   aiservice.ProviderOpenAICompatible,
+		Model:      "gpt-4.1-mini",
+		Message:    "ok",
+		DurationMS: 128,
+	}}
 	handler := NewHandler(Config{
 		Version:        "0.1.0",
 		Token:          "test-token",
@@ -2399,7 +2816,9 @@ func TestAIConfigTestUsesResolvedKeyWithoutLeakingSecret(t *testing.T) {
 		strings.Contains(payload, "Authorization") {
 		t.Fatalf("AI config test leaked secret: %s", payload)
 	}
-	if !strings.Contains(payload, `"ok":true`) || !strings.Contains(payload, `"provider":"openai-compatible"`) {
+	if !strings.Contains(payload, `"ok":true`) ||
+		!strings.Contains(payload, `"provider":"openai-compatible"`) ||
+		!strings.Contains(payload, `"duration_ms":128`) {
 		t.Fatalf("AI config test missing safe result fields: %s", payload)
 	}
 }
@@ -2448,6 +2867,62 @@ func TestAIConfigTestRedactsProviderError(t *testing.T) {
 		t.Fatalf("AI config test error leaked secret: %s", payload)
 	}
 	assertErrorEnvelope(t, payload, string(xerr.AIUpstream))
+}
+
+// TestAIConfigTestRedactsProviderErrorFromLogs 验证模型测试错误日志不会泄露运行期密钥。
+func TestAIConfigTestRedactsProviderErrorFromLogs(t *testing.T) {
+	store := newMemoryAIConfigStore()
+	tester := &recordingAIConfigTester{err: errors.New(`provider rejected {"api_key":"sk-runtime-secret-logging","authorization":"Bearer sk-runtime-secret-logging"}`)}
+	handler := NewHandler(Config{
+		Version:        "0.1.0",
+		Token:          "test-token",
+		DBStatus:       "not_configured",
+		Ready:          true,
+		AIConfigStore:  store,
+		AIConfigTester: tester,
+	})
+	if err := store.SaveAIConfig(context.Background(), &model.AIConfig{
+		ID:             13,
+		Name:           "OpenAI",
+		Provider:       aiservice.ProviderOpenAICompatible,
+		BaseURL:        "https://api.example.com/v1",
+		APIKeyRef:      "local-vault://ai-config/openai-compatible-13",
+		MaskedAPIKey:   "sk-****3456",
+		HasAPIKey:      true,
+		ModelName:      "gpt-4.1-mini",
+		TimeoutSeconds: 30,
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	var logBuffer bytes.Buffer
+	originalLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() {
+		slog.SetDefault(originalLogger)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/ai/configs/test",
+		strings.NewReader(`{"id":13,"resolved_api_key":"sk-runtime-secret-logging"}`),
+	)
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusBadGateway, recorder.Code, recorder.Body.String())
+	}
+	logPayload := logBuffer.String()
+	if strings.Contains(logPayload, "sk-runtime-secret-logging") ||
+		strings.Contains(logPayload, "Bearer sk-runtime-secret-logging") {
+		t.Fatalf("AI config test log leaked secret: %s", logPayload)
+	}
+	if !strings.Contains(logPayload, logger.RedactedValue) {
+		t.Fatalf("AI config test log did not record redaction marker: %s", logPayload)
+	}
 }
 
 // TestSettingsSetAndGetPersistValues 验证 settings API 可以保存并读取非敏感配置。
@@ -2542,6 +3017,47 @@ func TestSettingsSetRejectsCredentialsInDocumentedProxyURLKeys(t *testing.T) {
 			t.Fatalf("expected status %d for %s, got %d, body %s", http.StatusBadRequest, key, recorder.Code, recorder.Body.String())
 		}
 		assertErrorEnvelope(t, recorder.Body.String(), string(xerr.SettingsProxyCredentialInURL))
+	}
+}
+
+// TestProxyTestUsesInjectedTester 验证代理测试路由只转发固定 target，并返回脱敏连通性结果。
+func TestProxyTestUsesInjectedTester(t *testing.T) {
+	tester := &recordingProxyTester{
+		result: netproxyservice.ConnectionTestResult{
+			OK:         true,
+			Target:     "baidu",
+			StatusCode: 200,
+			DurationMS: 42,
+			CheckedAt:  "2026-06-24T12:00:00Z",
+			Message:    "ok",
+		},
+	}
+	handler := NewHandler(Config{
+		Version:       "0.1.0",
+		Token:         "test-token",
+		DBStatus:      "not_configured",
+		Ready:         true,
+		SettingsStore: newMemorySettingsStore(),
+		ProxyTester:   tester,
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/proxy/test", strings.NewReader(`{"target":"baidu"}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if tester.calls != 1 || tester.target != "baidu" {
+		t.Fatalf("unexpected proxy tester call: %+v", tester)
+	}
+	payload := recorder.Body.String()
+	if !strings.Contains(payload, `"ok":true`) ||
+		!strings.Contains(payload, `"duration_ms":42`) ||
+		!strings.Contains(payload, `"status_code":200`) {
+		t.Fatalf("proxy test response missing expected fields: %s", payload)
 	}
 }
 
@@ -2650,12 +3166,14 @@ type fakeMarketProvider struct {
 	status        market.ProviderStatus
 	quoteResult   market.Quote
 	quoteCalls    *int
+	quoteSymbols  *[]string
 	klineResults  []market.KlineBar
 	klineCalls    *int
 }
 
 type fakeNewsProvider struct {
 	listItems   []newsservice.Item
+	listError   error
 	listCalls   *int
 	marketItems []newsservice.Item
 	marketCalls *int
@@ -2681,9 +3199,12 @@ func (provider fakeMarketProvider) Search(context.Context, string) ([]market.Sto
 }
 
 // Quote 返回测试预置的行情快照并记录调用次数。
-func (provider fakeMarketProvider) Quote(context.Context, stock.Symbol) (market.Quote, error) {
+func (provider fakeMarketProvider) Quote(_ context.Context, symbol stock.Symbol) (market.Quote, error) {
 	if provider.quoteCalls != nil {
 		(*provider.quoteCalls)++
+	}
+	if provider.quoteSymbols != nil {
+		*provider.quoteSymbols = append(*provider.quoteSymbols, symbol.String())
 	}
 	return provider.quoteResult, nil
 }
@@ -2713,6 +3234,9 @@ func (provider fakeNewsProvider) Status(context.Context) newsservice.ProviderSta
 func (provider fakeNewsProvider) List(context.Context, newsservice.ListRequest) ([]newsservice.Item, error) {
 	if provider.listCalls != nil {
 		(*provider.listCalls)++
+	}
+	if provider.listError != nil {
+		return nil, provider.listError
 	}
 	return provider.listItems, nil
 }
@@ -2766,6 +3290,13 @@ type recordingAIConfigTester struct {
 	err            error
 }
 
+type recordingProxyTester struct {
+	calls  int
+	target string
+	result netproxyservice.ConnectionTestResult
+	err    error
+}
+
 type analysisExecutorCall struct {
 	taskID         string
 	request        analysisservice.ValidatedCreateRequest
@@ -2793,6 +3324,13 @@ func (tester *recordingAIConfigTester) TestAIConfig(_ context.Context, config ai
 			Message:  "ok",
 		}
 	}
+	return tester.result, tester.err
+}
+
+// TestConnection 记录代理测试调用，避免 action 单测访问真实公网。
+func (tester *recordingProxyTester) TestConnection(_ context.Context, target string) (netproxyservice.ConnectionTestResult, error) {
+	tester.calls++
+	tester.target = target
 	return tester.result, tester.err
 }
 
@@ -2844,9 +3382,10 @@ func (executor *blockingAnalysisExecutor) waitContext(t *testing.T) context.Cont
 }
 
 type memoryTaskStore struct {
-	mutex  sync.Mutex
-	tasks  map[string]model.Task
-	events []model.TaskEvent
+	mutex   sync.Mutex
+	tasks   map[string]model.Task
+	events  []model.TaskEvent
+	reports map[string]model.AnalysisReport
 }
 
 type memoryReportStore struct {
@@ -3134,7 +3673,10 @@ func (store *memoryAIConfigStore) SoftDeleteAIConfig(_ context.Context, id int64
 
 // newMemoryTaskStore 创建 actions 测试使用的内存任务 store。
 func newMemoryTaskStore() *memoryTaskStore {
-	return &memoryTaskStore{tasks: make(map[string]model.Task)}
+	return &memoryTaskStore{
+		tasks:   make(map[string]model.Task),
+		reports: make(map[string]model.AnalysisReport),
+	}
 }
 
 // SaveTask 保存或更新测试任务。
@@ -3202,6 +3744,14 @@ func (store *memoryTaskStore) ListTaskEventsAfter(_ context.Context, taskID stri
 	return items, nil
 }
 
+// GetAnalysisReportByTaskID 按任务 ID 返回测试报告，供任务历史报告跳转字段使用。
+func (store *memoryTaskStore) GetAnalysisReportByTaskID(_ context.Context, taskID string) (model.AnalysisReport, bool, error) {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+	item, ok := store.reports[taskID]
+	return item, ok, nil
+}
+
 // newMemoryReportStore 创建 actions 测试使用的内存报告 store。
 func newMemoryReportStore() *memoryReportStore {
 	return &memoryReportStore{
@@ -3229,6 +3779,24 @@ func (store *memoryReportStore) ListVisibleAnalysisReports(context.Context) ([]m
 func (store *memoryReportStore) SoftDeleteAnalysisReport(_ context.Context, id int64) error {
 	now := time.Now().UTC()
 	store.deleted[id] = &now
+	return nil
+}
+
+// BatchSoftDeleteAnalysisReports 对测试报告执行批量软删除，模拟真实 DAO 的事务边界。
+func (store *memoryReportStore) BatchSoftDeleteAnalysisReports(_ context.Context, ids []int64) error {
+	now := time.Now().UTC()
+	for _, id := range ids {
+		store.deleted[id] = &now
+	}
+	return nil
+}
+
+// UpdateAnalysisReportFavorite 更新内存报告收藏状态，验证 action 与真实 DAO 的写入契约一致。
+func (store *memoryReportStore) UpdateAnalysisReportFavorite(_ context.Context, id int64, favorite bool) error {
+	item := store.items[id]
+	item.Favorite = favorite
+	item.UpdatedAt = time.Now().UTC()
+	store.items[id] = item
 	return nil
 }
 

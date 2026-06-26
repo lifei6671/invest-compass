@@ -44,8 +44,36 @@ type marketRequest struct {
 	Limit  int    `json:"limit"`
 }
 
+type statsRequest struct {
+	Market string `json:"market"`
+	Limit  int    `json:"limit"`
+}
+
 type listData struct {
 	Items []itemData `json:"items"`
+}
+
+type statsData struct {
+	TotalCount       int    `json:"total_count"`
+	SourceCount      int    `json:"source_count"`
+	LatestPublished  string `json:"latest_published_at"`
+	SentimentSummary string `json:"sentiment_summary"`
+}
+
+type hotTopicsData struct {
+	Industries      []hotIndustryData    `json:"industries"`
+	MentionedStocks []mentionedStockData `json:"mentioned_stocks"`
+	UpdatedAt       string               `json:"updated_at"`
+}
+
+type hotIndustryData struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+type mentionedStockData struct {
+	Symbol string `json:"symbol"`
+	Count  int    `json:"count"`
 }
 
 type itemData struct {
@@ -65,6 +93,8 @@ func Routes(config Config) []httpx.Route {
 	return []httpx.Route{
 		{Method: http.MethodPost, Path: "/api/news/list", Handler: handleList(config)},
 		{Method: http.MethodPost, Path: "/api/news/market", Handler: handleMarket(config)},
+		{Method: http.MethodPost, Path: "/api/news/stats", Handler: handleStats(config)},
+		{Method: http.MethodPost, Path: "/api/news/hot-topics", Handler: handleHotTopics(config)},
 	}
 }
 
@@ -85,12 +115,14 @@ func handleList(config Config) http.HandlerFunc {
 			return
 		}
 
+		var cachedItems []model.NewsItem
 		if config.Store != nil {
 			items, err := config.Store.ListNewsBySymbol(request.Context(), symbol.String(), payload.Limit, newsCacheMaxAge)
 			if err != nil {
 				writeCacheError(response, context, "个股新闻缓存读取失败", err)
 				return
 			}
+			cachedItems = items
 			if len(items) >= payload.Limit {
 				httpx.WriteOK(response, listData{Items: itemDataFromModels(items)}, context)
 				return
@@ -103,6 +135,10 @@ func handleList(config Config) http.HandlerFunc {
 
 		items, err := config.NewsProvider.List(request.Context(), newsservice.ListRequest{Symbol: symbol, Limit: payload.Limit})
 		if err != nil {
+			if isUnsupportedStockNewsList(err) {
+				httpx.WriteOK(response, listData{Items: itemDataFromModels(cachedItems)}, context)
+				return
+			}
 			writeProviderError(response, context, config.NewsProvider.Name(), "list", err)
 			return
 		}
@@ -120,6 +156,12 @@ func handleList(config Config) http.HandlerFunc {
 
 		httpx.WriteOK(response, listData{Items: itemDataFromService(normalized, payload.Limit)}, context)
 	}
+}
+
+// isUnsupportedStockNewsList 判断 Provider 是否仅不支持个股新闻；该场景应回退到缓存而不是让详情页整体失败。
+func isUnsupportedStockNewsList(err error) bool {
+	var providerError *newsservice.ProviderError
+	return errors.As(err, &providerError) && providerError.Operation == "list_unsupported"
 }
 
 // handleMarket 处理市场新闻请求，缓存不足时调用 Provider 并落库。
@@ -178,6 +220,75 @@ func handleMarket(config Config) http.HandlerFunc {
 
 		httpx.WriteOK(response, listData{Items: itemDataFromService(normalized, payload.Limit)}, context)
 	}
+}
+
+// handleStats 返回资讯中心侧栏统计，统计口径仅来自本地新闻缓存。
+func handleStats(config Config) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		context := httpx.ContextFrom(request)
+		if !httpx.RequireReadyToken(response, request, config.Security, context) {
+			return
+		}
+		payload, ok := decodeStatsPayload(response, request, context)
+		if !ok {
+			return
+		}
+		items, ok := loadCachedMarketNews(response, request, context, config, payload.Market, payload.Limit)
+		if !ok {
+			return
+		}
+		httpx.WriteOK(response, buildStatsData(items), context)
+	}
+}
+
+// handleHotTopics 返回资讯热点标签和高频关联股票，避免前端硬编码热点榜。
+func handleHotTopics(config Config) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		context := httpx.ContextFrom(request)
+		if !httpx.RequireReadyToken(response, request, config.Security, context) {
+			return
+		}
+		payload, ok := decodeStatsPayload(response, request, context)
+		if !ok {
+			return
+		}
+		items, ok := loadCachedMarketNews(response, request, context, config, payload.Market, payload.Limit)
+		if !ok {
+			return
+		}
+		httpx.WriteOK(response, buildHotTopicsData(items), context)
+	}
+}
+
+// decodeStatsPayload 解析资讯统计类请求，共用 market 和 limit 边界校验。
+func decodeStatsPayload(response http.ResponseWriter, request *http.Request, context httpx.RequestContext) (statsRequest, bool) {
+	var payload statsRequest
+	if !httpx.DecodeJSON(response, request, context, &payload) {
+		return statsRequest{}, false
+	}
+	payload.Market = strings.ToUpper(strings.TrimSpace(payload.Market))
+	if payload.Market == "" {
+		httpx.WriteError(response, http.StatusBadRequest, 40008, "invalid_market", context)
+		return statsRequest{}, false
+	}
+	if !validateLimit(response, payload.Limit, context) {
+		return statsRequest{}, false
+	}
+	return payload, true
+}
+
+// loadCachedMarketNews 只读取本地缓存，不触发外部 Provider，保证侧栏统计不会伪造或隐式联网。
+func loadCachedMarketNews(response http.ResponseWriter, request *http.Request, context httpx.RequestContext, config Config, market string, limit int) ([]model.NewsItem, bool) {
+	if config.Store == nil {
+		httpx.WriteError(response, http.StatusServiceUnavailable, 50305, "news_store_unavailable", context)
+		return nil, false
+	}
+	items, err := config.Store.ListMarketNews(request.Context(), market, limit, 0)
+	if err != nil {
+		writeCacheError(response, context, "市场新闻缓存读取失败", err)
+		return nil, false
+	}
+	return items, true
 }
 
 // parseSymbol 将用户输入规范化为 service 层标准 symbol。
@@ -280,6 +391,99 @@ func itemDataFromModels(items []model.NewsItem) []itemData {
 		})
 	}
 	return result
+}
+
+// buildStatsData 从缓存新闻构造统计摘要；当前没有情绪模型，不输出假利好/利空判断。
+func buildStatsData(items []model.NewsItem) statsData {
+	sources := make(map[string]struct{})
+	var latest time.Time
+	for _, item := range items {
+		if source := strings.TrimSpace(item.Source); source != "" {
+			sources[source] = struct{}{}
+		}
+		if item.PublishedAt.After(latest) {
+			latest = item.PublishedAt
+		}
+	}
+	latestText := ""
+	if !latest.IsZero() {
+		latestText = latest.Format(time.RFC3339Nano)
+	}
+	return statsData{
+		TotalCount:       len(items),
+		SourceCount:      len(sources),
+		LatestPublished:  latestText,
+		SentimentSummary: "暂未接入情绪分类，当前仅展示新闻缓存数量、来源和标签统计。",
+	}
+}
+
+// buildHotTopicsData 从新闻 tags 和 symbols 统计热点，排序稳定且不依赖前端硬编码。
+func buildHotTopicsData(items []model.NewsItem) hotTopicsData {
+	tagCounts := make(map[string]int)
+	symbolCounts := make(map[string]int)
+	var latest time.Time
+	for _, item := range items {
+		if item.PublishedAt.After(latest) {
+			latest = item.PublishedAt
+		}
+		for _, tag := range decodeStringList(item.Tags) {
+			tag = strings.TrimSpace(tag)
+			if tag != "" {
+				tagCounts[tag]++
+			}
+		}
+		for _, symbol := range decodeStringList(item.Symbols) {
+			symbol = strings.TrimSpace(symbol)
+			if symbol != "" {
+				symbolCounts[symbol]++
+			}
+		}
+	}
+	updatedAt := ""
+	if !latest.IsZero() {
+		updatedAt = latest.Format(time.RFC3339Nano)
+	}
+	return hotTopicsData{
+		Industries:      topHotIndustries(tagCounts, 5),
+		MentionedStocks: topMentionedStocks(symbolCounts, 10),
+		UpdatedAt:       updatedAt,
+	}
+}
+
+// topHotIndustries 按出现次数和名称稳定排序，返回侧栏可展示的热点标签。
+func topHotIndustries(counts map[string]int, limit int) []hotIndustryData {
+	items := make([]hotIndustryData, 0, len(counts))
+	for name, count := range counts {
+		items = append(items, hotIndustryData{Name: name, Count: count})
+	}
+	sort.SliceStable(items, func(left int, right int) bool {
+		if items[left].Count == items[right].Count {
+			return items[left].Name < items[right].Name
+		}
+		return items[left].Count > items[right].Count
+	})
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items
+}
+
+// topMentionedStocks 按出现次数和 symbol 稳定排序，返回缓存新闻中的高频提及股票。
+func topMentionedStocks(counts map[string]int, limit int) []mentionedStockData {
+	items := make([]mentionedStockData, 0, len(counts))
+	for symbol, count := range counts {
+		items = append(items, mentionedStockData{Symbol: symbol, Count: count})
+	}
+	sort.SliceStable(items, func(left int, right int) bool {
+		if items[left].Count == items[right].Count {
+			return items[left].Symbol < items[right].Symbol
+		}
+		return items[left].Count > items[right].Count
+	})
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items
 }
 
 // modelNewsItemsFromService 转换 Provider 新闻为可持久化缓存模型。

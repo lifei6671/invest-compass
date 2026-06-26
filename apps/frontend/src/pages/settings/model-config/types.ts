@@ -46,6 +46,7 @@ export type ModelConfig = {
   isDefault: boolean;
   keyStatus: KeyStatus;
   connectionStatus: ConnectionStatus;
+  testDurationMs?: number;
   temperature: number;
   maxTokens: number;
   timeoutSeconds: number;

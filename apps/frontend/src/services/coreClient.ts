@@ -75,6 +75,7 @@ export type DashboardSummary = {
   recent_tasks: Array<{
     id: string;
     type?: string;
+    task_type?: string;
     status: string;
     title: string;
     progress?: number;
@@ -128,6 +129,8 @@ export type MarketQuote = {
   turnover_rate?: number;
   pe?: number;
   pb?: number;
+  total_market_cap?: number;
+  float_market_cap?: number;
   quote_time?: string;
   provider?: string;
 };
@@ -194,6 +197,25 @@ export type NewsListResult = {
   items: NewsItem[];
 };
 
+export type NewsStatsResult = {
+  total_count: number;
+  source_count: number;
+  latest_published_at?: string;
+  sentiment_summary: string;
+};
+
+export type NewsHotTopicsResult = {
+  industries: Array<{
+    name: string;
+    count: number;
+  }>;
+  mentioned_stocks: Array<{
+    symbol: string;
+    count: number;
+  }>;
+  updated_at?: string;
+};
+
 export type OpenExternalURLResult = {
   ok: boolean;
 };
@@ -238,6 +260,7 @@ export type AIConfigTestResult = {
   provider: string;
   model: string;
   message: string;
+  duration_ms: number;
 };
 
 export type AIConfigDeletePayload = {
@@ -294,6 +317,7 @@ export type AnalysisTaskCreatePayload = {
   ai_config_id: number;
   api_key_ref: string;
   prompt_template_id: number;
+  retry_of_task_id?: string;
   user_position?: UserPositionPayload | null;
 };
 
@@ -313,6 +337,7 @@ export type TaskItem = {
   status: string;
   title: string;
   progress: number;
+  report_id?: number;
   error_message?: string;
   started_at?: string;
   finished_at?: string;
@@ -326,6 +351,7 @@ export type TaskListResult = {
 
 export type TaskEventItem = {
   id: number;
+  task_id?: string;
   event: string;
   data: Record<string, unknown>;
   created_at?: string;
@@ -432,6 +458,7 @@ export type AnalysisReport = {
   prompt_template_id?: number;
   content_markdown?: string;
   risk_summary?: string;
+  favorite?: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -440,12 +467,37 @@ export type ReportListResult = {
   items: AnalysisReport[];
 };
 
+export type ReportStatsCount = {
+  name: string;
+  count: number;
+};
+
+export type ReportStatsResult = {
+  total: number;
+  unique_symbols: number;
+  latest_created_at?: string;
+  analysis_types: ReportStatsCount[];
+  top_models: ReportStatsCount[];
+};
+
+export type ReportBatchDeleteResult = {
+  ids: number[];
+};
+
+export type ReportExportResult = {
+  saved: boolean;
+  file_path: string;
+  file_name: string;
+};
+
 export type WatchlistItem = {
   id: number;
   symbol: string;
   sort_order: number;
-  tags: string[];
-  note: string;
+  tags: string[] | null;
+  note: string | null;
+  created_at?: string;
+  updated_at?: string;
   name?: string;
   code?: string;
   market?: string;
@@ -455,6 +507,8 @@ export type WatchlistItem = {
   list_date?: string;
   status?: string;
   full_name?: string;
+  quote?: MarketQuote | null;
+  trend_points?: number[];
 };
 
 export type WatchlistList = {
@@ -473,6 +527,15 @@ export type WatchlistUpdatePayload = {
   sort_order: number;
   tags: string[];
   note: string;
+};
+
+export type WatchlistRefreshPayload = {
+  symbols: string[];
+};
+
+export type WatchlistRefreshResult = {
+  accepted: boolean;
+  total: number;
 };
 
 export type SchedulerJob = {
@@ -626,6 +689,21 @@ export type SettingsSetPayload = {
 
 export type SettingsSetResult = {
   saved_keys: string[];
+};
+
+export type ProxyConnectionTestPayload = {
+  target: string;
+};
+
+export type ProxyConnectionTestResult = {
+  result: {
+    ok: boolean;
+    target: string;
+    status_code: number;
+    duration_ms: number;
+    checked_at: string;
+    message: string;
+  };
 };
 
 export type AutostartState = {
@@ -782,7 +860,7 @@ export type ProvidersStatusResult = {
 
 export type DataSourceCredentialAuthType = "none" | "api_key" | "cookie" | "bearer_token" | "custom_header";
 
-export type DataSourceCredentialStatus = "normal" | "not_configured" | "expired" | "expiring" | "failed";
+export type DataSourceCredentialStatus = "normal" | "not_configured" | "expired" | "expiring" | "limited" | "failed";
 
 export type DataSourceCredentialProvider = {
   id: string;
@@ -814,7 +892,7 @@ export type DataSourceCredentialTestTarget = {
 };
 
 export type DataSourceCredentialTestResult = {
-  status: "success" | "failed" | "untested";
+  status: "success" | "failed" | "untested" | "limited";
   responseTimeMs?: number;
   testedAt?: string;
   messages: string[];
@@ -879,8 +957,10 @@ export type DataSourceCredentialTestResponse = {
 export type UpdateCheckResult = {
   current_version: string;
   latest_version: string;
-  has_update: boolean;
-  release_notes?: string;
+  has_new_version: boolean;
+  action: "PROMPT_ONLY";
+  download_url?: string;
+  release_notes_url?: string;
 };
 
 export type ExportLogsResult = {
@@ -956,6 +1036,48 @@ function normalizeDashboardSummary(summary: DashboardSummary): DashboardSummary 
   };
 }
 
+type RawTaskEventItem = {
+  id: number;
+  task_id?: string;
+  event?: string;
+  event_type?: string;
+  data?: Record<string, unknown>;
+  payload?: string | Record<string, unknown>;
+  created_at?: string;
+};
+
+function normalizeTaskEventsResult(result: TaskEventsResult | { items?: RawTaskEventItem[] }): TaskEventsResult {
+  return {
+    items: (result.items ?? []).map(normalizeTaskEventItem),
+  };
+}
+
+function normalizeTaskEventItem(item: TaskEventItem | RawTaskEventItem): TaskEventItem {
+  const raw = item as RawTaskEventItem;
+  return {
+    id: raw.id,
+    task_id: raw.task_id,
+    event: raw.event ?? raw.event_type ?? "",
+    data: raw.data ?? parseTaskEventPayload(raw.payload),
+    created_at: raw.created_at,
+  };
+}
+
+function parseTaskEventPayload(payload: RawTaskEventItem["payload"]): Record<string, unknown> {
+  if (!payload) {
+    return {};
+  }
+  if (typeof payload !== "string") {
+    return payload;
+  }
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
 /// 通过固定 Rust command 搜索股票，搜索结果来自 Go core Provider，不在前端构造假数据。
 export async function stockSearch(keyword: string): Promise<StockSearchResult[]> {
   const response = await invoke<CoreEnvelope<StockSearchResult[]>>("stock_search", { keyword });
@@ -968,9 +1090,14 @@ export async function stockProfile(symbol: string): Promise<StockProfile> {
   return unwrapCoreResponse(response);
 }
 
+export type MarketQuoteOptions = {
+  forceRefresh?: boolean;
+};
+
 /// 通过固定 Rust command 读取单只股票行情，用于自选股等页面展示真实 quote。
-export async function marketQuote(symbol: string): Promise<MarketQuote> {
-  const response = await invoke<CoreEnvelope<MarketQuote>>("market_quote", { symbol });
+export async function marketQuote(symbol: string, options?: MarketQuoteOptions): Promise<MarketQuote> {
+  const payload = options?.forceRefresh ? { symbol, forceRefresh: true } : { symbol };
+  const response = await invoke<CoreEnvelope<MarketQuote>>("market_quote", payload);
   return unwrapCoreResponse(response);
 }
 
@@ -1003,6 +1130,18 @@ export async function newsList(payload: NewsListPayload): Promise<NewsListResult
 /// 通过固定 Rust command 读取市场新闻，资讯中心不直接访问外部数据源。
 export async function newsMarket(payload: NewsMarketPayload): Promise<NewsListResult> {
   const response = await invoke<CoreEnvelope<NewsListResult>>("news_market", payload);
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取资讯缓存统计，不在前端伪造情绪分类。
+export async function newsStats(payload: NewsMarketPayload): Promise<NewsStatsResult> {
+  const response = await invoke<CoreEnvelope<NewsStatsResult>>("news_stats", payload);
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取资讯缓存热点标签和提及股票统计。
+export async function newsHotTopics(payload: NewsMarketPayload): Promise<NewsHotTopicsResult> {
+  const response = await invoke<CoreEnvelope<NewsHotTopicsResult>>("news_hot_topics", payload);
   return unwrapCoreResponse(response);
 }
 
@@ -1115,7 +1254,7 @@ export async function taskGet(taskID: string): Promise<TaskItem> {
 /// 通过固定 Rust command 增量读取任务事件。
 export async function taskEvents(taskID: string, afterEventID: number): Promise<TaskEventsResult> {
   const response = await invoke<CoreEnvelope<TaskEventsResult>>("task_events", { taskId: taskID, afterEventId: afterEventID });
-  return unwrapCoreResponse(response);
+  return normalizeTaskEventsResult(unwrapCoreResponse(response));
 }
 
 /// 通过固定 Rust command 读取任务结构化日志列表。
@@ -1171,6 +1310,29 @@ export async function reportDelete(id: number): Promise<{ id: number }> {
   return unwrapCoreResponse(response);
 }
 
+/// 通过固定 Rust command 更新报告收藏状态。
+export async function reportUpdate(id: number, favorite: boolean): Promise<AnalysisReport> {
+  const response = await invoke<CoreEnvelope<AnalysisReport>>("report_update", { id, favorite });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 读取报告聚合统计。
+export async function reportStats(): Promise<ReportStatsResult> {
+  const response = await invoke<CoreEnvelope<ReportStatsResult>>("report_stats");
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 批量删除报告。
+export async function reportBatchDelete(ids: number[]): Promise<ReportBatchDeleteResult> {
+  const response = await invoke<CoreEnvelope<ReportBatchDeleteResult>>("report_batch_delete", { ids });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 打开系统保存对话框并导出报告 Markdown。
+export async function reportExport(id: number): Promise<ReportExportResult> {
+  return invoke<ReportExportResult>("report_export", { id });
+}
+
 /// 通过固定 Rust command 读取自选股列表。
 export async function watchlistList(): Promise<WatchlistList> {
   const response = await invoke<CoreEnvelope<WatchlistList>>("watchlist_list");
@@ -1192,6 +1354,12 @@ export async function watchlistUpdate(payload: WatchlistUpdatePayload): Promise<
 /// 通过固定 Rust command 删除自选股。
 export async function watchlistDelete(id: number): Promise<{ id: number }> {
   const response = await invoke<CoreEnvelope<{ id: number }>>("watchlist_delete", { id });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 提交自选股行情后台刷新请求，不在 UI 线程等待远端行情结果。
+export async function watchlistRefresh(payload: WatchlistRefreshPayload): Promise<WatchlistRefreshResult> {
+  const response = await invoke<CoreEnvelope<WatchlistRefreshResult>>("watchlist_refresh", { payload });
   return unwrapCoreResponse(response);
 }
 
@@ -1335,6 +1503,12 @@ export async function settingsGet(keys: string[]): Promise<SettingsGetResult> {
 /// 通过固定 Rust command 保存设置项，代理密码只作为一次性字段交给 Rust vault。
 export async function settingsSet(payload: SettingsSetPayload): Promise<SettingsSetResult> {
   const response = await invoke<CoreEnvelope<SettingsSetResult>>("settings_set", { payload });
+  return unwrapCoreResponse(response);
+}
+
+/// 通过固定 Rust command 执行代理连通性测试，只接受白名单 target 标识。
+export async function proxyConnectionTest(payload: ProxyConnectionTestPayload): Promise<ProxyConnectionTestResult> {
+  const response = await invoke<CoreEnvelope<ProxyConnectionTestResult>>("proxy_connection_test", { payload });
   return unwrapCoreResponse(response);
 }
 
@@ -1503,7 +1677,7 @@ export async function dataSourceCredentialsClear(
   return unwrapCoreResponse(response);
 }
 
-/// 通过固定 Rust command 执行数据源凭据本地预检，不访问真实外部 Provider。
+/// 通过固定 Rust command 执行数据源凭据真实连接测试，只返回脱敏状态和耗时。
 export async function dataSourceCredentialsTest(
   payload: DataSourceCredentialTestPayload,
 ): Promise<DataSourceCredentialTestResponse> {

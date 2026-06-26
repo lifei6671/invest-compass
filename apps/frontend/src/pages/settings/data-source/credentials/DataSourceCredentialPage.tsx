@@ -12,8 +12,18 @@ import { CredentialProviderList } from "./components/CredentialProviderList";
 import { CredentialSecurityCard } from "./components/CredentialSecurityCard";
 
 const stockTestTargetsByProvider: Record<string, Array<{ label: string; value: string }>> = {
+  eastmoney: [{ label: "基础证券列表（东财）", value: "security_list" }],
   sina: [{ label: "行情接口（/list）", value: "quote" }],
   tencent: [{ label: "K线接口（/fqkline）", value: "kline" }],
+  tdx: [{ label: "通达信 TCP/MAC 链路说明", value: "connectivity" }],
+  akshare: [{ label: "基础服务连通性", value: "connectivity" }],
+  "alpha-vantage": [{ label: "海外行情接口（GLOBAL_QUOTE）", value: "quote" }],
+  cls: [
+    { label: "快讯接口（/api/cache）", value: "flash" },
+    { label: "日历接口（/api/calendar）", value: "calendar" },
+    { label: "行业事件接口（/api/events）", value: "events" },
+  ],
+  xueqiu: [{ label: "热股榜接口（hot_stock）", value: "hot_stock" }],
 };
 
 export function DataSourceCredentialPage() {
@@ -23,7 +33,7 @@ export function DataSourceCredentialPage() {
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [testTargets, setTestTargets] = useState<Array<{ label: string; value: string }>>([]);
   const [testTarget, setTestTarget] = useState("");
-  const [testResult, setTestResult] = useState<CredentialTestResult>({ status: "untested", messages: ["尚未执行本地预检"] });
+  const [testResult, setTestResult] = useState<CredentialTestResult>({ status: "untested", messages: ["尚未执行真实连接测试"] });
   const [overview, setOverview] = useState({ configuredCount: 0, expiringSoonCount: 0, expiredCount: 0 });
   const [healthItems, setHealthItems] = useState<Array<{ name: string; status: "normal" | "limited" | "failed"; rateLimitText: string }>>([]);
   const [operationLogs, setOperationLogs] = useState<Array<{ id: string; action: string; status: "success" | "failed"; time: string }>>([]);

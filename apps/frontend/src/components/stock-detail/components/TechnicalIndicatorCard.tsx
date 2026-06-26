@@ -1,4 +1,4 @@
-import { App as AntApp, Empty } from "antd";
+import { Empty } from "antd";
 import { useState } from "react";
 import type { TechnicalIndicator } from "../types";
 
@@ -9,7 +9,6 @@ type TechnicalIndicatorCardProps = {
 const tabs = ["MA", "MACD", "RSI", "KDJ", "BOLL"];
 
 export function TechnicalIndicatorCard(props: TechnicalIndicatorCardProps) {
-  const { message } = AntApp.useApp();
   const [active, setActive] = useState("MA");
 
   return (
@@ -25,12 +24,7 @@ export function TechnicalIndicatorCard(props: TechnicalIndicatorCardProps) {
               key={tab}
               type="button"
               className={["h-7 min-w-[52px] rounded border-0 px-3 text-[13px]", active === tab ? "bg-[#eaf3ff] font-medium text-[#1677ff]" : "bg-transparent text-[#64748b]"].join(" ")}
-              onClick={() => {
-                setActive(tab);
-                if (tab !== "MA") {
-                  message.info("指标详情待接入");
-                }
-              }}
+              onClick={() => setActive(tab)}
             >
               {tab}
             </button>

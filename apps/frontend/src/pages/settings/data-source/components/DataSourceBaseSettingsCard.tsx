@@ -1,12 +1,9 @@
-import { Select, Switch } from "antd";
+import { Select } from "antd";
 import { ClockCircleOutlined } from "@ant-design/icons";
 import type { ReactNode } from "react";
 import type {
   DataSourceBaseSettings,
-  KlineRange,
-  MarketScope,
   MarketSource,
-  NewsSource,
   NewsSyncInterval,
   QuoteRefreshInterval,
 } from "../types";
@@ -18,32 +15,7 @@ type DataSourceBaseSettingsCardProps = {
 
 const marketSourceOptions: Array<{ label: string; value: MarketSource }> = [
   { label: "自动降级", value: "auto-fallback" },
-  { label: "AkShare / EastMoney", value: "akshare-eastmoney" },
-  { label: "EastMoney", value: "eastmoney" },
-  { label: "新浪财经", value: "sina" },
-  { label: "腾讯财经", value: "tencent" },
-  { label: "Custom Provider", value: "custom" },
-];
-
-const newsSourceOptions: Array<{ label: string; value: NewsSource }> = [
-  { label: "聚合新闻源", value: "aggregated" },
-  { label: "财联社", value: "cls" },
-  { label: "新浪财经", value: "sina" },
-  { label: "自定义资讯源", value: "custom" },
-];
-
-const marketScopeOptions: Array<{ label: string; value: MarketScope }> = [
-  { label: "A股", value: "CN" },
-  { label: "港股", value: "HK" },
-  { label: "美股", value: "US" },
-  { label: "全部市场", value: "ALL" },
-];
-
-const klineRangeOptions: Array<{ label: string; value: KlineRange }> = [
-  { label: "近 1 年", value: "1y" },
-  { label: "近 3 年", value: "3y" },
-  { label: "近 5 年", value: "5y" },
-  { label: "全量可用数据", value: "all" },
+  { label: "通达信（K线）", value: "tdx" },
 ];
 
 const quoteRefreshOptions: Array<{ label: string; value: QuoteRefreshInterval }> = [
@@ -76,9 +48,6 @@ export function DataSourceBaseSettingsCard(props: DataSourceBaseSettingsCardProp
       <div className="settings-data-source-form-grid">
         <div className="settings-basic-form-column">
           <SelectField label="默认行情源" value={props.value.defaultMarketSource} options={marketSourceOptions} onChange={(value) => update("defaultMarketSource", value)} />
-          <SelectField label="默认资讯源" value={props.value.defaultNewsSource} options={newsSourceOptions} onChange={(value) => update("defaultNewsSource", value)} />
-          <SelectField label="默认市场范围" value={props.value.defaultMarketScope} options={marketScopeOptions} onChange={(value) => update("defaultMarketScope", value)} />
-          <SelectField label="K线数据范围" value={props.value.klineRange} options={klineRangeOptions} onChange={(value) => update("klineRange", value)} />
         </div>
         <div className="settings-basic-form-column">
           <SelectField
@@ -94,12 +63,6 @@ export function DataSourceBaseSettingsCard(props: DataSourceBaseSettingsCardProp
             value={props.value.newsSyncInterval}
             options={newsSyncOptions}
             onChange={(value) => update("newsSyncInterval", value)}
-          />
-          <SwitchField label="启动时自动同步" checked={props.value.syncOnStartup} onChange={(checked) => update("syncOnStartup", checked)} />
-          <SwitchField
-            label="非交易时段降频"
-            checked={props.value.reduceFrequencyOutsideTradingHours}
-            onChange={(checked) => update("reduceFrequencyOutsideTradingHours", checked)}
           />
         </div>
       </div>
@@ -126,15 +89,6 @@ function SelectField<Value extends string>(props: {
         options={props.options}
         onChange={props.onChange}
       />
-    </div>
-  );
-}
-
-function SwitchField(props: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
-  return (
-    <div className="settings-data-source-field settings-data-source-switch-field">
-      <label>{props.label}</label>
-      <Switch checked={props.checked} onChange={props.onChange} />
     </div>
   );
 }

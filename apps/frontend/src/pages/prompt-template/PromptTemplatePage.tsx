@@ -1,5 +1,5 @@
 import { InfoCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { Alert, App as AntApp, Spin } from "antd";
+import { Alert, App as AntApp, Modal, Spin } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PromptActionBar } from "./components/PromptActionBar";
 import { PromptTemplateEditor } from "./components/PromptTemplateEditor";
@@ -35,6 +35,7 @@ export function PromptTemplatePage() {
   const [loading, setLoading] = useState(true);
   const [actionPending, setActionPending] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<PromptTemplateCategoryType>>(
     () => new Set(promptCategories.filter((category) => category.expanded).map((category) => category.id)),
   );
@@ -161,6 +162,64 @@ export function PromptTemplatePage() {
     message.info("已复制为可编辑自定义草稿，保存后写入用户模板");
   };
 
+  const searchPromptContent = () => {
+    const keyword = window.prompt("搜索 Prompt 内容");
+    const normalizedKeyword = keyword?.trim();
+    if (!normalizedKeyword) {
+      return;
+    }
+    const matchCount = editorState.promptContent.split(normalizedKeyword).length - 1;
+    if (matchCount > 0) {
+      message.success(`找到 ${matchCount} 处匹配`);
+      return;
+    }
+    message.warning("未找到匹配内容");
+  };
+
+  const insertPromptVariable = () => {
+    if (selectedTemplateReadOnly) {
+      message.warning("内置 Prompt 模板不可直接修改");
+      return;
+    }
+    const variable = promptVariables[0]?.name ?? "{{stock_name}}";
+    setEditorState((current) => ({
+      ...current,
+      promptContent: current.promptContent ? `${current.promptContent}\n${variable}` : variable,
+    }));
+    message.success(`已插入变量 ${variable}`);
+  };
+
+  const validatePromptContent = () => {
+    const content = editorState.promptContent.trim();
+    if (!content) {
+      message.warning("Prompt 内容不能为空");
+      return;
+    }
+    const leftCount = (content.match(/\{\{/g) ?? []).length;
+    const rightCount = (content.match(/\}\}/g) ?? []).length;
+    if (leftCount !== rightCount) {
+      message.warning("Prompt 变量括号不匹配");
+      return;
+    }
+    message.success("Prompt 格式检查通过");
+  };
+
+  const formatPromptContent = () => {
+    if (selectedTemplateReadOnly) {
+      message.warning("内置 Prompt 模板不可直接修改");
+      return;
+    }
+    setEditorState((current) => ({
+      ...current,
+      promptContent: current.promptContent
+        .split("\n")
+        .map((line) => line.trimEnd())
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n"),
+    }));
+    message.success("Prompt 内容已格式化");
+  };
+
   const saveTemplate = async () => {
     if (selectedTemplateReadOnly) {
       message.warning("内置 Prompt 模板不可直接修改");
@@ -241,9 +300,11 @@ export function PromptTemplatePage() {
           templateTypeOptions={categoryOptions}
           readOnly={selectedTemplateReadOnly}
           onChange={updateEditorState}
-          onToolAction={(action) => message.info(action)}
-          onFormat={() => message.info("格式化待接入")}
-          onFullscreen={() => message.info("全屏编辑待接入")}
+          onSearch={searchPromptContent}
+          onInsertVariable={insertPromptVariable}
+          onValidate={validatePromptContent}
+          onFormat={formatPromptContent}
+          onFullscreen={() => setFullscreenOpen(true)}
         />
         <div className="prompt-right-column">
           <VariableReferencePanel variables={promptVariables} />
@@ -278,6 +339,28 @@ export function PromptTemplatePage() {
       {actionPending ? <Spin size="small" /> : null}
       {loadError ? <Alert title="Prompt 模板读取失败" description={loadError} type="error" showIcon /> : null}
       {loading ? <Alert title="正在读取 Prompt 模板" type="info" showIcon /> : null}
+      <Modal
+        title="全屏编辑 Prompt"
+        open={fullscreenOpen}
+        footer={null}
+        width="min(1120px, 92vw)"
+        className="prompt-editor-fullscreen-modal"
+        onCancel={() => setFullscreenOpen(false)}
+      >
+        <div className="prompt-editor-fullscreen-content">
+          <PromptTemplateEditor
+            value={editorState}
+            templateTypeOptions={categoryOptions}
+            readOnly={selectedTemplateReadOnly}
+            onChange={updateEditorState}
+            onSearch={searchPromptContent}
+            onInsertVariable={insertPromptVariable}
+            onValidate={validatePromptContent}
+            onFormat={formatPromptContent}
+            onFullscreen={() => setFullscreenOpen(false)}
+          />
+        </div>
+      </Modal>
       <PromptRiskNotice />
     </section>
   );

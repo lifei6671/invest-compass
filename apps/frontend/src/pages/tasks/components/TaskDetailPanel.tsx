@@ -59,7 +59,7 @@ export function TaskDetailPanel({ task, events, onClose, onFullLog }: TaskDetail
         </div>
         <div>
           <dt>开始时间</dt>
-          <dd>2025-05-20 {task.startedAt}</dd>
+          <dd>{task.startedAt}</dd>
         </div>
         <div>
           <dt>预计耗时</dt>

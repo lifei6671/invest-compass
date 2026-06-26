@@ -3,6 +3,7 @@ import { App as AntApp, Button, ConfigProvider, Pagination, Switch, Table, Toolt
 import { useEffect, useMemo, useState } from "react";
 import type { ColumnsType } from "antd/es/table";
 import { appAntdLocale } from "../../../../lib/antdLocale";
+import { PAGE_SIZE_OPTIONS } from "../../../../lib/pagination";
 import { ModelStatusTag } from "./ModelStatusTag";
 import type { ModelConfig } from "../types";
 
@@ -115,8 +116,13 @@ export function ModelConfigTable(props: ModelConfigTableProps) {
     {
       title: "连接状态",
       dataIndex: "connectionStatus",
-      width: 86,
-      render: (_, record) => <ModelStatusTag status={record.connectionStatus} />,
+      width: 96,
+      render: (_, record) => (
+        <span className="inline-flex flex-col gap-0.5">
+          <ModelStatusTag status={record.connectionStatus} />
+          {typeof record.testDurationMs === "number" ? <span className="app-number text-[11px] leading-4 text-[#64748b]">{record.testDurationMs} ms</span> : null}
+        </span>
+      ),
     },
     {
       title: "操作",
@@ -210,7 +216,7 @@ export function ModelConfigTable(props: ModelConfigTableProps) {
             current={currentPage}
             total={props.configs.length}
             pageSize={pageSize}
-            pageSizeOptions={[10, 20, 50]}
+            pageSizeOptions={[...PAGE_SIZE_OPTIONS]}
             showQuickJumper
             showSizeChanger
             showTotal={(total) => `共 ${total} 条`}

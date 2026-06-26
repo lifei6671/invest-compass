@@ -10,6 +10,7 @@ export type ReportItem = {
   analysisType: AnalysisType;
   model: string;
   generatedAt: string;
+  generatedDate: string;
   riskSummary: string;
   status: ReportStatus;
   favorite?: boolean;
@@ -26,12 +27,9 @@ export type ReportFilters = {
 };
 
 export type ReportStats = {
-  weeklyCount: number;
-  weeklyChangePercent: number;
-  successRate: number;
-  successRateChangePercent: number;
-  recentFailedCount: number;
-  recentFailedChange: number;
+  totalCount: number;
+  uniqueSymbols: number;
+  latestCreatedAt: string;
 };
 
 export type TopModelItem = {

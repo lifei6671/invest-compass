@@ -38,13 +38,14 @@ func TestStoreTransactionRollsBackWrites(t *testing.T) {
 	}
 }
 
-// TestWatchlistRepositoryPersistsAndSoftDeletes 验证自选股 repository 支持排序、软删除和重新添加。
+// TestWatchlistRepositoryPersistsAndSoftDeletes 验证自选股 repository 按添加时间倒序、软删除和重新添加。
 func TestWatchlistRepositoryPersistsAndSoftDeletes(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	first := model.Watchlist{Symbol: "US:AAPL", SortOrder: 2, Tags: "tech", Note: "first"}
-	second := model.Watchlist{Symbol: "CN:SH:600519", SortOrder: 1, Tags: "white_wine"}
+	base := time.Date(2026, 6, 22, 9, 0, 0, 0, time.UTC)
+	first := model.Watchlist{Symbol: "US:AAPL", SortOrder: 2, Tags: "tech", Note: "first", CreatedAt: base, UpdatedAt: base}
+	second := model.Watchlist{Symbol: "CN:SH:600519", SortOrder: 1, Tags: "white_wine", CreatedAt: base.Add(time.Hour), UpdatedAt: base.Add(time.Hour)}
 	if err := store.SaveWatchlist(ctx, &first); err != nil {
 		t.Fatalf("save first watchlist: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestWatchlistRepositoryPersistsAndSoftDeletes(t *testing.T) {
 	if err := store.SoftDeleteWatchlist(ctx, second.ID); err != nil {
 		t.Fatalf("soft delete watchlist: %v", err)
 	}
-	if err := store.SaveWatchlist(ctx, &model.Watchlist{Symbol: "CN:SH:600519", SortOrder: 3}); err != nil {
+	if err := store.SaveWatchlist(ctx, &model.Watchlist{Symbol: "CN:SH:600519", SortOrder: 3, CreatedAt: base.Add(2 * time.Hour), UpdatedAt: base.Add(2 * time.Hour)}); err != nil {
 		t.Fatalf("re-add soft deleted watchlist symbol: %v", err)
 	}
 	items, err = store.ListActiveWatchlists(ctx)
@@ -72,6 +73,9 @@ func TestWatchlistRepositoryPersistsAndSoftDeletes(t *testing.T) {
 	}
 	if len(items) != 2 {
 		t.Fatalf("expected two active watchlists after re-add, got %+v", items)
+	}
+	if items[0].Symbol != "CN:SH:600519" || items[1].Symbol != "US:AAPL" {
+		t.Fatalf("expected re-added watchlist to sort first by created_at desc, got %+v", items)
 	}
 }
 
@@ -113,6 +117,49 @@ func TestStockRepositoryUpsertsBySymbol(t *testing.T) {
 		stocks[0].Industry != "消费" ||
 		stocks[0].Concept != "蓝筹" {
 		t.Fatalf("unexpected stocks after upsert: %+v", stocks)
+	}
+}
+
+// TestBuiltinStockRepositoryKeepsPackagedProfileFields 验证内置基础股票池可更新详情字段，且不会依赖远端简版 upsert。
+func TestBuiltinStockRepositoryKeepsPackagedProfileFields(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	err := store.UpsertBuiltinStocks(ctx, []model.Stock{{
+		Symbol:         "CN:SH:600519",
+		Market:         "CN",
+		Code:           "600519",
+		Name:           "贵州茅台",
+		Exchange:       "SH",
+		Industry:       "白酒",
+		FullName:       "贵州茅台酒股份有限公司",
+		PinyinInitials: "gzmt",
+		Status:         "LISTED",
+	}})
+	if err != nil {
+		t.Fatalf("upsert builtin stock: %v", err)
+	}
+	err = store.UpsertStocks(ctx, []model.Stock{{
+		Symbol:   "CN:SH:600519",
+		Market:   "CN",
+		Code:     "600519",
+		Name:     "贵州茅台",
+		Exchange: "SH",
+		Industry: "消费",
+	}})
+	if err != nil {
+		t.Fatalf("upsert remote stock: %v", err)
+	}
+
+	stock, ok, err := store.GetStockBySymbol(ctx, "CN:SH:600519")
+	if err != nil {
+		t.Fatalf("get stock by symbol: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected stock exists")
+	}
+	if stock.Industry != "消费" || stock.FullName != "贵州茅台酒股份有限公司" || stock.PinyinInitials != "gzmt" {
+		t.Fatalf("unexpected stock after mixed upserts: %+v", stock)
 	}
 }
 
@@ -220,20 +267,30 @@ func TestMarketQuoteRepositoryUpsertsBySymbol(t *testing.T) {
 	quoteTime := time.Date(2026, 6, 18, 10, 30, 0, 0, time.UTC)
 
 	if err := store.SaveQuote(ctx, &model.Quote{
-		Symbol:        "CN:SH:600519",
-		Price:         1688.5,
-		ChangePercent: 0.73,
-		QuoteTime:     quoteTime,
-		Provider:      "provider-a",
+		Symbol:         "CN:SH:600519",
+		Price:          1688.5,
+		ChangePercent:  0.73,
+		TurnoverRate:   3.98,
+		PE:             352.10,
+		PB:             2390.72,
+		TotalMarketCap: 123456789000,
+		FloatMarketCap: 98765432100,
+		QuoteTime:      quoteTime,
+		Provider:       "provider-a",
 	}); err != nil {
 		t.Fatalf("save quote: %v", err)
 	}
 	if err := store.SaveQuote(ctx, &model.Quote{
-		Symbol:        "CN:SH:600519",
-		Price:         1700,
-		ChangePercent: 1.2,
-		QuoteTime:     quoteTime.Add(time.Minute),
-		Provider:      "provider-b",
+		Symbol:         "CN:SH:600519",
+		Price:          1700,
+		ChangePercent:  1.2,
+		TurnoverRate:   0,
+		PE:             0,
+		PB:             0,
+		TotalMarketCap: 0,
+		FloatMarketCap: 0,
+		QuoteTime:      quoteTime.Add(time.Minute),
+		Provider:       "provider-b",
 	}); err != nil {
 		t.Fatalf("update quote: %v", err)
 	}
@@ -242,7 +299,15 @@ func TestMarketQuoteRepositoryUpsertsBySymbol(t *testing.T) {
 	if err != nil {
 		t.Fatalf("latest quote: %v", err)
 	}
-	if !ok || quote.Price != 1700 || quote.ChangePercent != 1.2 || quote.Provider != "provider-b" {
+	if !ok ||
+		quote.Price != 1700 ||
+		quote.ChangePercent != 1.2 ||
+		quote.TurnoverRate != 0 ||
+		quote.PE != 0 ||
+		quote.PB != 0 ||
+		quote.TotalMarketCap != 0 ||
+		quote.FloatMarketCap != 0 ||
+		quote.Provider != "provider-b" {
 		t.Fatalf("unexpected latest quote: ok=%v quote=%+v", ok, quote)
 	}
 	requireCount(t, store, &model.Quote{}, 1)
@@ -667,17 +732,24 @@ func TestReportRepositoryUpsertsByTaskID(t *testing.T) {
 	if err := store.SaveAnalysisReportByTaskID(ctx, &report); err != nil {
 		t.Fatalf("save report: %v", err)
 	}
+	reports, err := store.ListVisibleAnalysisReports(ctx)
+	if err != nil {
+		t.Fatalf("list visible reports before favorite: %v", err)
+	}
+	if err := store.UpdateAnalysisReportFavorite(ctx, reports[0].ID, true); err != nil {
+		t.Fatalf("favorite report: %v", err)
+	}
 	report.Title = "新报告"
 	report.ContentMarkdown = "new"
 	if err := store.SaveAnalysisReportByTaskID(ctx, &report); err != nil {
 		t.Fatalf("upsert report: %v", err)
 	}
 
-	reports, err := store.ListVisibleAnalysisReports(ctx)
+	reports, err = store.ListVisibleAnalysisReports(ctx)
 	if err != nil {
 		t.Fatalf("list visible reports: %v", err)
 	}
-	if len(reports) != 1 || reports[0].Title != "新报告" || reports[0].ContentMarkdown != "new" {
+	if len(reports) != 1 || reports[0].Title != "新报告" || reports[0].ContentMarkdown != "new" || !reports[0].Favorite {
 		t.Fatalf("unexpected reports after upsert: %+v", reports)
 	}
 

@@ -15,6 +15,7 @@ type ModelConfigPageProps = {
 };
 
 const connectionStatusCache = new Map<string, ConnectionStatus>();
+const connectionDurationCache = new Map<string, number>();
 
 export function ModelConfigPage(props: ModelConfigPageProps = {}) {
   const { message, modal } = AntApp.useApp();
@@ -137,6 +138,7 @@ export function ModelConfigPage(props: ModelConfigPageProps = {}) {
     try {
       await aiConfigDelete({ id: numericId });
       connectionStatusCache.delete(id);
+      connectionDurationCache.delete(id);
       setConfigs((current) => current.filter((item) => item.id !== id));
       if (selectedConfigId === id) {
         setSelectedConfigId(null);
@@ -213,12 +215,13 @@ export function ModelConfigPage(props: ModelConfigPageProps = {}) {
     testingConfigIdRef.current = id;
     rememberConnectionStatus(id, "testing");
     setTestingConfigId(id);
-    setConfigs((current) => current.map((item) => (item.id === id ? { ...item, connectionStatus: "testing" } : item)));
+    setConfigs((current) => current.map((item) => (item.id === id ? { ...item, connectionStatus: "testing", testDurationMs: undefined } : item)));
     try {
       const result = await aiConfigTest({ id: numericId, api_key_ref: config.apiKeyRef });
       const nextStatus = result.ok ? "normal" : "failed";
-      rememberConnectionStatus(id, nextStatus);
-      setConfigs((current) => current.map((item) => (item.id === id ? { ...item, connectionStatus: nextStatus } : item)));
+      const durationMs = normalizeDurationMs(result.duration_ms);
+      rememberConnectionStatus(id, nextStatus, durationMs);
+      setConfigs((current) => current.map((item) => (item.id === id ? { ...item, connectionStatus: nextStatus, testDurationMs: durationMs } : item)));
       if (result.ok) {
         message.success("连接测试完成");
         return;
@@ -226,7 +229,7 @@ export function ModelConfigPage(props: ModelConfigPageProps = {}) {
       message.error(redactSensitiveText(result.message || "连接测试失败"));
     } catch (error) {
       rememberConnectionStatus(id, "failed");
-      setConfigs((current) => current.map((item) => (item.id === id ? { ...item, connectionStatus: "failed" } : item)));
+      setConfigs((current) => current.map((item) => (item.id === id ? { ...item, connectionStatus: "failed", testDurationMs: undefined } : item)));
       reportCoreError(error);
       message.error(safeErrorMessage(error, "连接测试失败"));
     } finally {
@@ -258,7 +261,7 @@ export function ModelConfigPage(props: ModelConfigPageProps = {}) {
           onChange={(key) => {
             setActiveSettingsTab(key);
             if (key !== "model-config") {
-              message.info("该设置页待接入");
+              message.info("请从设置中心切换对应设置页");
             }
           }}
         />
@@ -343,14 +346,24 @@ function modelConfigFromAIConfig(config: AIConfig): ModelConfig {
       maskedKey: config.masked_api_key,
     },
     connectionStatus: connectionStatusCache.get(id) ?? "untested",
+    testDurationMs: connectionDurationCache.get(id),
     temperature: config.temperature,
     maxTokens: config.max_tokens,
     timeoutSeconds: config.timeout_seconds,
   };
 }
 
-function rememberConnectionStatus(id: string, status: ConnectionStatus) {
+function rememberConnectionStatus(id: string, status: ConnectionStatus, durationMs?: number) {
   connectionStatusCache.set(id, status);
+  if (typeof durationMs === "number") {
+    connectionDurationCache.set(id, durationMs);
+    return;
+  }
+  connectionDurationCache.delete(id);
+}
+
+function normalizeDurationMs(value: number) {
+  return Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined;
 }
 
 function aiConfigPayloadFromDraft(draft: ModelConfigDraft, selectedConfig: ModelConfig | null): AIConfigSavePayload {

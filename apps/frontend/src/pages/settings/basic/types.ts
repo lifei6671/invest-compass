@@ -6,6 +6,9 @@ export type SettingsTabKey =
   | "prompt-template"
   | "data-source"
   | "proxy"
+  | "notifications"
+  | "workspace"
+  | "cache"
   | "about";
 
 export type ThemeMode = "light" | "dark" | "system";
@@ -55,7 +58,7 @@ export type CacheSummary = {
 };
 
 export type ProxySummary = {
-  mode: "system" | "none" | "http" | "socks5";
+  mode: "system" | "none" | "custom";
   address?: string;
 };
 
@@ -70,6 +73,9 @@ export const settingsTabs: Array<{ key: SettingsTabKey; label: string }> = [
   { key: "prompt-template", label: "Prompt 配置" },
   { key: "data-source", label: "数据源设置" },
   { key: "proxy", label: "代理设置" },
+  { key: "notifications", label: "通知设置" },
+  { key: "workspace", label: "工作区设置" },
+  { key: "cache", label: "缓存管理" },
   { key: "about", label: "关于应用" },
 ];
 

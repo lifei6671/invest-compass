@@ -2,19 +2,23 @@ import type { ColumnsType } from "antd/es/table";
 import { Button, Pagination, Progress, Select, Table, Tag, Tooltip } from "antd";
 import { FileTextOutlined, FolderOpenOutlined, ReloadOutlined, StopOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import { taskStatusLabels, type TaskItem, type TaskSortMode } from "../types";
+import { PAGE_SIZE_OPTIONS } from "../../../lib/pagination";
 
 type TaskTableCardProps = {
   tasks: TaskItem[];
   total: number;
+  currentPage: number;
+  pageSize: number;
   selectedTaskId: string;
   sortMode: TaskSortMode;
+  onPageChange: (page: number, pageSize: number) => void;
   onSortChange: (sortMode: TaskSortMode) => void;
   onSelectTask: (task: TaskItem) => void;
   onLog: (task: TaskItem) => void;
   onCancel: (task: TaskItem) => void;
   onDetail: (task: TaskItem) => void;
-  onReport: () => void;
-  onRetry: () => void;
+  onReport: (task: TaskItem) => void;
+  onRetry: (task: TaskItem) => void;
   onColumnSettings: () => void;
 };
 
@@ -23,6 +27,7 @@ const typeClassMap: Record<TaskItem["taskType"], string> = {
   资讯同步: "task-type-news",
   行情刷新: "task-type-quote",
   缓存清理: "task-type-cache",
+  数据重建: "task-type-rebuild",
 };
 
 const statusClassMap: Record<TaskItem["status"], string> = {
@@ -109,28 +114,24 @@ export function TaskTableCard(props: TaskTableCardProps) {
               </Button>
             </Tooltip>
           ) : null}
-          {task.status === "SUCCESS" ? (
-            <Tooltip title={task.taskType === "AI 分析" ? "查看报告" : "查看详情"}>
+          {task.status === "SUCCESS" && task.taskType === "AI 分析" && task.reportId ? (
+            <Tooltip title="查看报告">
               <Button
                 type="text"
                 size="small"
                 icon={<FolderOpenOutlined />}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (task.taskType === "AI 分析") {
-                    props.onReport();
-                  } else {
-                    props.onDetail(task);
-                  }
+                  props.onReport(task);
                 }}
               >
-                {task.taskType === "AI 分析" ? "报告" : "详情"}
+                报告
               </Button>
             </Tooltip>
           ) : null}
           {task.status === "FAILED" ? (
             <Tooltip title="重试任务">
-              <Button type="text" size="small" icon={<ReloadOutlined />} onClick={(event) => { event.stopPropagation(); props.onRetry(); }}>
+              <Button type="text" size="small" icon={<ReloadOutlined />} onClick={(event) => { event.stopPropagation(); props.onRetry(task); }}>
                 重试
               </Button>
             </Tooltip>
@@ -183,12 +184,12 @@ export function TaskTableCard(props: TaskTableCardProps) {
         <span>共 {props.total} 条</span>
         <Pagination
           size="small"
-          current={1}
+          current={props.currentPage}
           total={props.total}
-          pageSize={20}
-          onChange={() => undefined}
+          pageSize={props.pageSize}
+          onChange={props.onPageChange}
           showSizeChanger
-          pageSizeOptions={[20]}
+          pageSizeOptions={[...PAGE_SIZE_OPTIONS]}
           showQuickJumper={{ goButton: "页" }}
           locale={{ items_per_page: "条/页", jump_to: "跳至", page: "页" }}
         />

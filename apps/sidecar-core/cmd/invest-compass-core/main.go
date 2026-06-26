@@ -27,12 +27,14 @@ import (
 	datasourcecredentialservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/datasourcecredential"
 	logexportservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/logexport"
 	marketservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
+	netproxyservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/netproxy"
 	newsservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/news"
 	notificationservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/notification"
 	promptservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/prompt"
 	schedulerservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/scheduler"
 	searchservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/search"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/sidecar"
+	stockseedservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/stockseed"
 	taskservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/task"
 	tasklogservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/tasklog"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/logger"
@@ -108,6 +110,10 @@ func main() {
 		slog.Error("初始化本地数据仓库失败", "error", err)
 		os.Exit(1)
 	}
+	if err := seedBuiltinStockBasics(dbCtx, store); err != nil {
+		slog.Error("初始化内置股票基础资料失败", "error", err)
+		os.Exit(1)
+	}
 	if err := seedBuiltinPromptTemplates(dbCtx, store); err != nil {
 		slog.Error("初始化内置 Prompt 模板失败", "error", err)
 		os.Exit(1)
@@ -154,8 +160,17 @@ func main() {
 		os.Exit(1)
 	}
 	schedulerCancel()
+	runtimeRefresher, err := newProductionRuntimeRefresher(store, *workspace, time.Now)
+	if err != nil {
+		slog.Error("初始化运行期数据刷新服务失败", "error", logger.RedactError(err))
+		os.Exit(1)
+	}
+	stopRuntimeRefresh := runtimeRefresher.Start(context.Background())
 	shutdownRequested := make(chan struct{}, 1)
-	lifecycle := newShutdownLifecycle(schedulerService.Shutdown, func() {
+	lifecycle := newShutdownLifecycle(func(ctx context.Context) error {
+		stopRuntimeRefresh()
+		return schedulerService.Shutdown(ctx)
+	}, func() {
 		select {
 		case shutdownRequested <- struct{}{}:
 		default:
@@ -231,6 +246,22 @@ func seedBuiltinPromptTemplates(ctx context.Context, store *dao.Store) error {
 		return err
 	}
 	return promptservice.SeedBuiltinPromptTemplates(ctx, builtinPromptStoreAdapter{store: store}, templates)
+}
+
+// seedBuiltinStockBasics 将打包的 A 股基础资料写入 SQLite，保证首启后自选和搜索有本地股票池。
+func seedBuiltinStockBasics(ctx context.Context, store *dao.Store) error {
+	result, err := stockseedservice.SeedPackagedStocks(ctx, store)
+	if err != nil {
+		return err
+	}
+	slog.Info(
+		"初始化内置股票基础资料完成",
+		"total_rows", result.TotalRows,
+		"seeded_rows", result.SeededRows,
+		"skipped_unsupported_exchange", result.SkippedUnsupportedExchange,
+		"skipped_invalid_rows", result.SkippedInvalidRows,
+	)
+	return nil
 }
 
 // serveCoreHTTP 在后台启动本地 HTTP server；调用方必须在 ready 前启动它，避免 Rust 收到 ready 后立刻请求时连接被拒绝。
@@ -327,8 +358,9 @@ func requiredSearchTokenizer() (searchservice.Tokenizer, error) {
 func newProductionScheduler(store *dao.Store, workspace string, now func() time.Time) (*schedulerservice.ExecutionQueue, *schedulerservice.Service, error) {
 	schedulerQueue := schedulerservice.NewExecutionQueue()
 	dataSourceCredentials := datasourcecredentialservice.NewService(store, datasourcecredentialservice.FileKeyProvider{Path: filepath.Join(workspace, "credentials", "data-source.key")})
+	dataSourceCredentials.HTTPClient = externalDataHTTPClient(store, 15*time.Second)
 	marketProvider := buildMarketProvider(store)
-	newsProvider := buildNewsProvider(dataSourceCredentialCookieResolver{Service: dataSourceCredentials})
+	newsProvider := buildNewsProvider(dataSourceCredentialCookieResolver{Service: dataSourceCredentials}, store)
 	schedulerService, err := schedulerservice.NewService(schedulerservice.Config{
 		Store: store,
 		Queue: schedulerQueue,
@@ -360,6 +392,15 @@ func newProductionScheduler(store *dao.Store, workspace string, now func() time.
 		return nil, nil, err
 	}
 	return schedulerQueue, schedulerService, nil
+}
+
+// newProductionRuntimeRefresher 组装进程级实时刷新器，启动后异步刷新缓存，前端页面只读取本地库。
+func newProductionRuntimeRefresher(store *dao.Store, workspace string, now func() time.Time) (*schedulerservice.RuntimeRefresher, error) {
+	dataSourceCredentials := datasourcecredentialservice.NewService(store, datasourcecredentialservice.FileKeyProvider{Path: filepath.Join(workspace, "credentials", "data-source.key")})
+	dataSourceCredentials.HTTPClient = externalDataHTTPClient(store, 15*time.Second)
+	marketProvider := buildMarketProvider(store)
+	newsProvider := buildNewsProvider(dataSourceCredentialCookieResolver{Service: dataSourceCredentials}, store)
+	return schedulerservice.NewRuntimeRefresher(store, marketProvider, newsProvider, now)
 }
 
 type shutdownLifecycle struct {
@@ -432,9 +473,11 @@ func applyTaskLogRetention(ctx context.Context, store *dao.Store, ndjsonWriter *
 func buildActionsConfig(token string, workspace string, store *dao.Store, schedulerQueue *schedulerservice.ExecutionQueue, schedulerService *schedulerservice.Service, taskLogService tasklogservice.Service, taskLogWriter tasklogservice.StageWriter, logSource *logexportservice.MemorySource, searchTokenizer searchservice.Tokenizer, onShutdown func()) actions.Config {
 	dataSourceCredentialKeyPath := filepath.Join(workspace, "credentials", "data-source.key")
 	notificationService := notificationservice.NewService(store)
+	aiHTTPClient := externalDataHTTPClient(store, 120*time.Second)
 	dataSourceCredentials := datasourcecredentialservice.NewService(store, datasourcecredentialservice.FileKeyProvider{Path: dataSourceCredentialKeyPath})
+	dataSourceCredentials.HTTPClient = externalDataHTTPClient(store, 15*time.Second)
 	marketProvider := buildMarketProvider(store)
-	newsProvider := buildNewsProvider(dataSourceCredentialCookieResolver{Service: dataSourceCredentials})
+	newsProvider := buildNewsProvider(dataSourceCredentialCookieResolver{Service: dataSourceCredentials}, store)
 	documentSearchService := searchservice.NewScopedDocumentSearchService(searchservice.DocumentSearchConfig{Store: store, Tokenizer: searchTokenizer})
 	return actions.Config{
 		Version:               version,
@@ -453,10 +496,10 @@ func buildActionsConfig(token string, workspace string, store *dao.Store, schedu
 		WatchlistStore:        store,
 		PromptTemplateStore:   store,
 		AIConfigStore:         store,
-		AIConfigTester:        aiservice.OpenAIConfigTester{},
+		AIConfigTester:        aiservice.OpenAIConfigTester{HTTPClient: aiHTTPClient},
 		ProviderNotifier:      notificationService,
 		AnalysisStore:         store,
-		AnalysisExecutor:      analysisservice.Executor{Store: store, TaskLogWriter: taskLogWriter, TaskNotifier: notificationService},
+		AnalysisExecutor:      analysisservice.Executor{Store: store, HTTPClient: aiHTTPClient, TaskLogWriter: taskLogWriter, TaskNotifier: notificationService},
 		AnalysisTransact: func(ctx context.Context, run func(analysisaction.Store) error) error {
 			return store.WithTransaction(ctx, func(tx *dao.Store) error {
 				return run(tx)
@@ -484,8 +527,8 @@ func buildActionsConfig(token string, workspace string, store *dao.Store, schedu
 }
 
 // buildMarketProvider 创建生产行情 Provider，初始化失败时明确回退为未配置状态。
-func buildMarketProvider(store marketservice.SettingsStore) marketservice.MarketProvider {
-	provider, err := marketservice.NewSinaTencentProvider(marketservice.SinaTencentConfig{})
+func buildMarketProvider(store *dao.Store) marketservice.MarketProvider {
+	provider, err := marketservice.NewSinaTencentProvider(marketservice.SinaTencentConfig{HTTPClient: externalDataHTTPClient(store, 15*time.Second)})
 	if err != nil {
 		slog.Warn("初始化行情 Provider 失败", "error", logger.RedactError(err))
 		return marketservice.UnconfiguredProvider{}
@@ -494,15 +537,21 @@ func buildMarketProvider(store marketservice.SettingsStore) marketservice.Market
 }
 
 // buildNewsProvider 创建生产资讯 Provider，财联社请求会按需读取本地加密 Cookie。
-func buildNewsProvider(resolver newsservice.CookieCredentialResolver) newsservice.Provider {
+func buildNewsProvider(resolver newsservice.CookieCredentialResolver, store *dao.Store) newsservice.Provider {
 	provider, err := newsservice.NewCailianpressProvider(newsservice.CailianpressConfig{
 		CredentialResolver: resolver,
+		HTTPClient:         externalDataHTTPClient(store, 15*time.Second),
 	})
 	if err != nil {
 		slog.Warn("初始化资讯 Provider 失败", "error", logger.RedactError(err))
 		return newsservice.UnconfiguredProvider{}
 	}
 	return provider
+}
+
+// externalDataHTTPClient 创建外部数据请求 HTTP client，每次请求按最新 settings 解析代理模式。
+func externalDataHTTPClient(store *dao.Store, timeout time.Duration) *http.Client {
+	return netproxyservice.DynamicClientForSettings(store, timeout)
 }
 
 // dataSourceCredentialCookieResolver 适配新闻 Provider 所需的 Cookie 凭据读取接口。

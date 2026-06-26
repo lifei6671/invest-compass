@@ -70,6 +70,7 @@ type Config struct {
 	CacheStatsProvider    cache.StatsProvider
 	CacheCleaner          cache.Cleaner
 	SettingsStore         settingsaction.Store
+	ProxyTester           settingsaction.ProxyTester
 	NotificationStore     notificationaction.Store
 	DataSourceCredentials datasourcecredentialservice.Service
 	SchedulerStore        scheduleraction.Store
@@ -127,8 +128,10 @@ func Routes(config Config) []httpx.Route {
 		Store:        config.NewsStore,
 	})...)
 	routes = append(routes, watchlistaction.Routes(watchlistaction.Config{
-		Security: security,
-		Store:    config.WatchlistStore,
+		Security:       security,
+		Store:          config.WatchlistStore,
+		MarketProvider: config.MarketProvider,
+		MarketStore:    config.MarketStore,
 	})...)
 	routes = append(routes, promptaction.Routes(promptaction.Config{
 		Security: security,
@@ -176,8 +179,9 @@ func Routes(config Config) []httpx.Route {
 		Cleaner:       config.CacheCleaner,
 	})...)
 	routes = append(routes, settingsaction.Routes(settingsaction.Config{
-		Security: security,
-		Store:    config.SettingsStore,
+		Security:    security,
+		Store:       config.SettingsStore,
+		ProxyTester: config.ProxyTester,
 	})...)
 	routes = append(routes, notificationaction.Routes(notificationaction.Config{
 		Security: security,

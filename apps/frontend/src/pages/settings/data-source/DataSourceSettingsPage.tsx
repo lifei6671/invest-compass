@@ -1,6 +1,7 @@
 import { App as AntApp } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import {
+  cacheClean,
   cacheStats,
   providersStatus,
   schedulerStatus,
@@ -11,6 +12,7 @@ import {
   type SchedulerStatus,
   type SettingItem,
 } from "../../../services/coreClient";
+import { notifyAutoRefreshSettingsChanged } from "../../../hooks/useAutoRefresh";
 import { SettingsRiskNotice } from "../components/SettingsRiskNotice";
 import { DataSourceCredentialPage } from "./credentials/DataSourceCredentialPage";
 import { DataSourceSubTabs, type DataSourceSubTabKey } from "./credentials/components/DataSourceSubTabs";
@@ -29,33 +31,24 @@ import {
   type CacheSnapshot,
   type DataSourceBaseSettings,
   type HealthStatusItem,
-  type KlineRange,
   type MarketDataSourceItem,
-  type MarketScope,
   type MarketSource,
   type NewsSourceItem,
-  type NewsSource,
   type NewsSyncInterval,
   type QuoteRefreshInterval,
   type SyncStrategy,
 } from "./types";
 
-const dataSourceSettingKeyByField: Record<keyof DataSourceBaseSettings, string> = {
+type RuntimeDataSourceSettingField = "defaultMarketSource" | "quoteRefreshInterval" | "newsSyncInterval";
+
+const dataSourceSettingKeyByField: Record<RuntimeDataSourceSettingField, string> = {
   defaultMarketSource: "data_source.default_market_source",
-  defaultNewsSource: "data_source.default_news_source",
-  defaultMarketScope: "data_source.default_market_scope",
-  klineRange: "data_source.kline_range",
   quoteRefreshInterval: "data_source.quote_refresh_interval",
   newsSyncInterval: "data_source.news_sync_interval",
-  syncOnStartup: "data_source.sync_on_startup",
-  reduceFrequencyOutsideTradingHours: "data_source.reduce_frequency_outside_trading_hours",
 };
 
 const dataSourceSettingsKeys = Object.values(dataSourceSettingKeyByField);
-const marketSourceValues: MarketSource[] = ["auto-fallback", "akshare-eastmoney", "eastmoney", "sina", "tencent", "custom"];
-const newsSourceValues: NewsSource[] = ["aggregated", "cls", "sina", "custom"];
-const marketScopeValues: MarketScope[] = ["CN", "HK", "US", "ALL"];
-const klineRangeValues: KlineRange[] = ["1y", "3y", "5y", "all"];
+const marketSourceValues: MarketSource[] = ["auto-fallback", "tdx"];
 const quoteRefreshValues: QuoteRefreshInterval[] = ["15s", "30s", "60s", "120s", "manual"];
 const newsSyncValues: NewsSyncInterval[] = ["5m", "15m", "30m", "60m", "manual"];
 
@@ -115,14 +108,31 @@ export function DataSourceSettingsPage() {
     void saveDataSourceSetting(changedKey, value[changedKey], previousValue);
   };
 
-  const saveDataSourceSetting = async (field: keyof DataSourceBaseSettings, value: DataSourceBaseSettings[keyof DataSourceBaseSettings], previousValue: DataSourceBaseSettings) => {
+  const saveDataSourceSetting = async (field: RuntimeDataSourceSettingField, value: DataSourceBaseSettings[RuntimeDataSourceSettingField], previousValue: DataSourceBaseSettings) => {
     try {
       await settingsSet({ items: [{ key: dataSourceSettingKeyByField[field], value: String(value) }] });
+      if (field === "quoteRefreshInterval") {
+        notifyAutoRefreshSettingsChanged();
+      }
       message.success("数据源设置已更新");
     } catch (error) {
       setBaseSettings(previousValue);
       message.error(error instanceof Error ? error.message : "数据源设置保存失败");
     }
+  };
+
+  const cleanDataSourceCache = async () => {
+    try {
+      await cacheClean(["quote", "kline", "news", "search"]);
+      message.success("缓存清理完成");
+      await loadOverviewStatus();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "数据源缓存清理失败");
+    }
+  };
+
+  const openScheduler = () => {
+    window.location.hash = "#/scheduler";
   };
 
   return (
@@ -142,10 +152,10 @@ export function DataSourceSettingsPage() {
             onChange={handleBaseSettingsChange}
           />
           <div className="settings-basic-card-grid settings-data-source-card-grid">
-            <MarketDataSourceCard items={marketDataSourcesFromProviders(overview.providers)} onTestConnection={() => message.info("数据源连接测试待接入")} onEditConfig={() => message.info("行情数据源配置待接入")} />
-            <NewsSourceCard items={newsSourcesFromProviders(overview.providers)} onSyncNow={() => message.info("新闻同步待接入")} onViewLog={() => message.info("同步日志待接入")} />
-            <SyncStrategyCard value={overview.syncStrategy} onViewScheduler={() => message.info("任务调度配置待接入")} />
-            <LocalCacheSnapshotCard value={overview.cacheSnapshot} onCleanCache={() => message.info("数据源缓存清理待接入")} />
+            <MarketDataSourceCard items={marketDataSourcesFromProviders(overview.providers)} onTestConnection={loadOverviewStatus} onEditConfig={() => setActiveSubTab("credentials")} />
+            <NewsSourceCard items={newsSourcesFromProviders(overview.providers)} onSyncNow={undefined} onViewLog={openScheduler} />
+            <SyncStrategyCard value={overview.syncStrategy} onViewScheduler={openScheduler} />
+            <LocalCacheSnapshotCard value={overview.cacheSnapshot} onCleanCache={() => void cleanDataSourceCache()} />
             <DataSourceHealthCard items={healthItemsFromOverview(overview)} onRefresh={loadOverviewStatus} />
             <DataComplianceCard onViewDescription={() => setActiveSubTab("description")} />
           </div>
@@ -160,13 +170,8 @@ function dataSourceSettingsFromItems(items: SettingItem[]): Partial<DataSourceBa
   const values = new Map(items.map((item) => [item.key, item.value]));
   const settings: Partial<DataSourceBaseSettings> = {};
   assignIfDefined(settings, "defaultMarketSource", readEnum(values, dataSourceSettingKeyByField.defaultMarketSource, marketSourceValues));
-  assignIfDefined(settings, "defaultNewsSource", readEnum(values, dataSourceSettingKeyByField.defaultNewsSource, newsSourceValues));
-  assignIfDefined(settings, "defaultMarketScope", readEnum(values, dataSourceSettingKeyByField.defaultMarketScope, marketScopeValues));
-  assignIfDefined(settings, "klineRange", readEnum(values, dataSourceSettingKeyByField.klineRange, klineRangeValues));
   assignIfDefined(settings, "quoteRefreshInterval", readEnum(values, dataSourceSettingKeyByField.quoteRefreshInterval, quoteRefreshValues));
   assignIfDefined(settings, "newsSyncInterval", readEnum(values, dataSourceSettingKeyByField.newsSyncInterval, newsSyncValues));
-  assignIfDefined(settings, "syncOnStartup", readBoolean(values, dataSourceSettingKeyByField.syncOnStartup));
-  assignIfDefined(settings, "reduceFrequencyOutsideTradingHours", readBoolean(values, dataSourceSettingKeyByField.reduceFrequencyOutsideTradingHours));
   return settings;
 }
 
@@ -184,19 +189,8 @@ function readEnum<Value extends string>(values: Map<string, string>, key: string
   return allowedValues.includes(value as Value) ? (value as Value) : undefined;
 }
 
-function readBoolean(values: Map<string, string>, key: string): boolean | undefined {
-  const value = values.get(key);
-  if (value === "true") {
-    return true;
-  }
-  if (value === "false") {
-    return false;
-  }
-  return undefined;
-}
-
-function findChangedDataSourceSettingsKey(previousValue: DataSourceBaseSettings, nextValue: DataSourceBaseSettings): keyof DataSourceBaseSettings | undefined {
-  return (Object.keys(dataSourceSettingKeyByField) as Array<keyof DataSourceBaseSettings>).find((key) => previousValue[key] !== nextValue[key]);
+function findChangedDataSourceSettingsKey(previousValue: DataSourceBaseSettings, nextValue: DataSourceBaseSettings): RuntimeDataSourceSettingField | undefined {
+  return (Object.keys(dataSourceSettingKeyByField) as RuntimeDataSourceSettingField[]).find((key) => previousValue[key] !== nextValue[key]);
 }
 
 type DataSourceOverviewState = {

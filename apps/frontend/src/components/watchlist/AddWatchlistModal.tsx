@@ -9,8 +9,6 @@ type AddWatchlistModalProps = {
   onConfirm: (payload: { stock: StockSearchResult; tags: string[]; note: string }) => Promise<void>;
 };
 
-const defaultTags = ["核心标的", "长期跟踪", "消费"];
-
 const marketTagStyle: Record<string, CSSProperties> = {
   A股: { backgroundColor: "#eaf3ff", color: "#1677ff", borderColor: "#cfe3ff" },
   港股: { backgroundColor: "#fff3e0", color: "#d97706", borderColor: "#ffe1ad" },
@@ -21,7 +19,7 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
   const { message } = AntApp.useApp();
   const [keyword, setKeyword] = useState("");
   const [selectedStock, setSelectedStock] = useState<StockSearchResult | null>(null);
-  const [tags, setTags] = useState(defaultTags);
+  const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [note, setNote] = useState("");
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
@@ -31,7 +29,7 @@ export function AddWatchlistModal(props: AddWatchlistModalProps) {
   const resetState = () => {
     setKeyword("");
     setSelectedStock(null);
-    setTags(defaultTags);
+    setTags([]);
     setTagInput("");
     setNote("");
     setSearchResults([]);

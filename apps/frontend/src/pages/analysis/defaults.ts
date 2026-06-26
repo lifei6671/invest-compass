@@ -1,12 +1,6 @@
-import type { AIModel, AnalysisConfig, AnalysisType, ContextSummary, OptionalHoldingContext, RiskPreference, SelectedStock } from "./types";
-
-export const stockCandidates: SelectedStock[] = [];
+import type { AnalysisConfig, AnalysisType, ContextSummary, OptionalHoldingContext, RiskPreference } from "./types";
 
 export const analysisTypes: AnalysisType[] = ["个股综合分析", "技术面分析", "基本面分析", "消息面分析"];
-
-export const aiModels: AIModel[] = ["DeepSeek (DeepSeek-V3)", "OpenAI (gpt-4o)", "Qwen (qwen-max)", "本地模型 (Ollama)"];
-
-export const promptTemplates = ["system", "stock_full", "technical", "custom"];
 
 export const riskPreferences: RiskPreference[] = ["保守", "中等", "积极"];
 
@@ -17,8 +11,8 @@ export const initialAnalysisConfig: AnalysisConfig = {
     code: "",
   },
   analysisType: "个股综合分析",
-  aiModel: "DeepSeek (DeepSeek-V3)",
-  promptTemplate: "stock_full",
+  aiModel: "",
+  promptTemplate: "",
 };
 
 export const initialHoldingContext: OptionalHoldingContext = {

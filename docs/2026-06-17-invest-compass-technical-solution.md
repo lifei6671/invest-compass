@@ -260,7 +260,7 @@ invest-compass/
 core_start()
 core_health()
 stock_search(keyword)
-market_quote(symbol)
+market_quote(symbol, forceRefresh?)
 market_kline(symbol, period, adjust, limit)
 market_indicators(symbol, period, adjust, limit, indicators)
 news_list(symbol, limit)
@@ -287,6 +287,10 @@ analysis_task_subscribe(task_id)
 report_list(filters)
 report_get(id)
 report_delete(id)
+report_stats()
+report_batch_delete(ids)
+report_update(id, favorite)
+report_export(id)
 dashboard_summary()
 providers_status()
 scheduler_job_types()
@@ -326,6 +330,10 @@ Rust 层不提供 `core_request(method, path, body)` 这类任意路径代理。
 - `report_list(filters)` -> `POST /api/reports/list`
 - `report_get(id)` -> `POST /api/reports/get`
 - `report_delete(id)` -> `POST /api/reports/delete`
+- `report_stats()` -> `POST /api/reports/stats`
+- `report_batch_delete(ids)` -> `POST /api/reports/batch-delete`
+- `report_update(id, favorite)` -> `POST /api/reports/update`
+- `report_export(id)` -> `POST /api/reports/export`
 
 报告查询结果默认不返回完整 `input_snapshot`。一次性持仓输入只允许作为任务输入快照的内部审计材料，默认复制、导出和历史查询链路都不得包含完整 `userPosition`。
 
@@ -541,7 +549,7 @@ type MarketProvider interface {
 
 首版至少实现一个合规可用的数据 Provider，同时保留可扩展接口。数据源必须明确来源、授权边界和访问频率限制。后续可以接入付费数据源或用户自己的数据源。
 
-当前实现已新增组合 Provider `sina-tencent-market`：`SinaSource/SinaProvider` 只负责新浪结构化搜索和实时行情，`TencentSource/TencentProvider` 只负责腾讯结构化 K 线，`EastMoneySource/EastMoneyProvider` 只负责东方财富 `push2his` K 线兜底，`CompositeMarketProvider` 对外组合成完整 `MarketProvider`。K 线请求优先使用腾讯源；腾讯返回错误或空结果时再尝试东财源，不引入 chromedp 或本地浏览器 Cookie 抓取。Provider 状态明确声明来源、授权边界、访问频率和当前支持市场。当前 service 层仅声明支持 `CN` A 股，并拒绝转债、基金、B 股等非 A 股代码；`HK` / `US` 不伪装可用，后续需要接入单独 Provider 或扩展当前 Provider 后再开放。数据源授权、频率限制、可分发边界、真实外网样例和跨平台开发环境验收完成前，生产 `main.go` 仍保持未配置 Provider 安全状态。
+当前实现已新增组合 Provider `sina-tencent-market`：`SinaSource/SinaProvider` 只负责新浪结构化搜索和实时行情，`TencentSource/TencentProvider` 只负责腾讯结构化 K 线和当日分时走势，`EastMoneySource/EastMoneyProvider` 只负责东方财富 `push2his` K 线兜底，`TdxSource/TdxProvider` 只负责通达信 MAC K 线，`CompositeMarketProvider` 对外组合成完整 `MarketProvider`。默认 K 线链路对齐 go-stock 已接入能力，按 `通达信 MAC -> 东方财富 -> 腾讯` 自动降级；当前项目尚未实现独立新浪 K 线 Provider，因此不伪造 `新浪 K 线` 兜底。设置中心保存 `data_source.default_market_source=tdx` 时，K 线优先使用通达信，TDX 失败或返回空数据时继续回落到现有 K 线链路；保存为 `eastmoney` 或 `tencent` 时，K 线显式命中对应 Provider，不再先走自动 TDX 链。搜索和实时行情仍走完整 Provider 的新浪链路。不引入 chromedp 或本地浏览器 Cookie 抓取。Provider 状态明确声明来源、授权边界、访问频率和当前支持市场。当前 service 层仅声明支持 `CN` A 股，并拒绝转债、基金、B 股等非 A 股代码；`HK` / `US` 不伪装可用，后续需要接入单独 Provider 或扩展当前 Provider 后再开放。生产 `main.go` 已注入 settings-backed 组合 Provider，初始化失败时才回退 `UnconfiguredProvider`；数据源授权、频率限制、可分发边界、真实外网样例和跨平台开发环境仍作为发布验收风险项记录。
 
 ### 5.2.4 news 模块
 
@@ -1122,6 +1130,8 @@ CREATE TABLE quotes (
     turnover_rate REAL,
     pe REAL,
     pb REAL,
+    total_market_cap REAL,
+    float_market_cap REAL,
     quote_time DATETIME,
     provider TEXT,
     created_at DATETIME,
@@ -1372,7 +1382,8 @@ POST /api/market/quote
 
 ```json
 {
-  "symbol": "CN:SH:600519"
+  "symbol": "CN:SH:600519",
+  "force_refresh": false
 }
 ```
 
@@ -1387,6 +1398,8 @@ POST /api/market/quote
     "price": 1688.5,
     "change_amount": 12.3,
     "change_percent": 0.73,
+    "total_market_cap": 2560000000000,
+    "float_market_cap": 1870000000000,
     "quote_time": "2026-06-18T10:30:00Z",
     "provider": "provider-name"
   },
@@ -1395,7 +1408,7 @@ POST /api/market/quote
 }
 ```
 
-Go core 先读取 10-60 秒 quote 短缓存；缓存未命中时才调用 `MarketProvider.Quote`，成功后写入 `quotes`。当前真实 Provider 对 `CN` A 股返回结构化行情快照；暂不支持的市场必须返回 Provider 错误，不能用空数据或假数据代替。
+Go core 默认先读取 10-60 秒 quote 短缓存；缓存未命中时才调用 `MarketProvider.Quote`，成功后写入 `quotes`。首页初次加载、定时刷新和用户点击刷新可传 `force_refresh: true` 绕过短缓存，确保页面按设置的刷新间隔读取 Provider 最新行情。当前真实 Provider 对 `CN` A 股返回结构化行情快照；暂不支持的市场必须返回 Provider 错误，不能用空数据或假数据代替。
 
 ### 8.4 获取 K线
 
@@ -1414,9 +1427,9 @@ POST /api/market/kline
 }
 ```
 
-`period` 首版只允许 `day`、`week`、`month`；`adjust` 首版只允许 `none`、`qfq`、`hfq`；`limit` 必须为 1-500。Rust `market_kline` 必须在转发前做同样校验，非法参数不得进入 Go core。
+`period` 首版允许 `minute`、`1m`、`5m`、`15m`、`30m`、`60m`、`day`、`week`、`month`、`quarter`、`year`；其中 `minute` 表示当日分时走势，`1m`/`5m`/`15m`/`30m`/`60m` 表示分钟级蜡烛 K。`adjust` 首版只允许 `none`、`qfq`、`hfq`；`limit` 必须为 1-500。Rust `market_kline` 必须在转发前做同样校验，非法参数不得进入 Go core。
 
-Go core 先读取 `symbol + period + adjust` 对应的 K 线缓存；缓存足量时不重复调用 Provider。返回数组必须按 `trade_date` 升序排列，Provider 返回后按交易日写入 `klines`。当前组合 Provider 的 K 线链路为腾讯优先、东方财富 direct HTTP 兜底；不依赖浏览器自动化获取 Cookie。
+Go core 先读取 `symbol + period + adjust` 对应的 K 线缓存；缓存足量时不重复调用 Provider。返回数组必须按 `trade_date` 升序排列，Provider 返回后按交易日写入 `klines`。当前组合 Provider 的 K 线链路为通达信 MAC 优先、东方财富 direct HTTP 兜底、腾讯结构化 K 线再兜底；不依赖浏览器自动化获取 Cookie。
 
 ### 8.5 获取技术指标
 
@@ -1676,7 +1689,7 @@ POST /api/reports/delete
 
 报告删除使用软删除。`list` 和 `get` 只返回未删除报告，已删除报告详情按未找到处理。
 报告历史查询默认不返回完整 `input_snapshot`，避免一次性持仓输入进入普通历史浏览、复制和默认导出路径。
-Rust `report_get` 和 `report_delete` 必须在转发前校验 `id > 0`，非法参数不得进入 Go core。
+Rust `report_get`、`report_delete`、`report_update` 和 `report_export` 必须在转发前校验 `id > 0`，`report_batch_delete` 必须校验 ids 非空且全部为正整数，非法参数不得进入 Go core。
 
 检查更新：
 
@@ -1872,9 +1885,9 @@ proxy_credential_ref
 
 ```text
 1. proxy.http_url / proxy.socks5_url 禁止包含 username/password。
-2. 代理用户名可存 SQLite settings。
-3. 代理密码必须走 Rust 本地文件 vault，SQLite 只保存 proxy_credential_ref。
-4. Rust `settings_set` 可以接收一次性 proxy_password，写入本地 vault 后只向 Go core 转发 proxy_credential_ref。
+2. 首版运行时手动代理只支持无认证 HTTP / SOCKS5 代理；前端不得提供可保存但不生效的认证代理入口。
+3. 如果历史 settings 中存在 proxy.username 或 proxy_credential_ref，Go runtime 必须明确拒绝该认证代理配置，避免外部请求以无认证方式静默发出。
+4. 代理密码 vault 能力保留为 Rust 安全边界能力；真正启用认证代理前，必须先补 Rust 解析 vault 后向 Go runtime 注入内存凭据的安全协议。
 5. Rust `settings_set` 清理代理凭据时必须删除本地 vault 文件，并向 Go core 清空 proxy_credential_ref。
 6. 同一次 `settings_set` 请求不得同时携带新 proxy_password 和 clear_proxy_credential，Rust 必须在读写本地 vault 前拒绝这种冲突请求。
 7. macOS / Windows 都使用 Rust 本地文件 vault。

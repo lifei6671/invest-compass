@@ -87,6 +87,7 @@ func TestHandleDeleteRejectsBuiltinLockedTemplate(t *testing.T) {
 	}
 }
 
+// performPromptRoute 执行 Prompt 路由并解析统一响应体，避免测试重复组装鉴权请求。
 func performPromptRoute(t *testing.T, route httpx.Route, payload string) map[string]any {
 	t.Helper()
 	request := httptest.NewRequest(route.Method, route.Path, bytes.NewBufferString(payload))
@@ -103,6 +104,7 @@ func performPromptRoute(t *testing.T, route httpx.Route, payload string) map[str
 	return body
 }
 
+// readySecurity 返回已就绪的测试鉴权配置，覆盖 Prompt 路由的 token 门禁。
 func readySecurity() httpx.SecurityConfig {
 	return httpx.SecurityConfig{Token: "test-token", Ready: true}
 }
@@ -113,16 +115,19 @@ type fakePromptStore struct {
 	deletedID int64
 }
 
+// SavePromptTemplate 记录保存调用，用于验证创建路径会把模板交给 store。
 func (store *fakePromptStore) SavePromptTemplate(_ context.Context, template *model.PromptTemplate) error {
 	store.saved = true
 	store.items = append(store.items, *template)
 	return nil
 }
 
+// ListPromptTemplates 返回测试模板快照，用于验证列表和删除前置校验。
 func (store *fakePromptStore) ListPromptTemplates(_ context.Context) ([]model.PromptTemplate, error) {
 	return append([]model.PromptTemplate(nil), store.items...), nil
 }
 
+// SoftDeletePromptTemplate 记录软删除目标，验证内置锁定模板不会被删除。
 func (store *fakePromptStore) SoftDeletePromptTemplate(_ context.Context, id int64) error {
 	store.deletedID = id
 	return nil

@@ -23,6 +23,10 @@ type SettingsBackedMarketProvider struct {
 	provider MarketProvider
 }
 
+type sourceSelectableKlineProvider interface {
+	klineWithSourcePreference(ctx context.Context, source string, request KlineRequest) ([]KlineBar, error)
+}
+
 // NewSettingsBackedMarketProvider 创建读取 settings 的行情 Provider 包装器。
 func NewSettingsBackedMarketProvider(store SettingsStore, provider MarketProvider) MarketProvider {
 	if provider == nil {
@@ -60,10 +64,21 @@ func (provider *SettingsBackedMarketProvider) Quote(ctx context.Context, symbol 
 	return provider.provider.Quote(ctx, symbol)
 }
 
-// Kline 读取默认行情源配置后执行 K 线查询，底层 Provider 继续负责腾讯到东财的自动降级。
+// Kline 读取默认行情源配置后执行 K 线查询，显式支持的 K 线源必须真实命中对应 Provider。
 func (provider *SettingsBackedMarketProvider) Kline(ctx context.Context, request KlineRequest) ([]KlineBar, error) {
-	if _, err := provider.defaultMarketSource(ctx); err != nil {
+	source, err := provider.defaultMarketSource(ctx)
+	if err != nil {
 		return nil, err
+	}
+	if preferredProvider, ok := provider.provider.(sourceSelectableKlineProvider); ok {
+		return preferredProvider.klineWithSourcePreference(ctx, source, request)
+	}
+	if source == settingsservice.DataSourceMarketSourceTdx {
+		if preferredProvider, ok := provider.provider.(interface {
+			klineWithTdxPreference(context.Context, KlineRequest) ([]KlineBar, error)
+		}); ok {
+			return preferredProvider.klineWithTdxPreference(ctx, request)
+		}
 	}
 	return provider.provider.Kline(ctx, request)
 }
