@@ -103,7 +103,7 @@ test("资讯中心刷新搜索时只调用 search_news 并展示资讯范围结�
         payload: {
           keyword: "光模块",
           symbols: [],
-          limit: 20,
+          limit: 80,
           offset: 0,
           sort: "relevance",
         },
@@ -168,4 +168,65 @@ test("资讯中心搜索无结果时说明仅搜索资讯中心", async () => {
     expect(calls.map((call) => call.command)).toContain("search_news");
     expect(screen.getByText("仅搜索资讯中心，暂无匹配资讯")).toBeInTheDocument();
   });
+});
+
+test("资讯中心手动刷新市场资讯时绕过缓存抓取最新数据", async () => {
+  const calls: Array<{ command: string; payload?: unknown }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    if (command === "news_market") {
+      const request = payload as { forceRefresh?: boolean };
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          items: [
+            {
+              id: request.forceRefresh ? "fresh" : "cached",
+              source: "新浪财经",
+              title: request.forceRefresh ? "最新市场资讯" : "缓存市场资讯",
+              url: "https://example.com/news",
+              summary: "市场摘要",
+              published_at: request.forceRefresh ? "2026-06-27T08:10:00Z" : "2026-06-27T06:42:00Z",
+              tags: ["市场"],
+            },
+          ],
+        },
+      };
+    }
+    if (command === "news_stats") {
+      return {
+        code: 0,
+        message: "ok",
+        data: { total_count: 1, source_count: 1, latest_published_at: "2026-06-27T08:10:00Z", sentiment_summary: "暂未接入情绪分类" },
+      };
+    }
+    if (command === "news_hot_topics") {
+      return { code: 0, message: "ok", data: { industries: [], mentioned_stocks: [], updated_at: "2026-06-27T08:10:00Z" } };
+    }
+    throw new Error(`unexpected command ${command}`);
+  });
+
+  render(
+    <AntApp>
+      <NewsCenterPage />
+    </AntApp>,
+  );
+
+  await waitFor(() => {
+    expect(screen.getByText("缓存市场资讯")).toBeInTheDocument();
+  });
+  expect(calls).toContainEqual({ command: "news_market", payload: { market: "CN", limit: 80 } });
+  calls.length = 0;
+
+  const refreshButton = screen.getByRole("button", { name: /刷新资讯/ });
+  await waitFor(() => {
+    expect(refreshButton).not.toBeDisabled();
+  });
+  fireEvent.click(refreshButton);
+
+  await waitFor(() => {
+    expect(screen.getByText("最新市场资讯")).toBeInTheDocument();
+  });
+  expect(calls).toContainEqual({ command: "news_market", payload: { market: "CN", limit: 80, forceRefresh: true } });
 });

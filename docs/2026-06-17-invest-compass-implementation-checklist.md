@@ -644,10 +644,10 @@ P7 跨平台桌面能力、打包、发布验收
   - 单测覆盖 URL 校验、标准 symbol 绑定、去重、个股/市场新闻契约、未配置状态、可选状态能力、缓存 TTL、缓存排序、缓存过期、缓存副本隔离和错误脱敏。
   - 已新增 `dao.Store.SaveNewsItems`、`ListNewsBySymbol`、`ListMarketNews`，新闻缓存按 `content_hash` 幂等入库，列表按发布时间倒序返回。
   - 已在 `apps/sidecar-core/internal/actions/news` 接入 `POST /api/news/list` 和 `POST /api/news/market`，复用 sidecar ready、runtime token、POST-only 和统一 envelope 安全边界。
-  - 新闻 API 会优先读取 60 分钟缓存；缓存不足时调用 `news.Provider`，输出前执行 URL scheme 校验、content hash 去重和排序，再写入 `news_items`。
+  - 新闻 API 会优先读取 60 分钟缓存；缓存不足时调用 `news.Provider`，输出前执行 URL scheme 校验、content hash 去重和排序，再写入 `news_items`；`/api/news/market` 支持 `force_refresh`，用于资讯中心手动刷新时绕过数量充足的市场新闻缓存。
   - Rust `news_list` 和 `news_market` 已在转发前校验 `limit` 必须为 1-100，非法请求不进入 Go core。
-  - 已新增 Rust 白名单 command：`news_list`、`news_market`，固定映射到 `POST /api/news/list` 和 `POST /api/news/market`，禁止通用 path 代理。
-  - 单测覆盖重复新闻不重复入库、列表按发布时间排序、新闻 URL 输出前 scheme 校验、个股新闻 API 写入缓存、市场新闻缓存命中不重复请求 Provider、Rust command 固定 path 和 Rust command 非法 `limit` 早失败。
+  - 已新增 Rust 白名单 command：`news_list`、`news_market`，固定映射到 `POST /api/news/list` 和 `POST /api/news/market`，禁止通用 path 代理；`news_market` 会把前端 `forceRefresh` 转发为 Go core 的 `force_refresh`。
+  - 单测覆盖重复新闻不重复入库、列表按发布时间排序、新闻 URL 输出前 scheme 校验、个股新闻 API 写入缓存、市场新闻缓存命中不重复请求 Provider、市场新闻手动刷新绕过缓存、Rust command 固定 path 和 Rust command 非法 `limit` 早失败。
   - 已新增 `CailianpressProvider` 和 `SinaLiveProvider` 的 service 层抓取清洗实现，分别清洗财联社电报和新浪财经直播快讯为统一 `news.Item`；尚未注入生产入口。
   - `scripts/provider-smoke.mjs` 已纳入新浪财经直播快讯样例端点；默认 dry-run 不访问网络，联网检查需要显式确认 Provider 条款、授权和频率限制边界。
   - 受真实合规新闻 Provider 数据源授权约束，Provider 注入、Dashboard/资讯中心/分析上下文真实新闻数据闭环完成后再标记为 `[x]`。
@@ -1320,7 +1320,7 @@ P7 跨平台桌面能力、打包、发布验收
 - 退出条件：
   - 资讯中心只展示首版真实可用数据。
 - 当前进展：
-  - 已新增 `/news` 资讯中心页面，通过 typed invoke service 调用 `news_market` 读取 CN 市场新闻，并支持输入股票代码后调用 `news_list` 读取个股新闻。
+  - 已新增 `/news` 资讯中心页面，通过 typed invoke service 调用 `news_market` 读取 CN 市场新闻，并支持输入股票代码后调用 `news_list` 读取个股新闻；无关键词手动刷新会传 `forceRefresh`，避免 60 分钟缓存已满时一直展示旧市场资讯。
   - 页面只合并展示后端返回的市场新闻和个股新闻，不提供公告、研报、资金流等首版未闭环入口。
   - 页面会过滤非 HTTPS URL，并支持按后端返回的 `tags` 做标签筛选；新闻列表、空状态和错误状态已有前端测试覆盖。
   - `apps/frontend/src/services/coreClient.test.ts` 覆盖 `news_market` 固定 command 契约。

@@ -1,4 +1,4 @@
-use crate::sidecar::CoreState;
+use crate::{commands::blocking::post_core_api, sidecar::CoreState};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -77,38 +77,32 @@ pub struct SchedulerRefreshSymbolPayload {
 
 /// 读取调度任务列表，固定转发到 Go core `/api/scheduler/jobs/list`。
 #[tauri::command]
-pub fn scheduler_jobs_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub async fn scheduler_jobs_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/jobs/list", &EmptyRequest {})
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/scheduler/jobs/list", EmptyRequest {}).await
 }
 
 /// 读取单个调度任务，固定转发到 Go core `/api/scheduler/jobs/get`。
 #[tauri::command]
-pub fn scheduler_jobs_get(
+pub async fn scheduler_jobs_get(
     state: State<'_, CoreState>,
     id: i64,
 ) -> Result<serde_json::Value, String> {
     validate_scheduler_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/jobs/get", &SchedulerIDRequest { id })
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/scheduler/jobs/get", SchedulerIDRequest { id }).await
 }
 
 /// 读取调度任务类型元数据，固定转发到 Go core `/api/scheduler/job-types`。
 #[tauri::command]
-pub fn scheduler_job_types(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub async fn scheduler_job_types(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/job-types", &EmptyRequest {})
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/scheduler/job-types", EmptyRequest {}).await
 }
 
 /// 保存调度任务配置，固定转发到 Go core `/api/scheduler/jobs/save`。
 #[tauri::command]
-pub fn scheduler_jobs_save(
+pub async fn scheduler_jobs_save(
     state: State<'_, CoreState>,
     payload: SchedulerJobPayload,
 ) -> Result<serde_json::Value, String> {
@@ -116,130 +110,119 @@ pub fn scheduler_jobs_save(
         validate_scheduler_id(payload.id)?;
     }
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/jobs/save", &payload)
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/scheduler/jobs/save", payload).await
 }
 
 /// 启用或停用调度任务，固定转发到 Go core `/api/scheduler/jobs/set-enabled`。
 #[tauri::command]
-pub fn scheduler_jobs_set_enabled(
+pub async fn scheduler_jobs_set_enabled(
     state: State<'_, CoreState>,
     id: i64,
     enabled: bool,
 ) -> Result<serde_json::Value, String> {
     validate_scheduler_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(
-            "/api/scheduler/jobs/set-enabled",
-            &SchedulerSetEnabledRequest { id, enabled },
-        )
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/scheduler/jobs/set-enabled",
+        SchedulerSetEnabledRequest { id, enabled },
+    )
+    .await
 }
 
 /// 软删除调度任务配置，固定转发到 Go core `/api/scheduler/jobs/delete`。
 #[tauri::command]
-pub fn scheduler_jobs_delete(
+pub async fn scheduler_jobs_delete(
     state: State<'_, CoreState>,
     id: i64,
 ) -> Result<serde_json::Value, String> {
     validate_scheduler_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/jobs/delete", &SchedulerIDRequest { id })
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/scheduler/jobs/delete",
+        SchedulerIDRequest { id },
+    )
+    .await
 }
 
 /// 立即执行一次调度任务，固定转发到 Go core `/api/scheduler/jobs/run-now`。
 #[tauri::command]
-pub fn scheduler_jobs_run_now(
+pub async fn scheduler_jobs_run_now(
     state: State<'_, CoreState>,
     payload: SchedulerRunNowPayload,
 ) -> Result<serde_json::Value, String> {
     validate_scheduler_id(payload.id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/jobs/run-now", &payload)
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/scheduler/jobs/run-now", payload).await
 }
 
 /// 手动补偿调度任务，固定转发到 Go core `/api/scheduler/jobs/backfill`。
 #[tauri::command]
-pub fn scheduler_jobs_backfill(
+pub async fn scheduler_jobs_backfill(
     state: State<'_, CoreState>,
     payload: SchedulerBackfillPayload,
 ) -> Result<serde_json::Value, String> {
     validate_backfill_payload(&payload)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/jobs/backfill", &payload)
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/scheduler/jobs/backfill", payload).await
 }
 
 /// 读取调度执行记录，固定转发到 Go core `/api/scheduler/runs/list`。
 #[tauri::command]
-pub fn scheduler_runs_list(
+pub async fn scheduler_runs_list(
     state: State<'_, CoreState>,
     job_id: i64,
     limit: i32,
 ) -> Result<serde_json::Value, String> {
     validate_scheduler_run_list_params(job_id, limit)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(
-            "/api/scheduler/runs/list",
-            &SchedulerRunsListRequest { job_id, limit },
-        )
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/scheduler/runs/list",
+        SchedulerRunsListRequest { job_id, limit },
+    )
+    .await
 }
 
 /// 读取单条调度执行记录，固定转发到 Go core `/api/scheduler/runs/get`。
 #[tauri::command]
-pub fn scheduler_runs_get(
+pub async fn scheduler_runs_get(
     state: State<'_, CoreState>,
     id: i64,
 ) -> Result<serde_json::Value, String> {
     validate_scheduler_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/runs/get", &SchedulerIDRequest { id })
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/scheduler/runs/get", SchedulerIDRequest { id }).await
 }
 
 /// 手动触发一次数据抓取，固定转发到 Go core `/api/scheduler/runs/trigger` 并复用调度队列。
 #[tauri::command]
-pub fn scheduler_runs_trigger(
+pub async fn scheduler_runs_trigger(
     state: State<'_, CoreState>,
     payload: SchedulerTriggerPayload,
 ) -> Result<serde_json::Value, String> {
     validate_trigger_payload(&payload)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/runs/trigger", &payload)
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/scheduler/runs/trigger", payload).await
 }
 
 /// 手动刷新某只股票的数据，固定转发到 Go core `/api/scheduler/refresh-symbol` 并复用调度队列。
 #[tauri::command]
-pub fn scheduler_refresh_symbol(
+pub async fn scheduler_refresh_symbol(
     state: State<'_, CoreState>,
     payload: SchedulerRefreshSymbolPayload,
 ) -> Result<serde_json::Value, String> {
     validate_refresh_symbol_payload(&payload)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/refresh-symbol", &payload)
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/scheduler/refresh-symbol", payload).await
 }
 
 /// 读取调度系统摘要状态，固定转发到 Go core `/api/scheduler/status`。
 #[tauri::command]
-pub fn scheduler_status(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub async fn scheduler_status(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/scheduler/status", &EmptyRequest {})
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/scheduler/status", EmptyRequest {}).await
 }
 
 /// validate_scheduler_id 在 Rust command 边界拒绝非法调度 ID，避免无效请求进入 Go core。

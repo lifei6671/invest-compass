@@ -3,6 +3,7 @@ package prompt
 import (
 	"context"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -71,6 +72,50 @@ func TestLoadPackagedBuiltinPromptTemplatesIncludesRequiredKeys(t *testing.T) {
 	} {
 		if _, ok := keys[key]; !ok {
 			t.Fatalf("missing packaged builtin prompt key %q, got %+v", key, keys)
+		}
+	}
+}
+
+// TestPackagedStockFullPromptKeepsComprehensiveContract 验证个股综合分析内置模板不会退化为纯技术面报告。
+func TestPackagedStockFullPromptKeepsComprehensiveContract(t *testing.T) {
+	templates, err := LoadPackagedBuiltinPromptTemplates()
+	if err != nil {
+		t.Fatalf("LoadPackagedBuiltinPromptTemplates returned error: %v", err)
+	}
+	var stockFull Template
+	for _, template := range templates {
+		if template.Key == "builtin_stock_full" {
+			stockFull = template
+			break
+		}
+	}
+	if stockFull.Key == "" {
+		t.Fatal("missing builtin_stock_full template")
+	}
+	if stockFull.Version < 2 {
+		t.Fatalf("stock_full builtin version must remain versioned for packaged updates, got %d", stockFull.Version)
+	}
+	for _, required := range []string{
+		"你是“投研罗盘 Invest Compass”的 AI 投研分析助手",
+		"{{news}}",
+		"{{fundamental_summary}}",
+		"{{user_position}}",
+		"analysis_type: stock_full",
+		"# {{stock_name}}（{{stock_code}}）个股综合分析",
+		"## 12. 免责声明",
+		"本文仅基于当前输入数据生成，用于研究辅助，不构成投资建议。",
+	} {
+		if !strings.Contains(stockFull.Content, required) {
+			t.Fatalf("stock_full prompt missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"你的任务是仅基于行情、K线和技术指标",
+		"analysis_type: technical",
+		"# {{stock_name}}（{{stock_code}}）技术面分析",
+	} {
+		if strings.Contains(stockFull.Content, forbidden) {
+			t.Fatalf("stock_full prompt must not use technical-only contract %q", forbidden)
 		}
 	}
 }

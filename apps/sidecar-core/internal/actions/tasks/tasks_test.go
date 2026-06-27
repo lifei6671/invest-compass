@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,6 +89,63 @@ func TestEventsStreamClosesWhenTerminalTaskHasNoNewEvents(t *testing.T) {
 	}
 	if recorder.Body.Len() != 0 {
 		t.Fatalf("expected no replay frames after the last event, got %q", recorder.Body.String())
+	}
+}
+
+// TestEventsStreamWaitsForRunningTaskProgress 验证运行中任务订阅会等待后续事件，
+// 并把新增进度事件实时写成 SSE 帧，供 Rust 转发给前端。
+func TestEventsStreamWaitsForRunningTaskProgress(t *testing.T) {
+	store := &liveTaskStore{
+		task: model.Task{
+			ID:     "task-running",
+			Type:   "ANALYSIS",
+			Status: "RUNNING",
+		},
+	}
+	handler := handleEventsStream(Config{
+		Security: httpx.SecurityConfig{Token: "test-token", Ready: true},
+		Store:    store,
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/tasks/events/stream",
+		strings.NewReader(`{"task_id":"task-running","after_event_id":0}`),
+	)
+	ctx, cancel := context.WithCancel(request.Context())
+	request = request.WithContext(ctx)
+	request.Header.Set(httpx.TokenHeader, "test-token")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.ServeHTTP(recorder, request)
+	}()
+	time.AfterFunc(40*time.Millisecond, func() {
+		store.appendEvent(model.TaskEvent{
+			ID:        1,
+			TaskID:    "task-running",
+			EventType: "TASK_PROGRESS",
+			Payload:   `{"stage":"quote_fetch","progress":20,"message":"行情快照已读取"}`,
+		})
+	})
+	time.AfterFunc(180*time.Millisecond, cancel)
+
+	select {
+	case <-done:
+	case <-time.After(300 * time.Millisecond):
+		cancel()
+		<-done
+		t.Fatal("running task stream did not return after context cancellation")
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "event: TASK_PROGRESS") ||
+		!strings.Contains(body, `"stage":"quote_fetch"`) {
+		t.Fatalf("expected progress SSE frame, got %q", body)
+	}
+	if store.eventPolls < 2 {
+		t.Fatalf("expected stream to wait and poll for later events, got %d polls", store.eventPolls)
 	}
 }
 
@@ -187,5 +245,50 @@ func (store *terminalTaskStore) ListTaskEventsAfter(_ context.Context, taskID st
 
 // GetAnalysisReportByTaskID 实现 Store 接口；终态 SSE 空增量用例不需要报告上下文。
 func (store *terminalTaskStore) GetAnalysisReportByTaskID(context.Context, string) (model.AnalysisReport, bool, error) {
+	return model.AnalysisReport{}, false, nil
+}
+
+type liveTaskStore struct {
+	mu         sync.Mutex
+	task       model.Task
+	events     []model.TaskEvent
+	eventPolls int
+}
+
+// appendEvent 模拟后台分析任务在 SSE 订阅建立后写入新任务事件。
+func (store *liveTaskStore) appendEvent(event model.TaskEvent) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.events = append(store.events, event)
+}
+
+// ListTasks 实现 Store 接口；当前用例不需要任务列表。
+func (store *liveTaskStore) ListTasks(context.Context, int) ([]model.Task, error) {
+	return nil, nil
+}
+
+// GetTask 返回运行中任务，直到测试取消请求上下文。
+func (store *liveTaskStore) GetTask(context.Context, string) (model.Task, bool, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.task, true, nil
+}
+
+// ListTaskEventsAfter 返回订阅建立后新写入的事件。
+func (store *liveTaskStore) ListTaskEventsAfter(_ context.Context, taskID string, afterID int64) ([]model.TaskEvent, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.eventPolls++
+	result := make([]model.TaskEvent, 0)
+	for _, event := range store.events {
+		if event.TaskID == taskID && event.ID > afterID {
+			result = append(result, event)
+		}
+	}
+	return result, nil
+}
+
+// GetAnalysisReportByTaskID 实现 Store 接口；运行中 SSE 用例不需要报告上下文。
+func (store *liveTaskStore) GetAnalysisReportByTaskID(context.Context, string) (model.AnalysisReport, bool, error) {
 	return model.AnalysisReport{}, false, nil
 }

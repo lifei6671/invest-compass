@@ -271,6 +271,7 @@ func (provider *SinaLiveProvider) Market(ctx context.Context, request MarketRequ
 		items = append(items, Item{
 			Source:      "新浪财经",
 			Title:       sinaTitle(content),
+			URL:         row.NewsURL(),
 			Summary:     content,
 			PublishedAt: publishedAt,
 			Tags:        row.TagNames(),
@@ -323,9 +324,31 @@ type sinaLiveResponse struct {
 type sinaLiveFeedRow struct {
 	RichText   string `json:"rich_text"`
 	CreateTime string `json:"create_time"`
+	DocURL     string `json:"docurl"`
+	Ext        string `json:"ext"`
 	Tags       []struct {
 		Name string `json:"name"`
 	} `json:"tag"`
+}
+
+type sinaLiveFeedExt struct {
+	DocURL string `json:"docurl"`
+}
+
+// NewsURL 返回新浪直播原文链接，优先使用响应顶层 docurl，再兼容 ext 中的 docurl。
+func (row sinaLiveFeedRow) NewsURL() string {
+	if url := strings.TrimSpace(row.DocURL); url != "" {
+		return url
+	}
+	ext := strings.TrimSpace(row.Ext)
+	if ext == "" {
+		return ""
+	}
+	var payload sinaLiveFeedExt
+	if err := json.Unmarshal([]byte(ext), &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.DocURL)
 }
 
 // TagNames 返回新浪直播标签名称。

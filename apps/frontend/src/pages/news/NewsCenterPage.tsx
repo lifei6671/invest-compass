@@ -34,7 +34,7 @@ const emptySentimentSummary: SentimentSummary = {
   summary: "暂无资讯情绪统计",
 };
 const defaultMarket = "CN";
-const newsQueryLimit = 20;
+const newsQueryLimit = 80;
 
 export function NewsCenterPage() {
   const { message } = AntApp.useApp();
@@ -104,10 +104,14 @@ export function NewsCenterPage() {
     message.success("摘要已复制");
   };
 
-  const loadMarketNews = useCallback(async () => {
+  const loadMarketNews = useCallback(async (options?: { forceRefresh?: boolean }) => {
     try {
       setIsSearching(true);
-      const result = await newsMarket({ market: defaultMarket, limit: newsQueryLimit });
+      const result = await newsMarket({
+        market: defaultMarket,
+        limit: newsQueryLimit,
+        ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+      });
       setSearchItems(result.items.map(mapCoreNewsItem));
       setRemoteSearchMode(false);
       setCurrentPage(1);
@@ -142,7 +146,7 @@ export function NewsCenterPage() {
   const handleRefresh = async () => {
     const keyword = filters.keyword.trim();
     if (!keyword) {
-      await loadMarketNews();
+      await loadMarketNews({ forceRefresh: true });
       await loadNewsInsights();
       return;
     }

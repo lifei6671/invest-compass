@@ -950,6 +950,143 @@ func TestNewsMarketReturnsSortedCachedItems(t *testing.T) {
 	}
 }
 
+// TestNewsMarketForceRefreshBypassesFullCache 验证手动刷新市场新闻时即使缓存数量充足，也会重新请求 Provider。
+func TestNewsMarketForceRefreshBypassesFullCache(t *testing.T) {
+	marketCalls := 0
+	store := newMemoryNewsStore()
+	if err := store.SaveNewsItems(context.Background(), []model.NewsItem{
+		{Title: "缓存新闻", URL: "https://example.com/cache", ContentHash: "cache", PublishedAt: time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC), Source: "cache"},
+	}); err != nil {
+		t.Fatalf("seed news cache: %v", err)
+	}
+	handler := NewHandler(Config{
+		Version:   "0.1.0",
+		Token:     "test-token",
+		DBStatus:  "not_configured",
+		Ready:     true,
+		NewsStore: store,
+		NewsProvider: fakeNewsProvider{
+			marketCalls: &marketCalls,
+			marketItems: []newsservice.Item{{
+				Source:      "provider",
+				Title:       "Provider 最新新闻",
+				URL:         "https://example.com/provider",
+				Summary:     "最新摘要",
+				PublishedAt: time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC),
+			}},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/news/market", strings.NewReader(`{"market":"CN","limit":1,"force_refresh":true}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	data := decodeResponseData(t, recorder.Body.Bytes())
+	items, ok := data["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one refreshed market news item, got %#v", data)
+	}
+	first, ok := items[0].(map[string]any)
+	if !ok || first["title"] != "Provider 最新新闻" {
+		t.Fatalf("force refresh should return provider news, got %#v", items[0])
+	}
+	if marketCalls != 1 {
+		t.Fatalf("expected provider market called once, got %d", marketCalls)
+	}
+}
+
+// TestNewsMarketFallsBackToPartialCacheWhenProviderFails 验证市场新闻缓存不足但外部来源失败时，接口返回已有缓存，避免资讯中心空白。
+func TestNewsMarketFallsBackToPartialCacheWhenProviderFails(t *testing.T) {
+	marketCalls := 0
+	store := newMemoryNewsStore()
+	if err := store.SaveNewsItems(context.Background(), []model.NewsItem{
+		{Title: "缓存新闻", URL: "https://example.com/cache", ContentHash: "cache", PublishedAt: time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC), Source: "cache"},
+	}); err != nil {
+		t.Fatalf("seed news cache: %v", err)
+	}
+	handler := NewHandler(Config{
+		Version:      "0.1.0",
+		Token:        "test-token",
+		DBStatus:     "not_configured",
+		Ready:        true,
+		NewsStore:    store,
+		NewsProvider: fakeNewsProvider{marketCalls: &marketCalls, marketError: errors.New("provider timeout")},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/news/market", strings.NewReader(`{"market":"CN","limit":2}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	data := decodeResponseData(t, recorder.Body.Bytes())
+	items, ok := data["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected cached market news item, got %#v", data)
+	}
+	first, ok := items[0].(map[string]any)
+	if !ok || first["title"] != "缓存新闻" {
+		t.Fatalf("expected cached news fallback, got %#v", items[0])
+	}
+	if marketCalls != 1 {
+		t.Fatalf("expected provider market called once, got %d", marketCalls)
+	}
+}
+
+// TestNewsMarketReturnsFreshItemsWhenCacheSaveFails 验证外部新闻已获取但缓存写入失败时，接口仍返回本次结果。
+func TestNewsMarketReturnsFreshItemsWhenCacheSaveFails(t *testing.T) {
+	marketCalls := 0
+	store := newMemoryNewsStore()
+	store.saveErr = context.DeadlineExceeded
+	handler := NewHandler(Config{
+		Version:   "0.1.0",
+		Token:     "test-token",
+		DBStatus:  "not_configured",
+		Ready:     true,
+		NewsStore: store,
+		NewsProvider: fakeNewsProvider{
+			marketCalls: &marketCalls,
+			marketItems: []newsservice.Item{{
+				Source:      "provider",
+				Title:       "实时新闻",
+				URL:         "https://example.com/live",
+				Summary:     "实时摘要",
+				PublishedAt: time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC),
+			}},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/news/market", strings.NewReader(`{"market":"CN","limit":2}`))
+	request.Header.Set("X-Invest-Compass-Token", "test-token")
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	data := decodeResponseData(t, recorder.Body.Bytes())
+	items, ok := data["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected fresh market news item, got %#v", data)
+	}
+	first, ok := items[0].(map[string]any)
+	if !ok || first["title"] != "实时新闻" {
+		t.Fatalf("expected fresh news response despite cache write failure, got %#v", items[0])
+	}
+	if marketCalls != 1 {
+		t.Fatalf("expected provider market called once, got %d", marketCalls)
+	}
+}
+
 // TestNewsStatsAndHotTopicsUseCachedNews 验证资讯统计和热点只从本地新闻缓存派生，不伪造情绪判断。
 func TestNewsStatsAndHotTopicsUseCachedNews(t *testing.T) {
 	store := newMemoryNewsStore()
@@ -1720,7 +1857,7 @@ func TestAnalysisTaskCancelCancelsRunningExecutorContext(t *testing.T) {
 	}
 }
 
-// TestReportsAPIListsGetsAndSoftDeletes 验证报告 API 隐藏软删除报告且默认不回显输入快照。
+// TestReportsAPIListsGetsAndSoftDeletes 验证报告 API 隐藏软删除报告，列表不回显输入快照，详情只回显脱敏快照。
 func TestReportsAPIListsGetsAndSoftDeletes(t *testing.T) {
 	store := newMemoryReportStore()
 	base := time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC)
@@ -1731,7 +1868,7 @@ func TestReportsAPIListsGetsAndSoftDeletes(t *testing.T) {
 		Title:           "苹果分析",
 		AnalysisType:    "stock_full",
 		ModelName:       "gpt-test",
-		InputSnapshot:   `{"userPosition":"满仓"}`,
+		InputSnapshot:   `{"prompt_template":"综合分析","model":"gpt-test","raw_prompt":"请基于以下数据分析苹果。","userPosition":"满仓","api_key":"sk-secret"}`,
 		ContentMarkdown: "正文内容",
 		RiskSummary:     "风险摘要",
 		CreatedAt:       base,
@@ -1788,6 +1925,18 @@ func TestReportsAPIListsGetsAndSoftDeletes(t *testing.T) {
 	detail := decodeResponseData(t, recorder.Body.Bytes())
 	if detail["content_markdown"] != "正文内容" || strings.Contains(recorder.Body.String(), "满仓") {
 		t.Fatalf("unexpected report detail payload: %#v", detail)
+	}
+	snapshot, ok := detail["input_snapshot"].(map[string]any)
+	if !ok || snapshot["prompt_template"] != "综合分析" || snapshot["model"] != "gpt-test" {
+		t.Fatalf("report detail should expose sanitized audit snapshot: %#v", detail)
+	}
+	if _, exists := snapshot["raw_prompt"]; exists {
+		t.Fatalf("report detail must not expose raw prompt: %#v", detail)
+	}
+	for _, forbidden := range []string{"raw_prompt", "请基于以下数据分析苹果。", "userPosition", "满仓", "api_key", "sk-secret"} {
+		if strings.Contains(recorder.Body.String(), forbidden) {
+			t.Fatalf("report detail leaked private snapshot field %q: %s", forbidden, recorder.Body.String())
+		}
 	}
 
 	recorder = httptest.NewRecorder()
@@ -2218,6 +2367,17 @@ func TestDashboardSummaryReadsRealStoreData(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save non-watchlist quote: %v", err)
 	}
+	if err := store.UpsertStocks(context.Background(), []model.Stock{{
+		Symbol:    "CN:SH:600519",
+		Market:    "CN",
+		Code:      "600519",
+		Name:      "贵州茅台",
+		Exchange:  "SH",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}}); err != nil {
+		t.Fatalf("save stock profile: %v", err)
+	}
 	if err := store.SaveAnalysisReportByTaskID(context.Background(), &model.AnalysisReport{
 		TaskID:          "task-dashboard",
 		Symbol:          "CN:SH:600519",
@@ -2282,8 +2442,13 @@ func TestDashboardSummaryReadsRealStoreData(t *testing.T) {
 	if watchlist["up_count"] != float64(1) || watchlist["down_count"] != float64(0) || watchlist["flat_count"] != float64(0) {
 		t.Fatalf("dashboard must summarize only active watchlist quotes, got %#v", watchlist)
 	}
-	if reports, ok := data["recent_reports"].([]any); !ok || len(reports) != 1 {
+	reports, ok := data["recent_reports"].([]any)
+	if !ok || len(reports) != 1 {
 		t.Fatalf("expected one recent report from store, got %#v", data["recent_reports"])
+	}
+	reportItem, ok := reports[0].(map[string]any)
+	if !ok || reportItem["stock_name"] != "贵州茅台" {
+		t.Fatalf("dashboard report should include stock name, got %#v", reports[0])
 	}
 	if tasks, ok := data["recent_tasks"].([]any); !ok || len(tasks) != 1 {
 		t.Fatalf("expected one recent task from store, got %#v", data["recent_tasks"])
@@ -3176,6 +3341,7 @@ type fakeNewsProvider struct {
 	listError   error
 	listCalls   *int
 	marketItems []newsservice.Item
+	marketError error
 	marketCalls *int
 	status      newsservice.ProviderStatus
 }
@@ -3246,6 +3412,9 @@ func (provider fakeNewsProvider) Market(context.Context, newsservice.MarketReque
 	if provider.marketCalls != nil {
 		(*provider.marketCalls)++
 	}
+	if provider.marketError != nil {
+		return nil, provider.marketError
+	}
 	return provider.marketItems, nil
 }
 
@@ -3264,7 +3433,8 @@ type memoryMarketStore struct {
 }
 
 type memoryNewsStore struct {
-	items map[string]model.NewsItem
+	items   map[string]model.NewsItem
+	saveErr error
 }
 
 type memoryWatchlistStore struct {
@@ -3390,6 +3560,7 @@ type memoryTaskStore struct {
 
 type memoryReportStore struct {
 	items   map[int64]model.AnalysisReport
+	stocks  map[string]model.Stock
 	deleted map[int64]*time.Time
 }
 
@@ -3499,6 +3670,9 @@ func newMemoryNewsStore() *memoryNewsStore {
 
 // SaveNewsItems 按 content_hash 保存测试新闻缓存。
 func (store *memoryNewsStore) SaveNewsItems(_ context.Context, items []model.NewsItem) error {
+	if store.saveErr != nil {
+		return store.saveErr
+	}
 	now := time.Now().UTC()
 	for _, item := range items {
 		if item.UpdatedAt.IsZero() {
@@ -3756,6 +3930,7 @@ func (store *memoryTaskStore) GetAnalysisReportByTaskID(_ context.Context, taskI
 func newMemoryReportStore() *memoryReportStore {
 	return &memoryReportStore{
 		items:   make(map[int64]model.AnalysisReport),
+		stocks:  make(map[string]model.Stock),
 		deleted: make(map[int64]*time.Time),
 	}
 }
@@ -3773,6 +3948,17 @@ func (store *memoryReportStore) ListVisibleAnalysisReports(context.Context) ([]m
 		return items[left].UpdatedAt.After(items[right].UpdatedAt)
 	})
 	return items, nil
+}
+
+// GetStocksBySymbols 返回报告关联股票基础资料，保持报告列表和总览页使用同一名称来源。
+func (store *memoryReportStore) GetStocksBySymbols(_ context.Context, symbols []string) (map[string]model.Stock, error) {
+	result := make(map[string]model.Stock, len(symbols))
+	for _, symbol := range symbols {
+		if stock, ok := store.stocks[symbol]; ok {
+			result[symbol] = stock
+		}
+	}
+	return result, nil
 }
 
 // SoftDeleteAnalysisReport 对测试报告执行软删除。

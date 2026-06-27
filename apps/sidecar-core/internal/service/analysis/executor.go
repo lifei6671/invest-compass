@@ -8,11 +8,14 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
 	aiservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/ai"
+	indicatorservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/indicator"
+	marketservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	promptservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/prompt"
 	taskservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/task"
 	tasklogservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/tasklog"
@@ -33,7 +36,9 @@ type ExecutionStore interface {
 	GetPromptTemplate(ctx context.Context, id int64) (model.PromptTemplate, error)
 	LatestQuote(ctx context.Context, symbol string, maxAge time.Duration) (model.Quote, bool, error)
 	ListKlines(ctx context.Context, symbol string, period string, adjust string, limit int) ([]model.Kline, error)
+	SaveKlines(ctx context.Context, klines []model.Kline) error
 	ListNewsBySymbol(ctx context.Context, symbol string, limit int, maxAge time.Duration) ([]model.NewsItem, error)
+	AppendTaskEvent(ctx context.Context, event *model.TaskEvent) error
 	SaveTaskWithEvent(ctx context.Context, task *model.Task, event *model.TaskEvent) error
 	SaveAnalysisReportWithTaskCompletion(ctx context.Context, report *model.AnalysisReport, chunkEvent *model.TaskEvent, task *model.Task, successEvent *model.TaskEvent) error
 }
@@ -53,12 +58,13 @@ type TaskNotifier interface {
 
 // Executor 负责执行单个分析任务，不处理 HTTP 路由和桌面 command。
 type Executor struct {
-	Store         ExecutionStore
-	NewChatClient ChatClientFactory
-	HTTPClient    *http.Client
-	Now           func() time.Time
-	TaskLogWriter tasklogservice.StageWriter
-	TaskNotifier  TaskNotifier
+	Store          ExecutionStore
+	NewChatClient  ChatClientFactory
+	MarketProvider marketservice.MarketProvider
+	HTTPClient     *http.Client
+	Now            func() time.Time
+	TaskLogWriter  tasklogservice.StageWriter
+	TaskNotifier   TaskNotifier
 }
 
 // Execute 拉取已缓存上下文、调用 AI、保存报告并推进任务事件。
@@ -181,6 +187,12 @@ func (executor Executor) executeBody(ctx context.Context, taskID string, request
 			return err
 		}
 		if len(klines) == 0 {
+			klines, err = executor.fetchAndCacheKlines(ctx, request)
+			if err != nil {
+				return err
+			}
+		}
+		if len(klines) == 0 {
 			return &xerr.Error{Code: xerr.PromptMissingData, Message: "missing klines"}
 		}
 		return nil
@@ -208,8 +220,13 @@ func (executor Executor) executeBody(ctx context.Context, taskID string, request
 		Market:           request.Symbol.Market,
 		Quote:            quoteSummary(quote),
 		KlineSummary:     klineSummary(klines),
+		DailyKlines:      dailyKlines(klines),
 		Indicators:       indicators,
 		News:             newsSummary(newsItems),
+		DataAsof:         dataAsof(quote, klines, executor.now()),
+		ContextQuality:   contextQuality(klines, indicators),
+		PromptKey:        promptKey(promptTemplate),
+		PromptVersion:    promptTemplate.Version,
 		AnalysisLanguage: "简体中文",
 		UserQuestion:     "请生成符合投研罗盘首版合规要求的个股分析报告。",
 		UserPosition:     userPositionSummary(request.UserPosition),
@@ -262,12 +279,26 @@ func (executor Executor) executeBody(ctx context.Context, taskID string, request
 		AnalysisType:     string(request.AnalysisType),
 		ModelName:        aiConfig.ModelName,
 		PromptTemplateID: request.PromptTemplateID,
-		InputSnapshot:    request.InputSnapshotForReport(),
-		ContentMarkdown:  content,
-		RiskSummary:      riskSummary(content),
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		InputSnapshot: request.InputSnapshotForReportWithContext(rawPromptForSnapshot(builtPrompt), ReportSnapshotMeta{
+			PromptTemplate: promptTemplate.Name,
+			Model:          aiConfig.ModelName,
+			Temperature:    aiConfig.Temperature,
+			MaxTokens:      aiConfig.MaxTokens,
+		}),
+		ContentMarkdown: content,
+		RiskSummary:     riskSummary(content),
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}, content, nil
+}
+
+// rawPromptForSnapshot 合并实际发送给模型的 System/User Prompt，供报告详情审计回放。
+func rawPromptForSnapshot(prompt promptservice.BuiltPrompt) string {
+	parts := []string{
+		"System:\n" + strings.TrimSpace(prompt.System),
+		"User:\n" + strings.TrimSpace(prompt.Context+"\n\n"+prompt.User),
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
 // stageMeta 生成分析任务阶段日志的公共上下文，避免真实密钥和完整 Prompt 进入日志。
@@ -285,10 +316,16 @@ func (executor Executor) stageMeta(taskID string, request ValidatedCreateRequest
 
 // runStage 在生产环境写入阶段日志；未注入 writer 的单测路径保持原始执行语义。
 func (executor Executor) runStage(ctx context.Context, meta tasklogservice.StageMeta, stage string, fn func(context.Context) error) error {
+	var err error
 	if executor.TaskLogWriter == nil {
-		return fn(ctx)
+		err = fn(ctx)
+	} else {
+		err = tasklogservice.RunStage(ctx, executor.TaskLogWriter, meta, stage, fn)
 	}
-	return tasklogservice.RunStage(ctx, executor.TaskLogWriter, meta, stage, fn)
+	if err != nil {
+		return err
+	}
+	return executor.appendProgressEvent(ctx, meta.TaskID, stage)
 }
 
 // writeFailedStreamStage 将 AI 调用失败进一步落到超时或失败阶段，方便日志抽屉按阶段排障。
@@ -305,6 +342,47 @@ func (executor Executor) writeFailedStreamStage(ctx context.Context, meta tasklo
 	return tasklogservice.RunStage(writeCtx, executor.TaskLogWriter, meta, stage, func(context.Context) error {
 		return cause
 	})
+}
+
+// appendProgressEvent 将分析阶段写入任务事件表，供 SSE 流实时推送到运行页。
+func (executor Executor) appendProgressEvent(ctx context.Context, taskID string, stage string) error {
+	progress, message, ok := analysisStageProgress(stage)
+	if !ok {
+		return nil
+	}
+	now := executor.now()
+	event := taskEventToModel(taskservice.Event{
+		TaskID: strings.TrimSpace(taskID),
+		Type:   taskservice.EventProgress,
+		Payload: taskservice.SanitizeEventPayload(mustJSON(map[string]any{
+			"stage":    stage,
+			"progress": progress,
+			"message":  message,
+		})),
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	return executor.Store.AppendTaskEvent(ctx, &event)
+}
+
+// analysisStageProgress 定义分析任务阶段到前端步骤显示的稳定映射。
+func analysisStageProgress(stage string) (int, string, bool) {
+	switch stage {
+	case tasklogservice.StageQuoteFetch:
+		return 20, "行情快照已读取", true
+	case tasklogservice.StageKlineFetch:
+		return 35, "K 线数据已准备", true
+	case tasklogservice.StageCalcMACD:
+		return 50, "技术指标已计算", true
+	case tasklogservice.StagePromptBuild:
+		return 65, "Prompt 已构建", true
+	case tasklogservice.StageStreamStart:
+		return 80, "AI 模型已响应", true
+	case tasklogservice.StageStreamChunk:
+		return 90, "AI 输出已生成", true
+	default:
+		return 0, "", false
+	}
 }
 
 // isTimeoutError 识别 Provider 或上下文返回的超时类错误。
@@ -334,6 +412,54 @@ func (executor Executor) markFailed(ctx context.Context, runningTask taskservice
 	}
 	executor.notifyTaskTerminal(ctx, taskToModel(runningTask))
 	return nil
+}
+
+// fetchAndCacheKlines 在分析任务缺少本地 K 线缓存时补拉真实行情源，避免前端承担隐藏的预热职责。
+func (executor Executor) fetchAndCacheKlines(ctx context.Context, request ValidatedCreateRequest) ([]model.Kline, error) {
+	if executor.MarketProvider == nil {
+		return nil, &xerr.Error{Code: xerr.PromptMissingData, Message: "missing klines"}
+	}
+	bars, err := executor.MarketProvider.Kline(ctx, marketservice.KlineRequest{
+		Symbol: request.Symbol,
+		Period: marketservice.Period(defaultKlinePeriod),
+		Adjust: marketservice.Adjust(defaultKlineAdjust),
+		Limit:  defaultKlineLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	klines := modelKlinesFromMarket(bars)
+	if len(klines) == 0 {
+		return nil, nil
+	}
+	if err := executor.Store.SaveKlines(ctx, klines); err != nil {
+		return nil, err
+	}
+	return klines, nil
+}
+
+// modelKlinesFromMarket 将行情 Provider 的 K 线转换为分析任务复用的本地缓存模型。
+func modelKlinesFromMarket(bars []marketservice.KlineBar) []model.Kline {
+	sort.SliceStable(bars, func(left int, right int) bool {
+		return bars[left].TradeDate < bars[right].TradeDate
+	})
+	klines := make([]model.Kline, 0, len(bars))
+	for _, bar := range bars {
+		klines = append(klines, model.Kline{
+			Symbol:    bar.Symbol.String(),
+			Period:    string(bar.Period),
+			Adjust:    string(bar.Adjust),
+			TradeDate: bar.TradeDate,
+			Open:      bar.Open,
+			High:      bar.High,
+			Low:       bar.Low,
+			Close:     bar.Close,
+			Volume:    bar.Volume,
+			Amount:    bar.Amount,
+			Provider:  bar.Provider,
+		})
+	}
+	return klines
 }
 
 // notifyTaskTerminal 写入应用内通知；通知失败只影响提醒，不反向改变分析任务终态。
@@ -392,17 +518,22 @@ func promptTemplateFromModel(item model.PromptTemplate) (promptservice.Template,
 		variables = append(variables, promptservice.Variable(variable))
 	}
 	return promptservice.Template{
-		ID:          item.ID,
-		Name:        item.Name,
-		Type:        promptservice.TemplateType(item.Type),
-		Description: item.Description,
-		Content:     item.Content,
-		Variables:   variables,
-		IsBuiltin:   item.IsBuiltin,
-		Deleted:     item.DeletedAt.Valid,
-		CreatedAt:   item.CreatedAt,
-		UpdatedAt:   item.UpdatedAt,
-		DeletedAt:   item.DeletedAt.Time,
+		ID:            item.ID,
+		Key:           item.Key,
+		Name:          item.Name,
+		Type:          promptservice.TemplateType(item.Type),
+		Description:   item.Description,
+		Content:       item.Content,
+		Variables:     variables,
+		IsBuiltin:     item.IsBuiltin,
+		BuiltinLocked: item.BuiltinLocked,
+		Version:       item.Version,
+		Checksum:      item.Checksum,
+		Source:        item.Source,
+		Deleted:       item.DeletedAt.Valid,
+		CreatedAt:     item.CreatedAt,
+		UpdatedAt:     item.UpdatedAt,
+		DeletedAt:     item.DeletedAt.Time,
 	}, nil
 }
 
@@ -442,17 +573,22 @@ func buildPromptForAnalysis(analysisType AnalysisType, template promptservice.Te
 // quoteSummary 将行情快照压缩为 Prompt 上下文。
 func quoteSummary(quote model.Quote) string {
 	return fmt.Sprintf(
-		"price=%.2f change_percent=%.2f%% volume=%.0f amount=%.0f quote_time=%s provider=%s",
+		"price=%.2f change_percent=%.2f%% volume=%.0f amount=%.0f turnover_rate=%.2f%% pe=%.2f pb=%.2f total_market_cap=%.0f float_market_cap=%.0f quote_time=%s provider=%s",
 		quote.Price,
 		quote.ChangePercent,
 		quote.Volume,
 		quote.Amount,
+		quote.TurnoverRate,
+		quote.PE,
+		quote.PB,
+		quote.TotalMarketCap,
+		quote.FloatMarketCap,
 		formatTime(quote.QuoteTime),
 		quote.Provider,
 	)
 }
 
-// klineSummary 将 K 线序列压缩为可审计摘要。
+// klineSummary 将 K 线序列压缩为简介，逐日明细由 dailyKlines 单独提供。
 func klineSummary(klines []model.Kline) string {
 	first := klines[0]
 	last := klines[len(klines)-1]
@@ -468,7 +604,59 @@ func klineSummary(klines []model.Kline) string {
 	)
 }
 
-// indicatorSummary 输出首版分析任务内置的轻量技术指标摘要。
+// dailyKlines 输出最近日 K 的逐日 OHLCV 明细，供 AI 直接基于真实每日结构分析。
+func dailyKlines(klines []model.Kline) string {
+	lines := make([]string, 0, len(klines))
+	for _, item := range klines {
+		lines = append(lines, fmt.Sprintf(
+			"date=%s open=%.2f high=%.2f low=%.2f close=%.2f volume=%.0f amount=%.0f",
+			item.TradeDate,
+			item.Open,
+			item.High,
+			item.Low,
+			item.Close,
+			item.Volume,
+			item.Amount,
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// dataAsof 选择输入数据截止时间，优先使用行情时间，其次使用最后一根 K 线日期。
+func dataAsof(quote model.Quote, klines []model.Kline, fallback time.Time) string {
+	if !quote.QuoteTime.IsZero() {
+		return formatTime(quote.QuoteTime)
+	}
+	if len(klines) > 0 && strings.TrimSpace(klines[len(klines)-1].TradeDate) != "" {
+		return klines[len(klines)-1].TradeDate
+	}
+	return formatTime(fallback)
+}
+
+// contextQuality 给 Prompt 提供简短质量说明，避免模型把缺失数据当成已知事实。
+func contextQuality(klines []model.Kline, indicators string) string {
+	indicatorStatus := "技术指标已生成"
+	if strings.TrimSpace(indicators) == "" {
+		indicatorStatus = "技术指标缺失"
+	}
+	if len(klines) >= defaultKlineLimit {
+		return fmt.Sprintf("日 K 线 %d 条，覆盖最近 60 日样本；%s。", len(klines), indicatorStatus)
+	}
+	return fmt.Sprintf("日 K 线 %d 条，少于最近 60 日样本；%s，技术分析可靠性下降。", len(klines), indicatorStatus)
+}
+
+// promptKey 返回模板稳定 key；历史自定义模板缺 key 时使用 ID 标识，避免 Prompt 出现空字段。
+func promptKey(template promptservice.Template) string {
+	if strings.TrimSpace(template.Key) != "" {
+		return template.Key
+	}
+	if template.ID > 0 {
+		return fmt.Sprintf("template_%d", template.ID)
+	}
+	return "custom_template"
+}
+
+// indicatorSummary 输出个股分析所需的常用技术指标快照，供 AI 基于结构化数值分析。
 func indicatorSummary(klines []model.Kline) string {
 	first := klines[0]
 	last := klines[len(klines)-1]
@@ -476,7 +664,125 @@ func indicatorSummary(klines []model.Kline) string {
 	if first.Close != 0 {
 		change = (last.Close - first.Close) / first.Close * 100
 	}
-	return fmt.Sprintf("close_change_percent=%.2f%% latest_volume=%.0f", change, last.Volume)
+	closes := analysisCloseValues(klines)
+	volumes := analysisVolumeValues(klines)
+	indicatorKlines := analysisIndicatorKLines(klines)
+
+	lines := []string{
+		fmt.Sprintf("close_change_percent=%.2f%% latest_volume=%.0f", change, last.Volume),
+		fmt.Sprintf(
+			"MA ma5=%s ma10=%s ma20=%s ma60=%s",
+			latestIndicatorValue(indicatorservice.MA(closes, 5)),
+			latestIndicatorValue(indicatorservice.MA(closes, 10)),
+			latestIndicatorValue(indicatorservice.MA(closes, 20)),
+			latestIndicatorValue(indicatorservice.MA(closes, 60)),
+		),
+		fmt.Sprintf(
+			"EMA ema12=%s ema26=%s",
+			latestIndicatorValue(indicatorservice.EMA(closes, 12)),
+			latestIndicatorValue(indicatorservice.EMA(closes, 26)),
+		),
+	}
+	if macd, err := indicatorservice.MACD(closes, 12, 26, 9); err == nil {
+		lines = append(lines, fmt.Sprintf(
+			"MACD dif=%s dea=%s bar=%s",
+			latestIndicatorValue(macd.DIF, nil),
+			latestIndicatorValue(macd.DEA, nil),
+			latestIndicatorValue(macd.Bar, nil),
+		))
+	} else {
+		lines = append(lines, "MACD 数据不足")
+	}
+	lines = append(lines, fmt.Sprintf(
+		"RSI rsi6=%s rsi12=%s rsi24=%s",
+		latestIndicatorValue(indicatorservice.RSI(closes, 6)),
+		latestIndicatorValue(indicatorservice.RSI(closes, 12)),
+		latestIndicatorValue(indicatorservice.RSI(closes, 24)),
+	))
+	if kdj, err := indicatorservice.KDJ(indicatorKlines, 9); err == nil {
+		lines = append(lines, fmt.Sprintf(
+			"KDJ k=%s d=%s j=%s",
+			latestIndicatorValue(kdj.K, nil),
+			latestIndicatorValue(kdj.D, nil),
+			latestIndicatorValue(kdj.J, nil),
+		))
+	} else {
+		lines = append(lines, "KDJ 数据不足")
+	}
+	if boll, err := indicatorservice.BOLL(closes, 20, 2); err == nil {
+		lines = append(lines, fmt.Sprintf(
+			"BOLL middle=%s upper=%s lower=%s",
+			latestIndicatorValue(boll.Middle, nil),
+			latestIndicatorValue(boll.Upper, nil),
+			latestIndicatorValue(boll.Lower, nil),
+		))
+	} else {
+		lines = append(lines, "BOLL 数据不足")
+	}
+	lines = append(lines, fmt.Sprintf(
+		"VOLUME_MA ma5=%s ma10=%s",
+		latestIndicatorValue(indicatorservice.VolumeMA(volumes, 5)),
+		latestIndicatorValue(indicatorservice.VolumeMA(volumes, 10)),
+	))
+	lines = append(lines, fmt.Sprintf(
+		"RISK_METRICS volatility=%s max_drawdown=%s",
+		singleIndicatorValue(indicatorservice.Volatility(closes)),
+		singleIndicatorValue(indicatorservice.MaxDrawdown(closes)),
+	))
+	return strings.Join(lines, "\n")
+}
+
+// latestIndicatorValue 提取指标序列最后一个有效值；数据不足时明确标注，避免 AI 误读空值。
+func latestIndicatorValue(values []float64, err error) string {
+	if err != nil {
+		return "数据不足"
+	}
+	for index := len(values) - 1; index >= 0; index-- {
+		value := values[index]
+		if !math.IsNaN(value) && !math.IsInf(value, 0) {
+			return fmt.Sprintf("%.2f", value)
+		}
+	}
+	return "数据不足"
+}
+
+// singleIndicatorValue 格式化单值指标；错误不吞掉，用“数据不足”暴露给 Prompt。
+func singleIndicatorValue(value float64, err error) string {
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return "数据不足"
+	}
+	return fmt.Sprintf("%.2f%%", value)
+}
+
+// analysisCloseValues 提取分析指标计算用收盘价序列。
+func analysisCloseValues(klines []model.Kline) []float64 {
+	values := make([]float64, 0, len(klines))
+	for _, item := range klines {
+		values = append(values, item.Close)
+	}
+	return values
+}
+
+// analysisVolumeValues 提取分析指标计算用成交量序列。
+func analysisVolumeValues(klines []model.Kline) []float64 {
+	values := make([]float64, 0, len(klines))
+	for _, item := range klines {
+		values = append(values, item.Volume)
+	}
+	return values
+}
+
+// analysisIndicatorKLines 转换 KDJ 所需的高低收盘价结构。
+func analysisIndicatorKLines(klines []model.Kline) []indicatorservice.KLine {
+	values := make([]indicatorservice.KLine, 0, len(klines))
+	for _, item := range klines {
+		values = append(values, indicatorservice.KLine{
+			High:  item.High,
+			Low:   item.Low,
+			Close: item.Close,
+		})
+	}
+	return values
 }
 
 // newsSummary 将新闻条目压缩为 Prompt 上下文；没有新闻时明确说明缺失，不伪造新闻。

@@ -10,6 +10,12 @@ type NewsListItemProps = {
 
 const sourceInitialMap: Record<string, string> = {
   财联社: "C",
+  财联社电报: "财",
+  新浪财经: "新",
+  "华尔街见闻-全球7x24": "华",
+  "东方财富研报": "研",
+  "东方财富行业研究": "行",
+  东方财富公告: "公",
   证券时报: "证",
   芯榜: "芯",
   界面新闻: "界",

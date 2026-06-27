@@ -1,4 +1,4 @@
-use crate::{desktop_runtime, sidecar::CoreState};
+use crate::{commands::blocking::post_core_api, desktop_runtime, sidecar::CoreState};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -35,29 +35,37 @@ pub struct LogsOpenDirectoryResult {
 
 /// 打开默认工作区下的运行日志目录；初始化失败时不能依赖 Go core 读取工作区设置。
 #[tauri::command]
-pub fn logs_open_directory(app_handle: AppHandle) -> Result<LogsOpenDirectoryResult, String> {
+pub async fn logs_open_directory(app_handle: AppHandle) -> Result<LogsOpenDirectoryResult, String> {
     let logs_dir = default_logs_directory(&app_handle)?;
-    std::fs::create_dir_all(&logs_dir).map_err(|error| format!("创建日志目录失败: {error}"))?;
-    open_path_in_file_manager(&logs_dir)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::create_dir_all(&logs_dir).map_err(|error| format!("创建日志目录失败: {error}"))?;
+        open_path_in_file_manager(&logs_dir)
+    })
+    .await
+    .map_err(|error| format!("open logs directory task failed: {error}"))??;
     Ok(LogsOpenDirectoryResult { opened: true })
 }
 
 /// 生成已脱敏日志导出包，并写入调用方明确指定的本地目录。
 #[tauri::command]
-pub fn export_logs(
+pub async fn export_logs(
     state: State<'_, CoreState>,
     target_dir: String,
 ) -> Result<ExportLogsResult, String> {
     let target_dir = PathBuf::from(target_dir);
     validate_log_export_target_dir(&target_dir)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    let response: CoreResponse<LogExportBundle> = client
-        .post_api("/api/logs/export", &EmptyRequest {})
-        .map_err(|error| error.to_string())?;
-    let output_path = write_log_export_bundle(&target_dir, &response.data)?;
+    let response: CoreResponse<LogExportBundle> =
+        post_core_api(client, "/api/logs/export", EmptyRequest {}).await?;
+    let bundle = response.data;
+    let file_name = bundle.file_name.clone();
+    let output_path =
+        tauri::async_runtime::spawn_blocking(move || write_log_export_bundle(&target_dir, &bundle))
+            .await
+            .map_err(|error| format!("log export task failed: {error}"))??;
     Ok(ExportLogsResult {
         file_path: output_path.to_string_lossy().to_string(),
-        file_name: response.data.file_name,
+        file_name,
     })
 }
 

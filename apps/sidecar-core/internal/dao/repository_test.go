@@ -302,15 +302,50 @@ func TestMarketQuoteRepositoryUpsertsBySymbol(t *testing.T) {
 	if !ok ||
 		quote.Price != 1700 ||
 		quote.ChangePercent != 1.2 ||
-		quote.TurnoverRate != 0 ||
-		quote.PE != 0 ||
-		quote.PB != 0 ||
-		quote.TotalMarketCap != 0 ||
-		quote.FloatMarketCap != 0 ||
+		quote.TurnoverRate != 3.98 ||
+		quote.PE != 352.10 ||
+		quote.PB != 2390.72 ||
+		quote.TotalMarketCap != 123456789000 ||
+		quote.FloatMarketCap != 98765432100 ||
 		quote.Provider != "provider-b" {
 		t.Fatalf("unexpected latest quote: ok=%v quote=%+v", ok, quote)
 	}
 	requireCount(t, store, &model.Quote{}, 1)
+}
+
+// TestMarketQuoteRepositoryKeepsNegativePE 验证负 PE 是亏损公司的真实估值语义，
+// 不能被旧缓存中的正 PE 当作“有效旧值”覆盖。
+func TestMarketQuoteRepositoryKeepsNegativePE(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	quoteTime := time.Date(2026, 6, 18, 10, 30, 0, 0, time.UTC)
+
+	if err := store.SaveQuote(ctx, &model.Quote{
+		Symbol:    "CN:SH:688001",
+		Price:     18.5,
+		PE:        42.6,
+		QuoteTime: quoteTime,
+		Provider:  "provider-a",
+	}); err != nil {
+		t.Fatalf("save quote: %v", err)
+	}
+	if err := store.SaveQuote(ctx, &model.Quote{
+		Symbol:    "CN:SH:688001",
+		Price:     18.9,
+		PE:        -15.8,
+		QuoteTime: quoteTime.Add(time.Minute),
+		Provider:  "provider-b",
+	}); err != nil {
+		t.Fatalf("update quote: %v", err)
+	}
+
+	quote, ok, err := store.LatestQuote(ctx, "CN:SH:688001", time.Minute)
+	if err != nil {
+		t.Fatalf("latest quote: %v", err)
+	}
+	if !ok || quote.PE != -15.8 {
+		t.Fatalf("negative PE must be preserved, ok=%v quote=%+v", ok, quote)
+	}
 }
 
 // TestMarketKlineRepositoryUpsertsAndOrdersBars 验证 K 线缓存按交易日幂等更新并稳定升序返回。

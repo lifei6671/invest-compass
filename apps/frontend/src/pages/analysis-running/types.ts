@@ -15,6 +15,7 @@ export type TaskStepStatus = "success" | "running" | "pending" | "failed";
 
 export type TaskStep = {
   id: number;
+  stageKey: string;
   title: string;
   description: string;
   status: TaskStepStatus;
@@ -23,6 +24,7 @@ export type TaskStep = {
 };
 
 export type TaskLogEventType =
+  | "TASK_CREATED"
   | "TASK_STARTED"
   | "TASK_PROGRESS"
   | "TASK_LOG"

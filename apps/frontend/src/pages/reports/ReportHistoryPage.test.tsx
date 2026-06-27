@@ -251,6 +251,63 @@ test("报告历史页读取报告统计并批量删除选中报告", async () =>
   expect(screen.queryByText("雅克科技 技术面分析")).not.toBeInTheDocument();
 });
 
+test("报告历史页将旧报告标题和关联股票展示为中文友好文案", async () => {
+  mockIPC((command) => {
+    if (command === "report_list") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          items: [
+            {
+              id: 22,
+              task_id: "analysis-22",
+              symbol: "CN:SH:600522",
+              stock_name: "中天科技",
+              title: "CN:SH:600522 stock_full AI 分析报告",
+              analysis_type: "stock_full",
+              model_name: "deepseek-v4-flash",
+              risk_summary: "技术面风险",
+              created_at: "2026-06-27T04:55:33Z",
+              updated_at: "2026-06-27T04:55:33Z",
+            },
+          ],
+        },
+      };
+    }
+    if (command === "report_stats") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          total: 1,
+          unique_symbols: 1,
+          latest_created_at: "2026-06-27T04:55:33Z",
+          analysis_types: [{ name: "stock_full", count: 1 }],
+          top_models: [{ name: "deepseek-v4-flash", count: 1 }],
+        },
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  });
+
+  render(
+    <MemoryRouter initialEntries={["/reports"]}>
+      <AntApp>
+        <ReportHistoryPage />
+      </AntApp>
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => {
+    expect(screen.getByText("中天科技（600522）个股综合分析报告")).toBeInTheDocument();
+  });
+  expect(screen.getByText("中天科技")).toBeInTheDocument();
+  expect(screen.getByText("600522")).toBeInTheDocument();
+  expect(screen.queryByText("CN:SH:600522 stock_full AI 分析报告")).not.toBeInTheDocument();
+  expect(screen.queryByText("stock_full")).not.toBeInTheDocument();
+});
+
 test("报告统计读取失败不阻塞报告列表展示", async () => {
   const calls: Array<{ command: string; payload?: unknown }> = [];
   mockIPC((command, payload) => {

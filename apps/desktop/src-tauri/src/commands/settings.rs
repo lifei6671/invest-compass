@@ -1,4 +1,5 @@
 use crate::{
+    commands::blocking::post_core_api_with_recovery,
     desktop_runtime,
     sidecar::{runtime_core_binary_path, CoreClient, CoreState},
 };
@@ -123,24 +124,37 @@ pub struct CacheCleanPayload {
 
 /// 读取非敏感 settings，固定转发到 Go core `/api/settings/get`。
 #[tauri::command]
-pub fn settings_get(
+pub async fn settings_get(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     keys: Vec<String>,
 ) -> Result<serde_json::Value, String> {
     post_settings_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/settings/get",
-        &SettingsGetRequest { keys },
+        SettingsGetRequest { keys },
     )
+    .await
 }
 
 /// 保存非敏感 settings，固定转发到 Go core `/api/settings/set`。
 #[tauri::command]
-pub fn settings_set(
+pub async fn settings_set(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
+    payload: SettingsSetPayload,
+) -> Result<serde_json::Value, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || settings_set_blocking(app_handle, state, payload))
+        .await
+        .map_err(|error| format!("settings set task failed: {error}"))?
+}
+
+/// 在线程池保存 settings 和代理凭据，避免 vault 与 Core 请求阻塞 Tauri command。
+fn settings_set_blocking(
+    app_handle: AppHandle,
+    state: CoreState,
     payload: SettingsSetPayload,
 ) -> Result<serde_json::Value, String> {
     let client = settings_core_client(&app_handle, &state)?;
@@ -165,27 +179,34 @@ pub fn settings_set(
 
 /// 执行代理连通性测试，固定转发到 Go core `/api/proxy/test`。
 #[tauri::command]
-pub fn proxy_connection_test(
+pub async fn proxy_connection_test(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: ProxyConnectionTestPayload,
 ) -> Result<serde_json::Value, String> {
     validate_proxy_test_target(&payload.target)?;
-    post_settings_api(&app_handle, &state, "/api/proxy/test", &payload)
+    post_settings_api(
+        app_handle,
+        state.inner().clone(),
+        "/api/proxy/test",
+        payload,
+    )
+    .await
 }
 
 /// 读取工作区路径，固定转发到 Go core `/api/workspace/get`。
 #[tauri::command]
-pub fn workspace_get(
+pub async fn workspace_get(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
 ) -> Result<serde_json::Value, String> {
     let mut response: serde_json::Value = post_settings_api(
-        &app_handle,
-        &state,
+        app_handle.clone(),
+        state.inner().clone(),
         "/api/workspace/get",
-        &WorkspaceGetRequest {},
-    )?;
+        WorkspaceGetRequest {},
+    )
+    .await?;
     if workspace_response_path_is_empty(&response) {
         response["data"]["path"] = serde_json::Value::String(
             desktop_runtime::default_workspace_path(&app_handle)
@@ -199,23 +220,37 @@ pub fn workspace_get(
 
 /// 保存用户选择的工作区路径，固定转发到 Go core `/api/workspace/set`。
 #[tauri::command]
-pub fn workspace_set(
+pub async fn workspace_set(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: WorkspaceSetPayload,
 ) -> Result<serde_json::Value, String> {
     validate_workspace_path(&payload.path)?;
-    let client = settings_core_client(&app_handle, &state)?;
-    client
-        .post_api("/api/workspace/set", &payload)
-        .map_err(|error| error.to_string())
+    post_settings_api(
+        app_handle,
+        state.inner().clone(),
+        "/api/workspace/set",
+        payload,
+    )
+    .await
 }
 
 /// 使用系统文件管理器打开当前工作区目录；路径只来自后端配置或平台默认目录。
 #[tauri::command]
-pub fn workspace_open(
+pub async fn workspace_open(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
+) -> Result<WorkspaceOpenResult, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || workspace_open_blocking(app_handle, state))
+        .await
+        .map_err(|error| format!("workspace open task failed: {error}"))?
+}
+
+/// 在线程池打开工作区目录，避免文件系统和系统命令阻塞 Tauri command。
+fn workspace_open_blocking(
+    app_handle: AppHandle,
+    state: CoreState,
 ) -> Result<WorkspaceOpenResult, String> {
     let current_path = current_workspace_path(&app_handle, &state)?;
     ensure_workspace_directory(&current_path)?;
@@ -225,9 +260,23 @@ pub fn workspace_open(
 
 /// 生成工作区迁移预检结果，不修改文件和 settings。
 #[tauri::command]
-pub fn workspace_migration_plan(
+pub async fn workspace_migration_plan(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
+    payload: WorkspaceMigrationPlanPayload,
+) -> Result<serde_json::Value, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        workspace_migration_plan_blocking(app_handle, state, payload)
+    })
+    .await
+    .map_err(|error| format!("workspace migration plan task failed: {error}"))?
+}
+
+/// 在线程池生成工作区迁移预检，避免目录扫描阻塞 Tauri command。
+fn workspace_migration_plan_blocking(
+    app_handle: AppHandle,
+    state: CoreState,
     payload: WorkspaceMigrationPlanPayload,
 ) -> Result<serde_json::Value, String> {
     let current_path = current_workspace_path(&app_handle, &state)?;
@@ -241,9 +290,23 @@ pub fn workspace_migration_plan(
 
 /// 执行工作区迁移；迁移前停止 Go core，成功后用目标工作区重启并写入 workspace_path。
 #[tauri::command]
-pub fn workspace_migrate(
+pub async fn workspace_migrate(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
+    payload: WorkspaceMigratePayload,
+) -> Result<serde_json::Value, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        workspace_migrate_blocking(app_handle, state, payload)
+    })
+    .await
+    .map_err(|error| format!("workspace migrate task failed: {error}"))?
+}
+
+/// 在线程池迁移工作区；这是文件复制和 sidecar 重启的长流程。
+fn workspace_migrate_blocking(
+    app_handle: AppHandle,
+    state: CoreState,
     payload: WorkspaceMigratePayload,
 ) -> Result<serde_json::Value, String> {
     let current_path = current_workspace_path(&app_handle, &state)?;
@@ -313,29 +376,33 @@ pub fn workspace_migrate(
 
 /// 读取临时缓存统计，固定转发到 Go core `/api/cache/stats`。
 #[tauri::command]
-pub fn cache_stats(
+pub async fn cache_stats(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
 ) -> Result<serde_json::Value, String> {
     post_settings_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/cache/stats",
-        &CacheStatsRequest {},
+        CacheStatsRequest {},
     )
+    .await
 }
 
 /// 清理临时缓存目标，固定转发到 Go core `/api/cache/clean`。
 #[tauri::command]
-pub fn cache_clean(
+pub async fn cache_clean(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: CacheCleanPayload,
 ) -> Result<serde_json::Value, String> {
-    let client = settings_core_client(&app_handle, &state)?;
-    client
-        .post_api("/api/cache/clean", &payload)
-        .map_err(|error| error.to_string())
+    post_settings_api(
+        app_handle,
+        state.inner().clone(),
+        "/api/cache/clean",
+        payload,
+    )
+    .await
 }
 
 /// 获取 settings 相关命令使用的 core client；若子进程已退出，则按当前默认工作区恢复启动。
@@ -358,27 +425,16 @@ fn settings_core_client(app_handle: &AppHandle, state: &CoreState) -> Result<Cor
 }
 
 /// 设置页读取类命令统一走可恢复调用，避免启动瞬间旧端口失效导致初始化误报。
-fn post_settings_api<TRequest>(
-    app_handle: &AppHandle,
-    state: &CoreState,
-    path: &str,
-    payload: &TRequest,
+async fn post_settings_api<TRequest>(
+    app_handle: AppHandle,
+    state: CoreState,
+    path: &'static str,
+    payload: TRequest,
 ) -> Result<serde_json::Value, String>
 where
-    TRequest: Serialize,
+    TRequest: Serialize + Send + 'static,
 {
-    let binary_path = runtime_core_binary_path();
-    let workspace_path =
-        desktop_runtime::default_workspace_path(app_handle).map_err(|error| error.to_string())?;
-    state
-        .post_api_with_recovery(
-            &binary_path,
-            &workspace_path,
-            std::time::Duration::from_secs(5),
-            path,
-            payload,
-        )
-        .map_err(|error| error.to_string())
+    post_core_api_with_recovery(state, app_handle, path, payload).await
 }
 
 /// 构造 settings 安全转发计划，代理密码只进本地 vault，清理旧引用必须等 Go core 保存成功。

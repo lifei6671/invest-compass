@@ -14,42 +14,49 @@ export type ReportDetail = {
   favorite: boolean;
   markdown: string;
   riskSummary: string;
+  inputSnapshot: InputSnapshot | null;
 };
 
 export type ReportSection = {
   id: string;
   index: number;
   title: string;
+  level: number;
 };
 
-export type InputSnapshot = {
-  stock: {
-    name: string;
-    symbol: string;
+export type InputSnapshot = Record<string, unknown> & {
+  raw_prompt?: string;
+  rawPrompt?: string;
+  prompt?: string;
+  rendered_prompt?: string;
+  renderedPrompt?: string;
+  stock?: {
+    name?: string;
+    symbol?: string;
   };
-  market: {
-    board: string;
-    industry: string;
+  market?: {
+    board?: string;
+    industry?: string;
   };
-  quote: {
-    price: string;
-    changePercent: string;
-    amount: string;
-    turnoverRate: string;
+  quote?: {
+    price?: string;
+    changePercent?: string;
+    amount?: string;
+    turnoverRate?: string;
   };
-  indicators: {
-    ma: string;
-    macd: string;
-    rsi: string;
-    kdj: string;
-    boll: string;
+  indicators?: {
+    ma?: string;
+    macd?: string;
+    rsi?: string;
+    kdj?: string;
+    boll?: string;
   };
-  news: {
-    count: number;
-    period: string;
+  news?: {
+    count?: number;
+    period?: string;
   };
-  promptTemplate: string;
-  model: string;
-  temperature: string;
-  maxTokens: string;
+  promptTemplate?: string;
+  model?: string;
+  temperature?: string;
+  maxTokens?: string;
 };

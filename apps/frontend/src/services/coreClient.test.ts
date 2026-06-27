@@ -500,6 +500,9 @@ describe("coreClient", () => {
     await expect(newsMarket({ market: "CN", limit: 20 })).resolves.toMatchObject({
       items: [{ title: "市场新闻", url: "https://example.com/news/2" }],
     });
+    await expect(newsMarket({ market: "CN", limit: 20, forceRefresh: true })).resolves.toMatchObject({
+      items: [{ title: "市场新闻", url: "https://example.com/news/2" }],
+    });
     await expect(newsStats({ market: "CN", limit: 20 })).resolves.toMatchObject({
       total_count: 2,
       source_count: 2,
@@ -532,6 +535,10 @@ describe("coreClient", () => {
       {
         command: "news_market",
         payload: { market: "CN", limit: 20 },
+      },
+      {
+        command: "news_market",
+        payload: { market: "CN", limit: 20, forceRefresh: true },
       },
       {
         command: "news_stats",

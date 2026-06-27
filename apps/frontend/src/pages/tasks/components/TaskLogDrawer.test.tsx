@@ -71,6 +71,7 @@ const runningTask: TaskItem = {
   progress: 62,
   startedAt: "2025-05-20 15:28:34",
   startedDate: "2025-05-20",
+  completedDate: "",
   duration: "00:03:12",
   model: "DeepSeek-V3",
 };

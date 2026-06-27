@@ -48,6 +48,7 @@ export const emptyContextSummary: ContextSummary = {
     ma20: "暂无",
     ma60: "暂无",
     ma120: "暂无",
+    dailyKlines: "",
   },
   indicators: {
     ma: "暂无",

@@ -499,7 +499,7 @@ func buildActionsConfig(token string, workspace string, store *dao.Store, schedu
 		AIConfigTester:        aiservice.OpenAIConfigTester{HTTPClient: aiHTTPClient},
 		ProviderNotifier:      notificationService,
 		AnalysisStore:         store,
-		AnalysisExecutor:      analysisservice.Executor{Store: store, HTTPClient: aiHTTPClient, TaskLogWriter: taskLogWriter, TaskNotifier: notificationService},
+		AnalysisExecutor:      analysisservice.Executor{Store: store, MarketProvider: marketProvider, HTTPClient: aiHTTPClient, TaskLogWriter: taskLogWriter, TaskNotifier: notificationService},
 		AnalysisTransact: func(ctx context.Context, run func(analysisaction.Store) error) error {
 			return store.WithTransaction(ctx, func(tx *dao.Store) error {
 				return run(tx)
@@ -538,15 +538,42 @@ func buildMarketProvider(store *dao.Store) marketservice.MarketProvider {
 
 // buildNewsProvider 创建生产资讯 Provider，财联社请求会按需读取本地加密 Cookie。
 func buildNewsProvider(resolver newsservice.CookieCredentialResolver, store *dao.Store) newsservice.Provider {
-	provider, err := newsservice.NewCailianpressProvider(newsservice.CailianpressConfig{
+	httpClient := externalDataHTTPClient(store, 15*time.Second)
+	cailianpress, err := newsservice.NewCailianpressProvider(newsservice.CailianpressConfig{
 		CredentialResolver: resolver,
-		HTTPClient:         externalDataHTTPClient(store, 15*time.Second),
+		HTTPClient:         httpClient,
 	})
 	if err != nil {
-		slog.Warn("初始化资讯 Provider 失败", "error", logger.RedactError(err))
+		slog.Warn("初始化财联社资讯 Provider 失败", "error", logger.RedactError(err))
 		return newsservice.UnconfiguredProvider{}
 	}
-	return provider
+	sinaLive, err := newsservice.NewSinaLiveProvider(newsservice.SinaLiveConfig{HTTPClient: httpClient})
+	if err != nil {
+		slog.Warn("初始化新浪资讯 Provider 失败", "error", logger.RedactError(err))
+		return newsservice.UnconfiguredProvider{}
+	}
+	wallstreetcnLive, err := newsservice.NewWallstreetcnLiveProvider(newsservice.WallstreetcnLiveConfig{HTTPClient: httpClient})
+	if err != nil {
+		slog.Warn("初始化华尔街见闻资讯 Provider 失败", "error", logger.RedactError(err))
+		return newsservice.UnconfiguredProvider{}
+	}
+	tradingView, err := newsservice.NewTradingViewProvider(newsservice.TradingViewConfig{HTTPClient: httpClient})
+	if err != nil {
+		slog.Warn("初始化 TradingView 资讯 Provider 失败", "error", logger.RedactError(err))
+		return newsservice.UnconfiguredProvider{}
+	}
+	eastMoneyResearch, err := newsservice.NewEastMoneyResearchProvider(newsservice.EastMoneyResearchConfig{HTTPClient: httpClient})
+	if err != nil {
+		slog.Warn("初始化东方财富研报公告 Provider 失败", "error", logger.RedactError(err))
+		return newsservice.UnconfiguredProvider{}
+	}
+	return newsservice.NewCompositeProvider("multi-market-news", []newsservice.Provider{
+		cailianpress,
+		sinaLive,
+		wallstreetcnLive,
+		tradingView,
+		eastMoneyResearch,
+	})
 }
 
 // externalDataHTTPClient 创建外部数据请求 HTTP client，每次请求按最新 settings 解析代理模式。

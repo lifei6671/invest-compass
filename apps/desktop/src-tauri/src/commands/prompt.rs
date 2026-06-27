@@ -1,4 +1,4 @@
-use crate::sidecar::CoreState;
+use crate::{commands::blocking::post_core_api, sidecar::CoreState};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -36,68 +36,69 @@ struct PromptTemplateDeleteRequest {
 
 /// 读取 Prompt 模板列表，固定转发到 Go core `/api/prompt-templates/list`。
 #[tauri::command]
-pub fn prompt_templates_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub async fn prompt_templates_list(
+    state: State<'_, CoreState>,
+) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/prompt-templates/list", &PromptTemplateListRequest {})
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/prompt-templates/list",
+        PromptTemplateListRequest {},
+    )
+    .await
 }
 
 /// 读取单个 Prompt 模板，固定转发到 Go core `/api/prompt-templates/get`。
 #[tauri::command]
-pub fn prompt_templates_get(
+pub async fn prompt_templates_get(
     state: State<'_, CoreState>,
     id: i64,
 ) -> Result<serde_json::Value, String> {
     validate_prompt_template_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(
-            "/api/prompt-templates/get",
-            &PromptTemplateGetRequest { id },
-        )
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/prompt-templates/get",
+        PromptTemplateGetRequest { id },
+    )
+    .await
 }
 
 /// 创建 Prompt 模板，固定转发到 Go core `/api/prompt-templates/create`。
 #[tauri::command]
-pub fn prompt_templates_create(
+pub async fn prompt_templates_create(
     state: State<'_, CoreState>,
     payload: PromptTemplateCreatePayload,
 ) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/prompt-templates/create", &payload)
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/prompt-templates/create", payload).await
 }
 
 /// 更新 Prompt 模板，固定转发到 Go core `/api/prompt-templates/update`。
 #[tauri::command]
-pub fn prompt_templates_update(
+pub async fn prompt_templates_update(
     state: State<'_, CoreState>,
     payload: PromptTemplateUpdatePayload,
 ) -> Result<serde_json::Value, String> {
     validate_prompt_template_id(payload.id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/prompt-templates/update", &payload)
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/prompt-templates/update", payload).await
 }
 
 /// 删除 Prompt 模板，固定转发到 Go core `/api/prompt-templates/delete`。
 #[tauri::command]
-pub fn prompt_templates_delete(
+pub async fn prompt_templates_delete(
     state: State<'_, CoreState>,
     id: i64,
 ) -> Result<serde_json::Value, String> {
     validate_prompt_template_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(
-            "/api/prompt-templates/delete",
-            &PromptTemplateDeleteRequest { id },
-        )
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/prompt-templates/delete",
+        PromptTemplateDeleteRequest { id },
+    )
+    .await
 }
 
 /// 校验 Prompt 模板 ID，避免 Rust command 转发无效模板请求。

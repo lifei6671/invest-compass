@@ -64,6 +64,7 @@ export type DashboardSummary = {
     id: number;
     task_id?: string;
     symbol?: string;
+    stock_name?: string;
     title: string;
     analysis_type?: string;
     model_name?: string;
@@ -191,6 +192,7 @@ export type NewsListPayload = {
 export type NewsMarketPayload = {
   market: string;
   limit: number;
+  forceRefresh?: boolean;
 };
 
 export type NewsListResult = {
@@ -452,11 +454,13 @@ export type AnalysisReport = {
   id: number;
   task_id: string;
   symbol: string;
+  stock_name?: string;
   title: string;
   analysis_type?: string;
   model_name?: string;
   prompt_template_id?: number;
   content_markdown?: string;
+  input_snapshot?: unknown;
   risk_summary?: string;
   favorite?: boolean;
   created_at?: string;

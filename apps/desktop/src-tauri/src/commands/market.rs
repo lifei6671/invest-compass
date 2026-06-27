@@ -1,4 +1,4 @@
-use crate::sidecar::CoreState;
+use crate::{commands::blocking::post_core_api, sidecar::CoreState};
 use serde::Serialize;
 use tauri::State;
 
@@ -39,52 +39,53 @@ struct MarketIndicatorsRequest {
 
 /// 搜索股票基础信息，固定转发到 Go core `/api/stocks/search`。
 #[tauri::command]
-pub fn stock_search(
+pub async fn stock_search(
     state: State<'_, CoreState>,
     keyword: String,
 ) -> Result<serde_json::Value, String> {
     validate_stock_search_keyword(&keyword)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/stocks/search", &StockSearchRequest { keyword })
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/stocks/search", StockSearchRequest { keyword }).await
 }
 
 /// 获取股票基础资料，固定转发到 Go core `/api/stocks/profile`。
 #[tauri::command]
-pub fn stock_profile(
+pub async fn stock_profile(
     state: State<'_, CoreState>,
     symbol: String,
 ) -> Result<serde_json::Value, String> {
     validate_stock_symbol(&symbol)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/stocks/profile", &StockProfileRequest { symbol })
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/stocks/profile",
+        StockProfileRequest { symbol },
+    )
+    .await
 }
 
 /// 获取股票行情快照，固定转发到 Go core `/api/market/quote`。
 #[tauri::command]
-pub fn market_quote(
+pub async fn market_quote(
     state: State<'_, CoreState>,
     symbol: String,
     force_refresh: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(
-            "/api/market/quote",
-            &MarketQuoteRequest {
-                symbol,
-                force_refresh: force_refresh.unwrap_or(false),
-            },
-        )
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/market/quote",
+        MarketQuoteRequest {
+            symbol,
+            force_refresh: force_refresh.unwrap_or(false),
+        },
+    )
+    .await
 }
 
 /// 获取股票 K 线，固定转发到 Go core `/api/market/kline`。
 #[tauri::command]
-pub fn market_kline(
+pub async fn market_kline(
     state: State<'_, CoreState>,
     symbol: String,
     period: String,
@@ -93,22 +94,22 @@ pub fn market_kline(
 ) -> Result<serde_json::Value, String> {
     validate_market_limit(limit)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(
-            "/api/market/kline",
-            &MarketKlineRequest {
-                symbol,
-                period,
-                adjust,
-                limit,
-            },
-        )
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/market/kline",
+        MarketKlineRequest {
+            symbol,
+            period,
+            adjust,
+            limit,
+        },
+    )
+    .await
 }
 
 /// 获取股票技术指标，固定转发到 Go core `/api/market/indicators`。
 #[tauri::command]
-pub fn market_indicators(
+pub async fn market_indicators(
     state: State<'_, CoreState>,
     symbol: String,
     period: String,
@@ -118,18 +119,18 @@ pub fn market_indicators(
 ) -> Result<serde_json::Value, String> {
     validate_market_limit(limit)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(
-            "/api/market/indicators",
-            &MarketIndicatorsRequest {
-                symbol,
-                period,
-                adjust,
-                limit,
-                indicators,
-            },
-        )
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/market/indicators",
+        MarketIndicatorsRequest {
+            symbol,
+            period,
+            adjust,
+            limit,
+            indicators,
+        },
+    )
+    .await
 }
 
 /// 校验股票搜索关键词，避免 Rust command 转发空查询到 Go core。

@@ -53,8 +53,32 @@ test("指标设置齿轮展示迁移后的指标分组", async () => {
   expect(onIndicatorChange).toHaveBeenCalledWith("TRIX");
   expect(onIndicatorChange).toHaveBeenCalledWith("ROC");
   expect(onIndicatorChange).toHaveBeenCalledWith("PVT");
-  expect(onIndicatorChange).toHaveBeenCalledWith("DMI");
+  expect(onIndicatorChange).toHaveBeenCalledWith("ADX");
 
-  expect(screen.getByRole("button", { name: "KAMA" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Aroon" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "KAMA" }));
+  fireEvent.click(screen.getByRole("button", { name: "Aroon" }));
+
+  expect(onIndicatorChange).toHaveBeenCalledWith("KAMA");
+  expect(onIndicatorChange).toHaveBeenCalledWith("AROON");
+});
+
+test("指标按钮悬停展示作用和计算方式", async () => {
+  render(
+    <AntApp>
+      <ChartControlBar
+        activePeriod="day"
+        activeAdjust="qfq"
+        activeIndicators={["MA"]}
+        onPeriodChange={vi.fn()}
+        onAdjustChange={vi.fn()}
+        onIndicatorChange={vi.fn()}
+      />
+    </AntApp>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "指标设置" }));
+  fireEvent.mouseEnter(await screen.findByRole("button", { name: "KAMA" }));
+
+  expect(await screen.findByText(/作用：根据行情噪声自适应快慢的均线/)).toBeInTheDocument();
+  expect(screen.getByText(/计算：效率比 ER 调整平滑系数/)).toBeInTheDocument();
 });

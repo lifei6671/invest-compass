@@ -1,7 +1,4 @@
-use crate::{
-    desktop_runtime,
-    sidecar::{runtime_core_binary_path, CoreState},
-};
+use crate::{commands::blocking::post_core_api_with_recovery, sidecar::CoreState};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
@@ -27,84 +24,98 @@ pub struct SearchRebuildPayload {
 
 /// 搜索报告历史范围，固定转发到 Go core `/api/search/reports`。
 #[tauri::command]
-pub fn search_reports(
+pub async fn search_reports(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: SearchDocumentsPayload,
 ) -> Result<serde_json::Value, String> {
     validate_search_payload(&payload)?;
-    post_search_api(&app_handle, &state, "/api/search/reports", &payload)
+    post_search_api(
+        app_handle,
+        state.inner().clone(),
+        "/api/search/reports",
+        payload,
+    )
+    .await
 }
 
 /// 搜索资讯范围，固定转发到 Go core `/api/search/news`。
 #[tauri::command]
-pub fn search_news(
+pub async fn search_news(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: SearchDocumentsPayload,
 ) -> Result<serde_json::Value, String> {
     validate_search_payload(&payload)?;
-    post_search_api(&app_handle, &state, "/api/search/news", &payload)
+    post_search_api(
+        app_handle,
+        state.inner().clone(),
+        "/api/search/news",
+        payload,
+    )
+    .await
 }
 
 /// 搜索自选备注范围，固定转发到 Go core `/api/search/watchlist-notes`。
 #[tauri::command]
-pub fn search_watchlist_notes(
+pub async fn search_watchlist_notes(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: SearchDocumentsPayload,
 ) -> Result<serde_json::Value, String> {
     validate_search_payload(&payload)?;
-    post_search_api(&app_handle, &state, "/api/search/watchlist-notes", &payload)
+    post_search_api(
+        app_handle,
+        state.inner().clone(),
+        "/api/search/watchlist-notes",
+        payload,
+    )
+    .await
 }
 
 /// 读取搜索索引状态，固定转发到 Go core `/api/search/status`。
 #[tauri::command]
-pub fn search_status(
+pub async fn search_status(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
 ) -> Result<serde_json::Value, String> {
     post_search_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/search/status",
-        &SearchStatusRequest {},
+        SearchStatusRequest {},
     )
+    .await
 }
 
 /// 触发搜索索引重建，固定转发到 Go core `/api/search/rebuild`。
 #[tauri::command]
-pub fn search_rebuild(
+pub async fn search_rebuild(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: SearchRebuildPayload,
 ) -> Result<serde_json::Value, String> {
     validate_search_rebuild_payload(&payload)?;
-    post_search_api(&app_handle, &state, "/api/search/rebuild", &payload)
+    post_search_api(
+        app_handle,
+        state.inner().clone(),
+        "/api/search/rebuild",
+        payload,
+    )
+    .await
 }
 
 /// 搜索命令统一通过状态恢复 API 调用 Go core，处理启动瞬间旧端口失效的连接竞态。
-fn post_search_api<TRequest>(
-    app_handle: &AppHandle,
-    state: &CoreState,
-    path: &str,
-    payload: &TRequest,
+async fn post_search_api<TRequest>(
+    app_handle: AppHandle,
+    state: CoreState,
+    path: &'static str,
+    payload: TRequest,
 ) -> Result<serde_json::Value, String>
 where
-    TRequest: Serialize,
+    TRequest: Serialize + Send + 'static,
 {
-    let binary_path = runtime_core_binary_path();
-    let workspace_path =
-        desktop_runtime::default_workspace_path(app_handle).map_err(|error| error.to_string())?;
-    state
-        .post_api_with_recovery(
-            &binary_path,
-            &workspace_path,
-            std::time::Duration::from_secs(5),
-            path,
-            payload,
-        )
-        .map_err(|error| error.to_string())
+    post_core_api_with_recovery(state, app_handle, path, payload).await
 }
 
 /// 校验菜单范围搜索请求，避免 Rust command 转发空关键词或无界分页。

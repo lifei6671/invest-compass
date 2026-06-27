@@ -3,6 +3,7 @@ import { Button } from "antd";
 
 type AnalysisActionBarProps = {
   generating: boolean;
+  startLoading?: boolean;
   startDisabled?: boolean;
   stopDisabled?: boolean;
   saveDisabled?: boolean;
@@ -18,8 +19,8 @@ type AnalysisActionBarProps = {
 export function AnalysisActionBar(props: AnalysisActionBarProps) {
   return (
     <div className="analysis-action-bar">
-      <Button type="primary" className="analysis-start-button" icon={<PlayCircleOutlined />} disabled={props.startDisabled} onClick={props.onStart}>
-        开始分析
+      <Button type="primary" className="analysis-start-button" icon={<PlayCircleOutlined />} loading={props.startLoading} disabled={props.startDisabled} onClick={props.onStart}>
+        {props.startLoading ? "创建任务中..." : "开始分析"}
       </Button>
       <Button className="analysis-action-button" icon={<StopOutlined />} disabled={props.stopDisabled ?? !props.generating} onClick={props.onStop}>
         停止生成

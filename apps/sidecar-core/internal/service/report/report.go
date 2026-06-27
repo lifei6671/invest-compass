@@ -13,6 +13,7 @@ type Report struct {
 	ID               int64
 	TaskID           string
 	Symbol           string
+	StockName        string
 	Title            string
 	AnalysisType     string
 	ModelName        string

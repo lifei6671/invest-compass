@@ -5,7 +5,7 @@ import "@testing-library/jest-dom/vitest";
 import "../test/setupDom";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App as AntApp } from "antd";
-import { Suspense } from "react";
+import { StrictMode, Suspense } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { App, AppErrorBoundary, StockDetailRoute } from "./App";
@@ -427,7 +427,7 @@ test("全屏 K 线图指数资料缺失时仍展示指数行情和 K 线", async
 
   render(<App initialBootState="ready" />);
 
-  expect(await screen.findByText("000001.SH")).toBeInTheDocument();
+  expect(await screen.findByText("上证指数")).toBeInTheDocument();
   expect(screen.getByText("000001")).toBeInTheDocument();
   expect(screen.getAllByText("4102.03").length).toBeGreaterThan(0);
   expect(screen.queryByText("全屏行情数据读取失败")).not.toBeInTheDocument();
@@ -857,6 +857,101 @@ test("全屏 K 线图顶部移除占位工具并通过返回按钮回到来源�
   expect(screen.getByText("source:/watchlist")).toBeInTheDocument();
 });
 
+test("全屏 K 线图按行情刷新间隔自动重拉 K 线", async () => {
+  vi.useFakeTimers();
+  const calls: Array<{ command: string; payload?: unknown }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "settings_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: { items: [{ key: "quote.refresh_interval", value: "15s" }] },
+        };
+      case "market_quote":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            symbol: "600000.SH",
+            price: calls.filter((call) => call.command === "market_quote").length === 1 ? 7.88 : 7.96,
+            change_amount: 0.18,
+            change_percent: 2.34,
+            open: 7.65,
+            high: 7.96,
+            low: 7.58,
+            pre_close: 7.7,
+            volume: 456200,
+            amount: 358900000,
+            turnover_rate: 0.63,
+            quote_time: "2026-06-25T10:42:18+08:00",
+          },
+        };
+      case "stock_profile":
+        return {
+          code: 0,
+          message: "ok",
+          data: { symbol: "600000.SH", name: "浦发银行", code: "600000", exchange: "SH", market: "CN", industry: "银行" },
+        };
+      case "market_kline":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              {
+                symbol: "600000.SH",
+                period: "day",
+                adjust: "qfq",
+                trade_date: "2026-06-25",
+                open: 7.8,
+                high: 7.96,
+                low: 7.74,
+                close: calls.filter((call) => call.command === "market_kline").length === 1 ? 7.88 : 7.96,
+                volume: 456200,
+              },
+            ],
+          },
+        };
+      case "market_indicators":
+        return { code: 0, message: "ok", data: { symbol: "600000.SH", period: "day", adjust: "qfq", indicators: {} } };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(
+    <MemoryRouter initialEntries={["/chart/kline?symbol=600000.SH&period=day&adjust=qfq"]}>
+      <AntApp>
+        <Routes>
+          <Route path="/chart/kline" element={<FullscreenKlinePage />} />
+        </Routes>
+      </AntApp>
+    </MemoryRouter>,
+  );
+
+  await act(async () => {
+    await vi.dynamicImportSettled();
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
+  });
+  expect(calls.filter((call) => call.command === "market_kline")).toHaveLength(1);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15_000);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(calls.filter((call) => call.command === "market_kline")).toHaveLength(2);
+  expect(calls).toContainEqual({
+    command: "market_kline",
+    payload: { symbol: "600000.SH", period: "day", adjust: "qfq", limit: 120 },
+  });
+});
+
 test("全屏 K 线图分钟周期直连后端分钟 K 线", async () => {
   window.location.hash = "#/chart/kline?symbol=600000.SH&period=day&adjust=qfq";
   const calls: Array<{ command: string; payload?: unknown }> = [];
@@ -937,7 +1032,7 @@ test("全屏 K 线图分钟周期直连后端分钟 K 线", async () => {
   });
 });
 
-test("全屏 K 线图分时周期读取后端分时走势", async () => {
+test("全屏 K 线图分时周期读取后端 1 分钟 K 线", async () => {
   window.location.hash = "#/chart/kline?symbol=600000.SH&period=minute&adjust=qfq";
   const calls: Array<{ command: string; payload?: unknown }> = [];
   mockIPC((command, payload) => {
@@ -974,8 +1069,8 @@ test("全屏 K 线图分时周期读取后端分时走势", async () => {
           message: "ok",
           data: {
             items: [
-              { symbol: "600000.SH", period: "minute", adjust: "qfq", trade_date: "2026-06-25 10:30", open: 7.7, high: 7.82, low: 7.68, close: 7.78, volume: 120000 },
-              { symbol: "600000.SH", period: "minute", adjust: "qfq", trade_date: "2026-06-25 10:31", open: 7.78, high: 7.9, low: 7.76, close: 7.88, volume: 156200 },
+              { symbol: "600000.SH", period: "1m", adjust: "qfq", trade_date: "2026-06-25 10:30", open: 7.7, high: 7.82, low: 7.68, close: 7.78, volume: 120000 },
+              { symbol: "600000.SH", period: "1m", adjust: "qfq", trade_date: "2026-06-25 10:31", open: 7.78, high: 7.9, low: 7.76, close: 7.88, volume: 156200 },
             ],
           },
         };
@@ -985,7 +1080,7 @@ test("全屏 K 线图分时周期读取后端分时走势", async () => {
           message: "ok",
           data: {
             symbol: "600000.SH",
-            period: "minute",
+            period: "1m",
             adjust: "qfq",
             indicators: {
               ma: { ma5: [7.78, 7.82], ma10: [7.7, 7.75], ma20: [7.6, 7.66], ma60: [7.4, 7.45] },
@@ -1002,10 +1097,10 @@ test("全屏 K 线图分时周期读取后端分时走势", async () => {
   render(<App initialBootState="ready" />);
 
   expect(await screen.findByText("浦发银行")).toBeInTheDocument();
-  expect(calls).toContainEqual({ command: "market_kline", payload: { symbol: "600000.SH", period: "minute", adjust: "qfq", limit: 240 } });
+  expect(calls).toContainEqual({ command: "market_kline", payload: { symbol: "600000.SH", period: "1m", adjust: "qfq", limit: 240 } });
   expect(calls).toContainEqual({
     command: "market_indicators",
-    payload: { symbol: "600000.SH", period: "minute", adjust: "qfq", limit: 240, indicators: ["ma", "rsi", "macd", "kdj", "boll"] },
+    payload: { symbol: "600000.SH", period: "1m", adjust: "qfq", limit: 240, indicators: ["ma", "rsi", "macd", "kdj", "boll"] },
   });
 });
 
@@ -2002,7 +2097,11 @@ test("个股详情页进入后读取真实行情、K线、指标和新闻", asyn
             ],
           },
         };
-      case "market_quote":
+      case "market_quote": {
+        const args = payload as { forceRefresh?: boolean };
+        if (args.forceRefresh) {
+          return new Promise(() => undefined);
+        }
         return {
           code: 0,
           message: "ok",
@@ -2022,6 +2121,7 @@ test("个股详情页进入后读取真实行情、K线、指标和新闻", asyn
             provider: "sina",
           },
         };
+      }
       case "stock_profile":
         return {
           code: 0,
@@ -2071,7 +2171,7 @@ test("个股详情页进入后读取真实行情、K线、指标和新闻", asyn
             symbol: args.symbol,
             period: args.period,
             adjust: args.adjust,
-            indicators: { ma5: args.period === "week" ? 7.18 : 7.12, macd_dif: 0.12, rsi6: 58.6 },
+	            indicators: { ma5: args.period === "week" ? 7.18 : 7.12, ma60: 6.88, macd_dif: 0.12, rsi6: 58.6 },
           },
         };
       }
@@ -2123,9 +2223,15 @@ test("个股详情页进入后读取真实行情、K线、指标和新闻", asyn
   expect(screen.getByRole("heading", { name: "K线图" })).toBeInTheDocument();
   expect(screen.getByLabelText("K线图")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /全屏/ })).toBeInTheDocument();
-  expect(screen.getByText("MA.MA5")).toBeInTheDocument();
-  expect(screen.getByText("MACD.DIF")).toBeInTheDocument();
-  expect(screen.getByText("RSI.RSI6")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "分时" })).not.toBeInTheDocument();
+	  expect(screen.getByText("MA(5,10,20,60)")).toBeInTheDocument();
+	  expect(screen.getByText("MA5")).toBeInTheDocument();
+	  expect(screen.getByText("MA60")).toBeInTheDocument();
+	  expect(screen.getByText("6.88")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "MACD" }));
+  expect(screen.getByText("MACD(12,26,9)")).toBeInTheDocument();
+  expect(screen.getByText("DIF")).toBeInTheDocument();
+  expect(screen.queryByText("MACD.DIF")).not.toBeInTheDocument();
   expect(screen.getByText("银行 / 暂无")).toBeInTheDocument();
   expect(screen.getAllByText("低估值").length).toBeGreaterThan(0);
   expect(screen.getByText("上海浦东发展银行股份有限公司")).toBeInTheDocument();
@@ -2151,6 +2257,11 @@ test("个股详情页进入后读取真实行情、K线、指标和新闻", asyn
   await waitFor(() => {
     expect(calls.filter((call) => call.command === "market_quote")).toHaveLength(2);
   });
+  const quoteCalls = calls.filter((call) => call.command === "market_quote");
+  expect(quoteCalls[1]).toEqual({ command: "market_quote", payload: { symbol: "600000.SH", forceRefresh: true } });
+  expect(calls.filter((call) => call.command === "market_kline")).toHaveLength(1);
+  expect(calls.filter((call) => call.command === "market_indicators")).toHaveLength(1);
+  expect(calls.filter((call) => call.command === "news_list")).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: /发起 AI 分析/ }));
   expect(window.location.hash).toBe("#/analysis?symbol=600000.SH");
 });
@@ -2856,7 +2967,7 @@ test("AI 分析页读取真实模型、Prompt 和股票上下文后创建分析�
   expect(screen.getByText("浦发银行发布最新经营动态")).toBeInTheDocument();
   expect(screen.getByText("7.12")).toBeInTheDocument();
   expect(calls).toContainEqual({ command: "stock_profile", payload: { symbol: "600000.SH" } });
-  expect(calls).toContainEqual({ command: "market_quote", payload: { symbol: "600000.SH" } });
+  expect(calls).toContainEqual({ command: "market_quote", payload: { symbol: "600000.SH", forceRefresh: true } });
   expect(calls).toContainEqual({ command: "market_kline", payload: { symbol: "600000.SH", period: "day", adjust: "qfq", limit: 120 } });
   expect(calls).toContainEqual({
     command: "market_indicators",
@@ -2890,7 +3001,7 @@ test("AI 分析页读取真实模型、Prompt 和股票上下文后创建分析�
   fireEvent.click(screen.getByRole("button", { name: /开始分析/ }));
   await waitFor(() => {
     expect(window.location.hash).toBe("#/analysis/running?taskId=analysis-600000");
-    expect(screen.getByRole("heading", { name: "AI 分析任务" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "浦发银行（600000.SH） 个股综合分析" })).toBeInTheDocument();
   });
   expect(calls).toContainEqual({
     command: "analysis_task_create",
@@ -2910,6 +3021,178 @@ test("AI 分析页读取真实模型、Prompt 和股票上下文后创建分析�
   expect(screen.queryByText("券商账户")).not.toBeInTheDocument();
   expect(screen.queryByText("自动交易")).not.toBeInTheDocument();
   expect(calls.map((call) => call.command)).not.toContain("search_global");
+});
+
+test("AI 分析页创建任务期间立即展示创建中状态", async () => {
+  window.location.hash = "#/analysis?symbol=600000.SH";
+  const createTaskDeferred: { resolve?: (value: unknown) => void } = {};
+  mockIPC((command) => {
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+      case "providers_status":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      case "ai_config_list":
+        return {
+          code: 0,
+          message: "ok",
+          data: { items: [{ id: 1, provider: "deepseek", name: "DeepSeek", model_name: "DeepSeek-V3", api_key_ref: "local-vault://ai-config/deepseek-1", has_api_key: true, is_default: true }] },
+        };
+      case "prompt_templates_list":
+        return {
+          code: 0,
+          message: "ok",
+          data: { items: [{ id: 11, key: "stock_full_v1", name: "个股综合模板", type: "stock_full", content: "分析 {{stock_name}}", variables: ["stock_name"], is_builtin: true, builtin_locked: true }] },
+        };
+      case "stock_search":
+        return { code: 0, message: "ok", data: [{ name: "浦发银行", symbol: "600000.SH", code: "600000" }] };
+      case "stock_profile":
+        return { code: 0, message: "ok", data: { symbol: "600000.SH", name: "浦发银行", code: "600000", exchange: "SH", market: "CN", industry: "银行" } };
+      case "market_quote":
+        return { code: 0, message: "ok", data: { symbol: "600000.SH", price: 7.12, quote_time: "2026-06-23T10:00:00Z" } };
+      case "market_kline":
+        return { code: 0, message: "ok", data: { items: [{ symbol: "600000.SH", period: "day", adjust: "qfq", trade_date: "2026-06-23", open: 7, high: 7.2, low: 6.9, close: 7.12 }] } };
+      case "market_indicators":
+        return { code: 0, message: "ok", data: { symbol: "600000.SH", period: "day", adjust: "qfq", indicators: {} } };
+      case "news_list":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "analysis_task_create":
+        return new Promise((resolve) => {
+          createTaskDeferred.resolve = resolve;
+        });
+      case "task_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            id: "analysis-600000",
+            type: "ANALYSIS",
+            title: "600000.SH stock_full",
+            status: "RUNNING",
+            progress: 5,
+            created_at: "2026-06-23T10:00:00Z",
+            updated_at: "2026-06-23T10:00:00Z",
+          },
+        };
+      case "task_events":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "analysis_task_subscribe":
+        return { emitted: 0, last_event_id: 0 };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { name: "AI 分析" })).toBeInTheDocument();
+  });
+  await waitFor(() => {
+    expect(screen.getByText("7.12")).toBeInTheDocument();
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: /开始分析/ }));
+
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { name: "浦发银行（600000.SH） 个股综合分析" })).toBeInTheDocument();
+  });
+  expect(window.location.hash).toBe("#/analysis/running?creating=1");
+
+  createTaskDeferred.resolve?.({ code: 0, message: "ok", data: { task_id: "analysis-600000", status: "PENDING" } });
+  await waitFor(() => {
+    expect(window.location.hash).toBe("#/analysis/running?taskId=analysis-600000");
+  });
+});
+
+test("AI 分析页在 StrictMode 下不会在 render 阶段消费任务 draft", async () => {
+  window.location.hash = "#/analysis?symbol=600000.SH";
+  const calls: Array<{ command: string; payload?: any }> = [];
+  const createTaskDeferred: { resolve?: (value: unknown) => void } = {};
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+      case "providers_status":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      case "ai_config_list":
+        return {
+          code: 0,
+          message: "ok",
+          data: { items: [{ id: 1, provider: "deepseek", name: "DeepSeek", model_name: "DeepSeek-V3", api_key_ref: "local-vault://ai-config/deepseek-1", has_api_key: true, is_default: true }] },
+        };
+      case "prompt_templates_list":
+        return {
+          code: 0,
+          message: "ok",
+          data: { items: [{ id: 11, key: "stock_full_v1", name: "个股综合模板", type: "stock_full", content: "分析 {{stock_name}}", variables: ["stock_name"], is_builtin: true, builtin_locked: true }] },
+        };
+      case "stock_search":
+        return { code: 0, message: "ok", data: [{ name: "浦发银行", symbol: "600000.SH", code: "600000" }] };
+      case "stock_profile":
+        return { code: 0, message: "ok", data: { symbol: "600000.SH", name: "浦发银行", code: "600000", exchange: "SH", market: "CN", industry: "银行" } };
+      case "market_quote":
+        return { code: 0, message: "ok", data: { symbol: "600000.SH", price: 7.12, quote_time: "2026-06-23T10:00:00Z" } };
+      case "market_kline":
+        return { code: 0, message: "ok", data: { items: [{ symbol: "600000.SH", period: "day", adjust: "qfq", trade_date: "2026-06-23", open: 7, high: 7.2, low: 6.9, close: 7.12 }] } };
+      case "market_indicators":
+        return { code: 0, message: "ok", data: { symbol: "600000.SH", period: "day", adjust: "qfq", indicators: {} } };
+      case "news_list":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "analysis_task_create":
+        return new Promise((resolve) => {
+          createTaskDeferred.resolve = resolve;
+        });
+      case "task_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            id: "analysis-600000",
+            type: "ANALYSIS",
+            title: "600000.SH stock_full",
+            status: "RUNNING",
+            progress: 5,
+            created_at: "2026-06-23T10:00:00Z",
+            updated_at: "2026-06-23T10:00:00Z",
+          },
+        };
+      case "task_events":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "analysis_task_subscribe":
+        return { emitted: 0, last_event_id: 0 };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { name: "AI 分析" })).toBeInTheDocument();
+  });
+  await waitFor(() => {
+    expect(screen.getByText("7.12")).toBeInTheDocument();
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: /开始分析/ }));
+
+  await waitFor(() => {
+    expect(calls.map((call) => call.command)).toContain("analysis_task_create");
+  });
+  createTaskDeferred.resolve?.({ code: 0, message: "ok", data: { task_id: "analysis-600000", status: "PENDING" } });
+  await waitFor(() => {
+    expect(window.location.hash).toBe("#/analysis/running?taskId=analysis-600000");
+  });
 });
 
 test("AI 分析页未配置模型时禁用任务创建", async () => {
@@ -2994,15 +3277,17 @@ test("AI 分析运行页恢复任务事件、订阅增量事件并支持取消",
           message: "ok",
           data: {
             items: [
-              { id: 1, event_type: "TASK_STARTED", payload: "{\"progress\":5}", created_at: "2026-06-24T12:00:01Z" },
-              { id: 2, event_type: "TASK_PROGRESS", payload: "{\"progress\":35,\"message\":\"正在读取行情上下文\"}", created_at: "2026-06-24T12:00:02Z" },
-              { id: 3, event_type: "TASK_LOG", payload: "{\"message\":\"K 线数据已加载\"}", created_at: "2026-06-24T12:00:03Z" },
-              { id: 4, event_type: "TASK_CHUNK", payload: "{\"content\":\"## 技术结论\\n- 趋势偏强\"}", created_at: "2026-06-24T12:00:04Z" },
+              { id: 1, event_type: "TASK_CREATED", payload: "{\"stock_name\":\"浦发银行\",\"symbol\":\"600000.SH\",\"analysis_type\":\"technical\"}", created_at: "2026-06-24T12:00:00Z" },
+              { id: 2, event_type: "TASK_STARTED", payload: "{\"progress\":5}", created_at: "2026-06-24T12:00:01Z" },
+              { id: 3, event_type: "TASK_PROGRESS", payload: "{\"stage\":\"quote_fetch\",\"progress\":20,\"message\":\"行情快照已读取\"}", created_at: "2026-06-24T12:00:02Z" },
+              { id: 4, event_type: "TASK_PROGRESS", payload: "{\"stage\":\"kline_fetch\",\"progress\":35,\"message\":\"K 线数据已准备\"}", created_at: "2026-06-24T12:00:03Z" },
+              { id: 5, event_type: "TASK_LOG", payload: "{\"message\":\"K 线数据已加载\"}", created_at: "2026-06-24T12:00:04Z" },
+              { id: 6, event_type: "TASK_CHUNK", payload: "{\"content\":\"## 技术结论\\n- 趋势偏强\"}", created_at: "2026-06-24T12:00:05Z" },
             ],
           },
         };
       case "analysis_task_subscribe":
-        return { emitted: 0, last_event_id: 4 };
+        return { emitted: 0, last_event_id: 6 };
       case "analysis_task_cancel":
         return { code: 0, message: "ok", data: { task_id: "analysis-1", status: "CANCELLED" } };
       default:
@@ -3013,7 +3298,7 @@ test("AI 分析运行页恢复任务事件、订阅增量事件并支持取消",
   render(<App />);
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "600000.SH technical" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "浦发银行（600000.SH） 技术面分析" })).toBeInTheDocument();
   });
   expect(screen.getByRole("link", { name: "AI 分析" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByText("AI 分析任务进行中，请稍候...")).toBeInTheDocument();
@@ -3023,13 +3308,19 @@ test("AI 分析运行页恢复任务事件、订阅增量事件并支持取消",
   expect(calls).toContainEqual({ command: "task_get", payload: { taskId: "analysis-1" } });
   expect(calls).toContainEqual({ command: "task_events", payload: { taskId: "analysis-1", afterEventId: 0 } });
   await waitFor(() => {
-    expect(calls).toContainEqual({ command: "analysis_task_subscribe", payload: { taskId: "analysis-1", afterEventId: 4 } });
+    expect(calls).toContainEqual({ command: "analysis_task_subscribe", payload: { taskId: "analysis-1", afterEventId: 6 } });
   });
   expect(eventListenMock).toHaveBeenCalledWith("analysis-task-event", expect.any(Function));
 
   expect(screen.getByText("任务步骤")).toBeInTheDocument();
   expect(screen.getByText("任务已开始")).toBeInTheDocument();
-  expect(screen.getAllByText("正在读取行情上下文").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("行情快照已读取").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("K 线数据已准备").length).toBeGreaterThan(0);
+  const stepCard = screen.getByText("任务步骤").closest("section");
+  expect(stepCard).not.toBeNull();
+  expect(within(stepCard as HTMLElement).getAllByText("行情快照已读取").length).toBeGreaterThan(0);
+  expect(within(stepCard as HTMLElement).getAllByText("K 线数据已准备").length).toBeGreaterThan(0);
+  expect(within(stepCard as HTMLElement).queryByText("K 线数据已加载")).not.toBeInTheDocument();
 
   expect(screen.getByText("流式输出")).toBeInTheDocument();
   expect(screen.getByText("自动滚动")).toBeInTheDocument();
@@ -3040,7 +3331,7 @@ test("AI 分析运行页恢复任务事件、订阅增量事件并支持取消",
 
   expect(screen.getByText("任务日志")).toBeInTheDocument();
   expect(screen.getByText("TASK_STARTED")).toBeInTheDocument();
-  expect(screen.getByText("TASK_PROGRESS")).toBeInTheDocument();
+  expect(screen.getAllByText("TASK_PROGRESS").length).toBeGreaterThan(0);
   expect(screen.getByText("TASK_LOG")).toBeInTheDocument();
   expect(screen.getByText("TASK_CHUNK")).toBeInTheDocument();
   expect(screen.getAllByText("K 线数据已加载").length).toBeGreaterThan(0);
@@ -3139,6 +3430,165 @@ test("AI 分析运行页忽略非当前任务的实时事件", async () => {
   expect(screen.getByText("当前任务输出")).toBeInTheDocument();
 });
 
+test("AI 分析运行页通过轮询补齐 SSE 未送达的输出事件", async () => {
+  window.location.hash = "#/analysis/running?taskId=analysis-poll";
+  const calls: Array<{ command: string; payload?: any }> = [];
+  let taskEventsCalls = 0;
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+      case "providers_status":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      case "task_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            id: "analysis-poll",
+            type: "ANALYSIS",
+            status: "RUNNING",
+            title: "600000.SH stock_full",
+            progress: 90,
+            started_at: "2026-06-24T12:00:00Z",
+            created_at: "2026-06-24T12:00:00Z",
+          },
+        };
+      case "task_events":
+        taskEventsCalls += 1;
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: taskEventsCalls === 1
+              ? [
+                { id: 1, event_type: "TASK_STARTED", payload: "{\"progress\":5}", created_at: "2026-06-24T12:00:01Z" },
+                { id: 2, event_type: "TASK_PROGRESS", payload: "{\"stage\":\"stream_chunk\",\"progress\":90,\"message\":\"AI 输出已生成\"}", created_at: "2026-06-24T12:00:04Z" },
+              ]
+              : [
+                { id: 3, event_type: "TASK_CHUNK", payload: "{\"content\":\"## 实时补齐\\n- SSE 未送达时由轮询补齐\"}", created_at: "2026-06-24T12:00:05Z" },
+                { id: 4, event_type: "TASK_SUCCESS", payload: "{\"progress\":100}", created_at: "2026-06-24T12:00:06Z" },
+              ],
+          },
+        };
+      case "analysis_task_subscribe":
+        return { emitted: 0, last_event_id: 2 };
+      case "stock_profile":
+        return {
+          code: 0,
+          message: "ok",
+          data: { symbol: "600000.SH", name: "浦发银行", code: "600000", exchange: "SH", market: "CN" },
+        };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(screen.getAllByText("AI 输出已生成").length).toBeGreaterThan(0);
+  });
+  expect(screen.getByText("暂无流式输出")).toBeInTheDocument();
+
+  await waitFor(() => {
+    expect(screen.getByText("实时补齐")).toBeInTheDocument();
+  }, { timeout: 2_000 });
+  expect(screen.getByText("SSE 未送达时由轮询补齐")).toBeInTheDocument();
+  expect(calls).toContainEqual({ command: "task_events", payload: { taskId: "analysis-poll", afterEventId: 2 } });
+});
+
+test("AI 分析运行页通过任务状态轮询更新完成态", async () => {
+  window.location.hash = "#/analysis/running?taskId=analysis-status-poll";
+  const calls: Array<{ command: string; payload?: any }> = [];
+  let taskGetCalls = 0;
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+      case "providers_status":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      case "task_get": {
+        taskGetCalls += 1;
+        const completed = taskGetCalls > 1;
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            id: "analysis-status-poll",
+            type: "ANALYSIS",
+            status: completed ? "SUCCESS" : "RUNNING",
+            title: "600000.SH stock_full",
+            progress: completed ? 100 : 90,
+            report_id: completed ? 88 : undefined,
+            started_at: "2026-06-24T12:00:00Z",
+            finished_at: completed ? "2026-06-24T12:03:00Z" : undefined,
+            created_at: "2026-06-24T12:00:00Z",
+          },
+        };
+      }
+      case "task_events":
+        const taskEventPayload = payload as { afterEventId?: number } | undefined;
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: taskEventPayload?.afterEventId === 0
+              ? [
+                { id: 1, event_type: "TASK_STARTED", payload: "{\"progress\":5}", created_at: "2026-06-24T12:00:01Z" },
+                { id: 2, event_type: "TASK_PROGRESS", payload: "{\"stage\":\"stream_chunk\",\"progress\":90,\"message\":\"AI 输出已生成\"}", created_at: "2026-06-24T12:00:04Z" },
+              ]
+              : [],
+          },
+        };
+      case "analysis_task_subscribe":
+        return { emitted: 0, last_event_id: 2 };
+      case "stock_profile":
+        return {
+          code: 0,
+          message: "ok",
+          data: { symbol: "600000.SH", name: "浦发银行", code: "600000", exchange: "SH", market: "CN" },
+        };
+      case "report_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            id: 88,
+            task_id: "analysis-status-poll",
+            symbol: "600000.SH",
+            title: "600000.SH stock_full",
+            analysis_type: "stock_full",
+            content_markdown: "## 完成态正文\n- 任务状态轮询已更新",
+            model_name: "gpt-4.1-mini",
+            created_at: "2026-06-24T12:03:00Z",
+            updated_at: "2026-06-24T12:03:00Z",
+          },
+        };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+
+  expect(await screen.findByText("RUNNING")).toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.getByText("SUCCESS")).toBeInTheDocument();
+  }, { timeout: 2_000 });
+  expect(screen.getByRole("button", { name: /停止生成/ })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /查看报告/ })).toBeEnabled();
+  expect(await screen.findByText("完成态正文")).toBeInTheDocument();
+  expect(calls).toContainEqual({ command: "task_get", payload: { taskId: "analysis-status-poll" } });
+  expect(calls).toContainEqual({ command: "task_events", payload: { taskId: "analysis-status-poll", afterEventId: 2 } });
+});
+
 test("AI 分析运行页成功任务可跳转已生成报告", async () => {
   window.location.hash = "#/analysis/running?taskId=analysis-success";
   const calls: Array<{ command: string; payload?: any }> = [];
@@ -3179,6 +3629,12 @@ test("AI 分析运行页成功任务可跳转已生成报告", async () => {
             ],
           },
         };
+      case "stock_profile":
+        return {
+          code: 0,
+          message: "ok",
+          data: { symbol: "600000.SH", name: "浦发银行", code: "600000", exchange: "SH", market: "CN" },
+        };
       case "report_get":
         return {
           code: 0,
@@ -3205,18 +3661,100 @@ test("AI 分析运行页成功任务可跳转已生成报告", async () => {
   render(<App />);
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "600000.SH technical" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "浦发银行（600000.SH） 技术面分析" })).toBeInTheDocument();
   });
   expect(calls).toContainEqual({ command: "task_get", payload: { taskId: "analysis-success" } });
   expect(calls).toContainEqual({ command: "task_events", payload: { taskId: "analysis-success", afterEventId: 0 } });
   expect(calls.some((call) => call.command === "analysis_task_subscribe")).toBe(false);
   expect(screen.getByText("SUCCESS")).toBeInTheDocument();
+  expect(screen.getByText("技术结论")).toBeInTheDocument();
+  expect(screen.getByText("趋势偏强")).toBeInTheDocument();
+  expect(screen.queryByText("暂无流式输出")).not.toBeInTheDocument();
+  expect(screen.queryByText("内容持续生成中...")).not.toBeInTheDocument();
+  expect(document.querySelectorAll(".analysis-running-step-spinner")).toHaveLength(0);
 
   fireEvent.click(screen.getByRole("button", { name: /查看报告/ }));
 
   await waitFor(() => {
     expect(window.location.hash).toBe("#/reports/88");
   });
+});
+
+test("AI 分析运行页缺少 chunk 时用已生成报告回填流式输出", async () => {
+  window.location.hash = "#/analysis/running?taskId=analysis-success-no-chunk";
+  const calls: Array<{ command: string; payload?: any }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
+    switch (command) {
+      case "core_health":
+        return { code: 0, message: "ok", data: { status: "ok", version: "0.1.0" } };
+      case "providers_status":
+        return { code: 0, message: "ok", data: { items: [] } };
+      case "notifications_unread_count":
+        return { code: 0, message: "ok", data: { count: 0 } };
+      case "task_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            id: "analysis-success-no-chunk",
+            type: "ANALYSIS",
+            status: "SUCCESS",
+            title: "600000.SH stock_full",
+            progress: 100,
+            report_id: 88,
+            started_at: "2026-06-24T12:00:00Z",
+            finished_at: "2026-06-24T12:03:00Z",
+            created_at: "2026-06-24T12:00:00Z",
+          },
+        };
+      case "task_events":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              { id: 1, event_type: "TASK_STARTED", payload: "{\"progress\":5}", created_at: "2026-06-24T12:00:01Z" },
+              { id: 2, event_type: "TASK_PROGRESS", payload: "{\"stage\":\"stream_chunk\",\"progress\":90,\"message\":\"AI 输出已生成\"}", created_at: "2026-06-24T12:00:04Z" },
+              { id: 3, event_type: "TASK_SUCCESS", payload: "{\"progress\":100}", created_at: "2026-06-24T12:03:00Z" },
+            ],
+          },
+        };
+      case "stock_profile":
+        return {
+          code: 0,
+          message: "ok",
+          data: { symbol: "600000.SH", name: "浦发银行", code: "600000", exchange: "SH", market: "CN" },
+        };
+      case "report_get":
+        return {
+          code: 0,
+          message: "ok",
+          data: {
+            id: 88,
+            task_id: "analysis-success-no-chunk",
+            symbol: "600000.SH",
+            title: "600000.SH stock_full",
+            analysis_type: "stock_full",
+            content_markdown: "## 回填结论\n- 报告正文已生成",
+            model_name: "gpt-4.1-mini",
+            created_at: "2026-06-24T12:03:00Z",
+            updated_at: "2026-06-24T12:03:00Z",
+          },
+        };
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  });
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(screen.getByText("回填结论")).toBeInTheDocument();
+  });
+  expect(screen.getByText("报告正文已生成")).toBeInTheDocument();
+  expect(screen.queryByText("暂无流式输出")).not.toBeInTheDocument();
+  expect(calls).toContainEqual({ command: "report_get", payload: { id: 88 } });
 });
 
 test("分析报告历史页面展示空态并按报告范围搜索", async () => {
@@ -3442,12 +3980,12 @@ test("资讯中心页面加载真实市场新闻并按资讯范围搜索", async
     expect(calls).toContainEqual({ command: "open_external_url", payload: { url: "https://news.example.com/optical" } });
   });
   expect(withoutGlobalNotificationUnreadCalls(calls)).toEqual([
-    { command: "news_market", payload: { market: "CN", limit: 20 } },
-    { command: "news_stats", payload: { market: "CN", limit: 20 } },
-    { command: "news_hot_topics", payload: { market: "CN", limit: 20 } },
+    { command: "news_market", payload: { market: "CN", limit: 80 } },
+    { command: "news_stats", payload: { market: "CN", limit: 80 } },
+    { command: "news_hot_topics", payload: { market: "CN", limit: 80 } },
     {
       command: "search_news",
-      payload: { payload: { keyword: "光模块", symbols: [], limit: 20, offset: 0, sort: "relevance" } },
+      payload: { payload: { keyword: "光模块", symbols: [], limit: 80, offset: 0, sort: "relevance" } },
     },
     { command: "open_external_url", payload: { url: "https://news.example.com/optical" } },
   ]);
@@ -3518,8 +4056,30 @@ test("分析报告详情页面按路由 ID 读取真实报告", async () => {
           title: "贵州茅台 个股综合分析",
           analysis_type: "stock_full",
           model_name: "gpt-4.1-mini",
-          content_markdown: "## 核心结论\n\n仅作研究辅助，不构成投资建议。",
+          content_markdown: [
+            "---",
+            'schema_version: 1 prompt_key: "{{prompt_key}}"',
+            "analysis_type: stock_full",
+            "---",
+            "",
+            "# 贵州茅台 个股综合分析",
+            "",
+            "## 1. 核心结论",
+            "",
+            "- **事实**：收盘上涨。",
+            "- **观点**：仅作研究辅助，不构成投资建议。",
+            "",
+            "## 2. 风险提示",
+            "",
+            "请查看 [原始公告](https://example.com/report)。",
+          ].join("\n"),
           risk_summary: "估值波动风险",
+          input_snapshot: {
+            symbol: "CN:SH:600519",
+            analysis_type: "stock_full",
+            prompt_template_id: 9,
+            raw_prompt: "System: 你是投研罗盘的 AI 投研辅助助手。\nUser: 请基于以下数据分析贵州茅台。",
+          },
           favorite: false,
           created_at: "2026-06-22T09:00:00Z",
           updated_at: "2026-06-22T10:00:00Z",
@@ -3544,12 +4104,29 @@ test("分析报告详情页面按路由 ID 读取真实报告", async () => {
   await waitFor(() => {
     expect(screen.getByRole("heading", { name: "贵州茅台 个股综合分析" })).toBeInTheDocument();
   });
-  expect(screen.getAllByText(/核心结论/).length).toBeGreaterThan(0);
+  expect(screen.getByRole("heading", { level: 2, name: "1. 核心结论" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "1. 核心结论" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "2. 风险提示" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /3\\. 1\\. 核心结论/ })).not.toBeInTheDocument();
+  expect(document.querySelector(".report-markdown-content pre")).not.toBeInTheDocument();
+  expect(document.querySelector(".report-markdown-content strong")?.textContent).toBe("事实");
+  expect(screen.getByRole("link", { name: "原始公告" })).toHaveAttribute("href", "https://example.com/report");
   expect(screen.getByText(/仅作研究辅助，不构成投资建议/)).toBeInTheDocument();
+  expect(screen.queryByText(/schema_version/)).not.toBeInTheDocument();
   expect(screen.getByText(/估值波动风险/)).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "复制输入快照" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "复制输入快照" })).toBeInTheDocument();
+  expect(screen.getByText("原始 Prompt")).toBeInTheDocument();
+  expect(screen.getByText(/请基于以下数据分析贵州茅台/)).toBeInTheDocument();
+  const snapshotCard = screen.getByRole("heading", { name: "输入快照" }).closest("section");
+  expect(snapshotCard).not.toBeNull();
+  expect(within(snapshotCard as HTMLElement).getByText("Prompt 模板")).toBeInTheDocument();
+  expect(within(snapshotCard as HTMLElement).getAllByText("9").length).toBeGreaterThan(0);
+  expect(within(snapshotCard as HTMLElement).getByText("使用模型")).toBeInTheDocument();
+  expect(within(snapshotCard as HTMLElement).getByText("gpt-4.1-mini")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "折叠目录" }));
   expect(screen.queryByRole("button", { name: /1\\. 核心结论/ })).not.toBeInTheDocument();
+  expect(document.querySelector(".report-detail-layout-toc-collapsed")).toBeInTheDocument();
+  expect(document.querySelector(".report-toc-panel-collapsed")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "展开目录" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "收藏报告" }));
   await waitFor(() => {
@@ -3919,6 +4496,54 @@ test("任务历史页面时间范围筛选使用后端任务日期而不是展�
   expect(screen.getByText("浦发银行 个股综合分析")).toBeInTheDocument();
 });
 
+test("任务历史今日成功只统计本地今天完成的成功任务", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-06-27T12:00:00+08:00"));
+  window.location.hash = "#/tasks";
+  mockIPC((command) => {
+    if (command === "task_list") {
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          items: [
+            {
+              id: "search-rebuild-yesterday",
+              type: "SEARCH_REBUILD",
+              status: "SUCCESS",
+              title: "搜索索引重建",
+              progress: 100,
+              started_at: "2026-06-26T10:45:31+08:00",
+              finished_at: "2026-06-26T10:45:31+08:00",
+              created_at: "2026-06-26T10:45:31+08:00",
+            },
+            {
+              id: "analysis-failed-today",
+              type: "ANALYSIS",
+              status: "FAILED",
+              title: "浦发银行 个股综合分析",
+              progress: 80,
+              started_at: "2026-06-27T09:00:00+08:00",
+              finished_at: "2026-06-27T09:01:00+08:00",
+              created_at: "2026-06-27T09:00:00+08:00",
+            },
+          ],
+        },
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  });
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(screen.getByText("search-rebuild-yesterday")).toBeInTheDocument();
+  });
+  const successCard = screen.getByText("今日成功").closest("section");
+  expect(successCard).not.toBeNull();
+  expect(successCard).toHaveTextContent("0 个");
+});
+
 test("任务历史成功分析任务可跳转已生成报告", async () => {
   window.location.hash = "#/tasks";
   const calls: Array<{ command: string; payload?: any }> = [];
@@ -4030,10 +4655,12 @@ test("任务历史搜索索引重建任务展示为数据重建且不显示报�
 test("任务历史失败分析任务可按原创建事件生成重试任务", async () => {
   window.location.hash = "#/tasks";
   const calls: Array<{ command: string; payload?: any }> = [];
+  let taskListCalls = 0;
   mockIPC((command, payload) => {
     calls.push({ command, payload });
     switch (command) {
       case "task_list":
+        taskListCalls += 1;
         return {
           code: 0,
           message: "ok",
@@ -4050,6 +4677,20 @@ test("任务历史失败分析任务可按原创建事件生成重试任务", as
                 finished_at: "2026-06-24T12:01:00Z",
                 created_at: "2026-06-24T12:00:00Z",
               },
+              ...(taskListCalls > 1
+                ? [
+                    {
+                      id: "analysis-retry",
+                      type: "ANALYSIS",
+                      status: "PENDING",
+                      title: "浦发银行 个股综合分析",
+                      progress: 0,
+                      started_at: "",
+                      finished_at: "",
+                      created_at: "2026-06-24T12:02:00Z",
+                    },
+                  ]
+                : []),
             ],
           },
         };
@@ -4098,10 +4739,6 @@ test("任务历史失败分析任务可按原创建事件生成重试任务", as
         };
       case "analysis_task_create":
         return { code: 0, message: "ok", data: { task_id: "analysis-retry", status: "PENDING" } };
-      case "task_get":
-        return { code: 0, message: "ok", data: { id: "analysis-retry", type: "ANALYSIS", status: "PENDING", title: "重试任务", progress: 0 } };
-      case "analysis_task_subscribe":
-        return { code: 0, message: "ok", data: { emitted: 0, last_event_id: 0 } };
       default:
         throw new Error(`unexpected command ${command}`);
     }
@@ -4129,6 +4766,11 @@ test("任务历史失败分析任务可按原创建事件生成重试任务", as
       },
     });
   });
+  await waitFor(() => {
+    expect(calls.filter((call) => call.command === "task_list")).toHaveLength(2);
+  });
+  expect(window.location.hash).toBe("#/tasks");
+  expect(calls.map((call) => call.command)).not.toContain("analysis_task_subscribe");
 });
 
 test("TopBar 运行期新增未读通知时按设置触发系统通知", async () => {

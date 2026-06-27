@@ -264,7 +264,7 @@ market_quote(symbol, forceRefresh?)
 market_kline(symbol, period, adjust, limit)
 market_indicators(symbol, period, adjust, limit, indicators)
 news_list(symbol, limit)
-news_market(market, limit)
+news_market(market, limit, forceRefresh?)
 open_external_url(url)
 watchlist_list()
 watchlist_create(payload)
@@ -1507,7 +1507,8 @@ POST /api/news/market
 ```json
 {
   "market": "CN",
-  "limit": 20
+  "limit": 20,
+  "force_refresh": false
 }
 ```
 
@@ -1537,7 +1538,7 @@ POST /api/news/market
 }
 ```
 
-新闻 `limit` 必须为 1-100。Rust `news_list` 和 `news_market` 必须在转发前做同样校验，非法参数不得进入 Go core。
+新闻 `limit` 必须为 1-100。Rust `news_list` 和 `news_market` 必须在转发前做同样校验，非法参数不得进入 Go core。`news_market` 的 `force_refresh` 默认为 `false`；资讯中心手动刷新可传 `true` 绕过市场新闻数量充足的短缓存，直接调用新闻 Provider 获取最新列表。Provider 失败时仍可返回已有缓存，避免资讯中心空白。
 
 Go core 输出新闻前必须执行 HTTP(S) URL scheme 校验和 `content_hash` 去重。新闻缓存写入 `news_items`，按 30-120 分钟缓存策略读取；缓存不足时通过合规 `news.Provider` 拉取。首版不接公告、研报、资金流专用数据源。
 
@@ -1688,7 +1689,7 @@ POST /api/reports/delete
 ```
 
 报告删除使用软删除。`list` 和 `get` 只返回未删除报告，已删除报告详情按未找到处理。
-报告历史查询默认不返回完整 `input_snapshot`，避免一次性持仓输入进入普通历史浏览、复制和默认导出路径。
+报告历史查询默认不返回完整 `input_snapshot`，避免一次性持仓输入进入普通历史浏览、复制和默认导出路径；列表响应可从本地 `stocks` 基础资料补充非敏感 `stock_name`，供前端展示中文友好的关联股票。
 Rust `report_get`、`report_delete`、`report_update` 和 `report_export` 必须在转发前校验 `id > 0`，`report_batch_delete` 必须校验 ids 非空且全部为正整数，非法参数不得进入 Go core。
 
 检查更新：

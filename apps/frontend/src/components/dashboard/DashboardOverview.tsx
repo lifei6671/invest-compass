@@ -148,6 +148,14 @@ function HotNewsCard(props: { state: DashboardViewState }) {
 
 function RecentReportsCard(props: { state: DashboardViewState }) {
   const rows = props.state.summary.recent_reports.slice(0, 5);
+  const columns: TableProps<DashboardRecentReport>["columns"] = [
+    { title: "报告标题", dataIndex: "title", width: 210, ellipsis: true, render: (value: string, record) => <span className="block truncate font-medium text-slate-800">{formatReportTitle(value, record)}</span> },
+    { title: "关联股票", key: "stock", width: 150, ellipsis: true, render: (_: unknown, record) => <span className="block truncate">{formatReportStock(record)}</span> },
+    { title: "分析类型", dataIndex: "analysis_type", width: 100, render: (value?: string) => <AnalysisTypeTag value={value} /> },
+    { title: "模型", dataIndex: "model_name", width: 86, ellipsis: true, render: (value?: string) => value || "--" },
+    { title: "生成时间", dataIndex: "created_at", width: 112, render: (value?: string) => formatShortDateTime(value) },
+    { title: "操作", key: "action", width: 64, render: (_: unknown, record) => <Link className="text-[#1677ff]" to={`/reports/${record.id}`}>查看</Link> },
+  ];
   return (
     <DashboardCard className="dashboard-card-fill h-[260px] overflow-hidden" title="最近分析报告">
       {rows.length > 0 ? (
@@ -160,14 +168,7 @@ function RecentReportsCard(props: { state: DashboardViewState }) {
             pagination={false}
             scroll={{ y: 142 }}
             dataSource={rows}
-            columns={[
-              { title: "报告标题", dataIndex: "title", width: 210, ellipsis: true, render: (value: string) => <span className="block truncate font-medium text-slate-800">{value}</span> },
-              { title: "关联股票", dataIndex: "symbol", width: 104, render: (value?: string) => value || "--" },
-              { title: "分析类型", dataIndex: "analysis_type", width: 100, render: (value?: string) => <AnalysisTypeTag value={value} /> },
-              { title: "模型", dataIndex: "model_name", width: 86, ellipsis: true, render: (value?: string) => value || "--" },
-              { title: "生成时间", dataIndex: "created_at", width: 112, render: (value?: string) => formatShortDateTime(value) },
-              { title: "操作", key: "action", width: 64, render: (_: unknown, record: { id: number }) => <Link className="text-[#1677ff]" to={`/reports/${record.id}`}>查看</Link> },
-            ]}
+            columns={columns}
           />
         </div>
       ) : (
@@ -389,8 +390,46 @@ function MetricLine(props: { label: string; value: string; tone: string }) {
   );
 }
 
+type DashboardRecentReport = DashboardViewState["summary"]["recent_reports"][number];
+
+function formatReportStock(report: DashboardRecentReport) {
+  const symbol = report.symbol?.trim();
+  const stockName = report.stock_name?.trim();
+  if (stockName && symbol) {
+    return `${stockName}（${symbol}）`;
+  }
+  return stockName || symbol || "--";
+}
+
+function formatReportTitle(title: string | undefined, report: DashboardRecentReport) {
+  const rawTitle = title?.trim() || "";
+  const analysisType = analysisTypeLabel(report.analysis_type);
+  const stockLabel = report.stock_name?.trim() || report.symbol?.trim();
+  if (/stock_full|technical|fundamental|news|custom/.test(rawTitle) && stockLabel) {
+    return `${stockLabel} ${analysisType}报告`;
+  }
+  return rawTitle.replace(/\b(stock_full|technical|fundamental|news|custom)\b/g, (value) => analysisTypeLabel(value)) || "--";
+}
+
+function analysisTypeLabel(value?: string) {
+  switch ((value || "").trim()) {
+    case "stock_full":
+      return "个股综合分析";
+    case "technical":
+      return "技术面分析";
+    case "fundamental":
+      return "基本面分析";
+    case "news":
+      return "消息面分析";
+    case "custom":
+      return "自定义分析";
+    default:
+      return value?.trim() || "个股综合分析";
+  }
+}
+
 function AnalysisTypeTag(props: { value?: string }) {
-  const value = props.value || "深度分析";
+  const value = analysisTypeLabel(props.value);
   const tone = value.includes("基本") ? "green" : value.includes("技术") ? "orange" : "blue";
   const className =
     tone === "green"

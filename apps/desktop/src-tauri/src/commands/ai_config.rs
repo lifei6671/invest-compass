@@ -1,4 +1,5 @@
 use crate::{
+    commands::blocking::post_core_api_with_recovery,
     desktop_runtime,
     sidecar::{runtime_core_binary_path, CoreClient, CoreState},
 };
@@ -325,23 +326,38 @@ impl LocalCredentialVault {
 
 /// 读取 AI 配置列表，固定转发到 Go core `/api/ai/configs/list`。
 #[tauri::command]
-pub fn ai_config_list(
+pub async fn ai_config_list(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
 ) -> Result<serde_json::Value, String> {
     post_ai_config_read_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/ai/configs/list",
-        &AIConfigListRequest {},
+        AIConfigListRequest {},
     )
+    .await
 }
 
 /// 保存 AI 配置元数据，固定转发到 Go core `/api/ai/configs/save`。
 #[tauri::command]
-pub fn ai_config_save(
+pub async fn ai_config_save(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
+    payload: AIConfigSavePayload,
+) -> Result<serde_json::Value, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ai_config_save_blocking(app_handle, state, payload)
+    })
+    .await
+    .map_err(|error| format!("ai config save task failed: {error}"))?
+}
+
+/// 在线程池保存 AI 配置，避免 vault 写入和 Go core 请求阻塞 Tauri command。
+fn ai_config_save_blocking(
+    app_handle: AppHandle,
+    state: CoreState,
     payload: AIConfigSavePayload,
 ) -> Result<serde_json::Value, String> {
     let client = ai_config_client(&app_handle, &state)?;
@@ -370,10 +386,13 @@ pub async fn ai_config_test(
     state: State<'_, CoreState>,
     payload: AIConfigTestPayload,
 ) -> Result<serde_json::Value, String> {
-    let client = ai_config_client(&app_handle, &state)?;
-    tauri::async_runtime::spawn_blocking(move || ai_config_test_blocking(client, payload))
-        .await
-        .map_err(|error| format!("ai config test task failed: {error}"))?
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let client = ai_config_client(&app_handle, &state)?;
+        ai_config_test_blocking(client, payload)
+    })
+    .await
+    .map_err(|error| format!("ai config test task failed: {error}"))?
 }
 
 /// 执行阻塞式模型连通性测试请求，避免外部 Provider 网络等待卡住 Tauri command 调度线程。
@@ -404,9 +423,23 @@ fn ai_config_test_blocking(
 
 /// 删除 AI 配置元数据和可选本地 vault 密钥，固定转发到 Go core `/api/ai/configs/delete`。
 #[tauri::command]
-pub fn ai_config_delete(
+pub async fn ai_config_delete(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
+    payload: AIConfigDeletePayload,
+) -> Result<serde_json::Value, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ai_config_delete_blocking(app_handle, state, payload)
+    })
+    .await
+    .map_err(|error| format!("ai config delete task failed: {error}"))?
+}
+
+/// 在线程池删除 AI 配置和本地 vault 密钥，避免文件删除阻塞 command。
+fn ai_config_delete_blocking(
+    app_handle: AppHandle,
+    state: CoreState,
     payload: AIConfigDeletePayload,
 ) -> Result<serde_json::Value, String> {
     let client = ai_config_client(&app_handle, &state)?;
@@ -438,27 +471,16 @@ fn ai_config_client(app_handle: &AppHandle, state: &CoreState) -> Result<CoreCli
 }
 
 /// 模型配置读取类命令统一走可恢复调用，避免启动瞬间旧端口失效导致设置页初始化误报。
-fn post_ai_config_read_api<TRequest>(
-    app_handle: &AppHandle,
-    state: &CoreState,
-    path: &str,
-    payload: &TRequest,
+async fn post_ai_config_read_api<TRequest>(
+    app_handle: AppHandle,
+    state: CoreState,
+    path: &'static str,
+    payload: TRequest,
 ) -> Result<serde_json::Value, String>
 where
-    TRequest: Serialize,
+    TRequest: Serialize + Send + 'static,
 {
-    let binary_path = runtime_core_binary_path();
-    let workspace_path =
-        desktop_runtime::default_workspace_path(app_handle).map_err(|error| error.to_string())?;
-    state
-        .post_api_with_recovery(
-            &binary_path,
-            &workspace_path,
-            Duration::from_secs(5),
-            path,
-            payload,
-        )
-        .map_err(|error| error.to_string())
+    post_core_api_with_recovery(state, app_handle, path, payload).await
 }
 
 /// 构造模型连通性测试请求，真实密钥只在 Rust 内部读取后注入给 Go core。

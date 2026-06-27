@@ -10,7 +10,9 @@ pub struct OpenExternalURLResult {
 #[tauri::command]
 pub async fn open_external_url(url: String) -> Result<OpenExternalURLResult, String> {
     let validated = validate_external_https_url(&url)?;
-    open_system_browser(&validated)?;
+    tauri::async_runtime::spawn_blocking(move || open_system_browser(&validated))
+        .await
+        .map_err(|error| format!("open external url task failed: {error}"))??;
     Ok(OpenExternalURLResult { ok: true })
 }
 

@@ -40,9 +40,24 @@ export function NewsFilterCard(props: NewsFilterCardProps) {
           <span>信息来源</span>
           <Select
             value={props.filters.source}
-            options={["全部来源", "财联社", "证券时报", "芯榜", "界面新闻", "同花顺资讯", "上海证券报", "Wind 资讯", "第一财经", "证券日报"].map(
-              (value) => ({ value, label: value }),
-            )}
+            options={[
+              "全部来源",
+              "财联社电报",
+              "新浪财经",
+              "华尔街见闻-全球7x24",
+              "TradingView-PANews",
+              "东方财富研报",
+              "东方财富行业研究",
+              "东方财富公告",
+              "证券时报",
+              "芯榜",
+              "界面新闻",
+              "同花顺资讯",
+              "上海证券报",
+              "Wind 资讯",
+              "第一财经",
+              "证券日报",
+            ].map((value) => ({ value, label: value }))}
             onChange={(source) => props.onChange({ source })}
           />
         </label>

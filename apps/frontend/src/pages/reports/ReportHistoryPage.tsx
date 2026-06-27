@@ -111,7 +111,8 @@ export function ReportHistoryPage() {
         !keyword ||
         report.title.toLowerCase().includes(keyword) ||
         report.stockName.toLowerCase().includes(keyword) ||
-        report.stockCode.toLowerCase().includes(keyword);
+        report.stockCode.toLowerCase().includes(keyword) ||
+        (report.stockSymbol || "").toLowerCase().includes(keyword);
       const analysisTypeMatched = appliedFilters.analysisType === "全部类型" || report.analysisType === appliedFilters.analysisType;
       const modelMatched = appliedFilters.model === "全部模型" || report.model === appliedFilters.model;
       const statusMatched = appliedFilters.status === "全部状态" || statusLabelMap[report.status] === appliedFilters.status;
@@ -309,12 +310,16 @@ function ReportRiskNotice() {
 }
 
 function reportItemFromSearchResult(item: DocumentSearchItem): ReportItem {
+  const analysisType = analysisTypeFromReportTitle(item.title);
+  const stockCode = displayStockCode(item.symbol);
+  const stockName = displayStockName(undefined, item.symbol, item.title, analysisType);
   return {
     id: item.ref_id || item.doc_uid,
-    title: item.title,
-    stockName: item.symbol || "—",
-    stockCode: item.symbol || "—",
-    analysisType: analysisTypeFromReportTitle(item.title),
+    title: friendlyReportTitle(item.title, stockName, stockCode, analysisType),
+    stockName,
+    stockCode,
+    stockSymbol: item.symbol || "",
+    analysisType,
     model: item.source || "—",
     generatedAt: formatSearchSourceTime(item.source_time),
     generatedDate: reportDateKey(item.source_time),
@@ -326,12 +331,16 @@ function reportItemFromSearchResult(item: DocumentSearchItem): ReportItem {
 
 function reportItemFromAnalysisReport(report: AnalysisReport): ReportItem {
   const generatedValue = report.created_at || report.updated_at || "";
+  const analysisType = analysisTypeFromBackend(report.analysis_type);
+  const stockCode = displayStockCode(report.symbol);
+  const stockName = displayStockName(report.stock_name, report.symbol, report.title, analysisType);
   return {
     id: String(report.id),
-    title: report.title || "未命名报告",
-    stockName: displayStockName(report.symbol),
-    stockCode: report.symbol || "—",
-    analysisType: analysisTypeFromBackend(report.analysis_type),
+    title: friendlyReportTitle(report.title, stockName, stockCode, analysisType),
+    stockName,
+    stockCode,
+    stockSymbol: report.symbol || "",
+    analysisType,
     model: report.model_name || "—",
     generatedAt: formatReportTime(generatedValue),
     generatedDate: reportDateKey(generatedValue),
@@ -361,6 +370,8 @@ function analysisTypeFromReportTitle(title: string): ReportItem["analysisType"] 
 
 function analysisTypeFromBackend(value: string | undefined): ReportItem["analysisType"] {
   switch ((value || "").toLowerCase()) {
+    case "stock_full":
+      return "个股综合分析";
     case "technical":
       return "技术面分析";
     case "fundamental":
@@ -372,8 +383,62 @@ function analysisTypeFromBackend(value: string | undefined): ReportItem["analysi
   }
 }
 
-function displayStockName(symbol: string): string {
-  return symbol || "—";
+function displayStockName(value: string | undefined, symbol: string | undefined, title: string, analysisType: ReportItem["analysisType"]): string {
+  const explicitName = (value || "").trim();
+  if (explicitName) {
+    return explicitName;
+  }
+  const titleName = stockNameFromTitle(title, analysisType);
+  if (titleName) {
+    return titleName;
+  }
+  return displayStockCode(symbol);
+}
+
+function displayStockCode(symbol: string | undefined): string {
+  const trimmed = (symbol || "").trim();
+  if (!trimmed) {
+    return "—";
+  }
+  const parts = trimmed.split(":");
+  const lastPart = parts[parts.length - 1] || trimmed;
+  return /^[0-9]{6}$/.test(lastPart) ? lastPart : trimmed;
+}
+
+function stockNameFromTitle(title: string, analysisType: ReportItem["analysisType"]): string {
+  const trimmed = title.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const markerIndex = trimmed.indexOf(analysisType);
+  if (markerIndex <= 0) {
+    return "";
+  }
+  const candidate = trimmed.slice(0, markerIndex).replace(/[（(].*$/, "").trim();
+  return candidate && !looksLikeStockSymbol(candidate) ? candidate : "";
+}
+
+function friendlyReportTitle(title: string, stockName: string, stockCode: string, analysisType: ReportItem["analysisType"]): string {
+  const trimmed = title.trim();
+  if (trimmed && !needsFriendlyReportTitle(trimmed)) {
+    return trimmed;
+  }
+  const hasName = stockName && stockName !== "—" && stockName !== stockCode && !looksLikeStockSymbol(stockName);
+  if (hasName && stockCode && stockCode !== "—") {
+    return `${stockName}（${stockCode}）${analysisType}报告`;
+  }
+  if (stockCode && stockCode !== "—") {
+    return `${stockCode} ${analysisType}报告`;
+  }
+  return `${analysisType}报告`;
+}
+
+function needsFriendlyReportTitle(title: string): boolean {
+  return /^[A-Z]{2}:[A-Z]{2}:[0-9A-Z.-]+/i.test(title) || /\b(stock_full|technical|fundamental|position)\b/i.test(title);
+}
+
+function looksLikeStockSymbol(value: string): boolean {
+  return /^[A-Z]{2}:[A-Z]{2}:[0-9A-Z.-]+$/i.test(value) || /^[0-9]{6}$/.test(value);
 }
 
 function formatSearchSourceTime(value: string): string {

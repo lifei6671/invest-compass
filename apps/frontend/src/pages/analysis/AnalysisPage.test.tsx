@@ -5,7 +5,7 @@ import "@testing-library/jest-dom/vitest";
 import "../../test/setupDom";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { AnalysisPage } from "./AnalysisPage";
 import { APP_FONT } from "../../styles/fonts";
@@ -160,7 +160,9 @@ test("URL 指定股票未精确匹配时不静默选择搜索第一项", async (
 });
 
 test("股票上下文预览按 A 股口径展示百分比和涨跌颜色", async () => {
-  mockIPC((command) => {
+  const calls: Array<{ command: string; payload?: unknown }> = [];
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
     if (command === "ai_config_list") {
       return { code: 0, message: "ok", data: { items: [] } };
     }
@@ -246,9 +248,11 @@ test("股票上下文预览按 A 股口径展示百分比和涨跌颜色", async
   expect(screen.getByText("-6.02")).toHaveClass("analysis-down");
   expect(screen.getByText("-3.22%")).toHaveClass("analysis-down");
   expect(screen.getByText("3.98%")).toBeInTheDocument();
+  expect(screen.getAllByText("149.78亿").length).toBeGreaterThanOrEqual(2);
   expect(screen.queryByText("398.00%")).not.toBeInTheDocument();
   expect(screen.getByText("-8.33%")).toHaveClass("analysis-down");
   expect(screen.getByText("10.00%")).toHaveClass("analysis-up");
+  expect(calls).toContainEqual({ command: "market_quote", payload: { symbol: "CN:SZ:301217", forceRefresh: true } });
 });
 
 test("选择股票后右侧输出预览展示已渲染的 Prompt 内容", async () => {
@@ -267,8 +271,8 @@ test("选择股票后右侧输出预览展示已渲染的 Prompt 内容", async 
               name: "个股综合模板",
               type: "stock_full",
               description: "",
-              content: "# {{stock_name}} 投研分析\n\n现价：{{current_price}}\n行业：{{industry}}\n相关新闻：{{news_summary}}\n风险偏好：{{risk_preference}}",
-              variables: ["stock_name", "current_price", "industry", "news_summary", "risk_preference"],
+              content: "# {{stock_name}} 投研分析\n\n现价：{{current_price}}\n行业：{{industry}}\n日K：{{daily_klines}}\n相关新闻：{{news_summary}}\n风险偏好：{{risk_preference}}",
+              variables: ["stock_name", "current_price", "industry", "daily_klines", "news_summary", "risk_preference"],
               is_builtin: true,
             },
           ],
@@ -305,7 +309,16 @@ test("选择股票后右侧输出预览展示已渲染的 Prompt 内容", async 
       };
     }
     if (command === "market_kline") {
-      return { code: 0, message: "ok", data: { items: [] } };
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          items: [
+            { symbol: "CN:SZ:301217", period: "day", adjust: "qfq", trade_date: "2026-06-24", open: 180.1, high: 185.2, low: 178.6, close: 183.27, volume: 120000, amount: 21992400 },
+            { symbol: "CN:SZ:301217", period: "day", adjust: "qfq", trade_date: "2026-06-25", open: 183.4, high: 186.5, low: 181.2, close: 184.9, volume: 135000, amount: 24961500 },
+          ],
+        },
+      };
     }
     if (command === "market_indicators") {
       return { code: 0, message: "ok", data: { symbol: "CN:SZ:301217", period: "day", adjust: "qfq", indicators: {} } };
@@ -322,6 +335,8 @@ test("选择股票后右侧输出预览展示已渲染的 Prompt 内容", async 
   expect(await screen.findByRole("heading", { name: "铜冠铜箔 投研分析" })).toBeInTheDocument();
   expect(screen.getByText("现价：183.27")).toBeInTheDocument();
   expect(screen.getByText("行业：元器件")).toBeInTheDocument();
+  expect(screen.getByText(/date=2026-06-24 open=180.10 high=185.20 low=178.60 close=183.27 volume=120000 amount=21992400/)).toBeInTheDocument();
+  expect(screen.queryByText(/变量缺失: daily_klines/)).not.toBeInTheDocument();
   expect(screen.getByText("相关新闻：铜冠铜箔扩产项目进展顺利")).toBeInTheDocument();
   expect(screen.getByText("风险偏好：中等")).toBeInTheDocument();
   expect(screen.queryByText("暂无输出内容")).not.toBeInTheDocument();
@@ -419,12 +434,18 @@ test("分析页可复制并导出当前 Prompt 预览 Markdown", async () => {
   removeChild.mockRestore();
 });
 
-test("AI 分析任务创建期间停止按钮保持禁用，避免假停止", async () => {
-  let resolveCreateTask: ((value: unknown) => void) | undefined;
-  const createTaskPromise = new Promise((resolve) => {
-    resolveCreateTask = resolve;
-  });
-  mockIPC((command) => {
+test("AI 分析页点击开始后进入创建中页面且不把敏感载荷写入路由状态", async () => {
+  const calls: Array<{ command: string; payload?: unknown }> = [];
+  let currentRoute = "";
+  let currentState: unknown = null;
+  function RouteProbe() {
+    const location = useLocation();
+    currentRoute = `${location.pathname}${location.search}`;
+    currentState = location.state;
+    return null;
+  }
+  mockIPC((command, payload) => {
+    calls.push({ command, payload });
     if (command === "ai_config_list") {
       return { code: 0, message: "ok", data: { items: [{ id: 1, name: "DeepSeek", provider: "deepseek", model_name: "deepseek-chat", api_key_ref: "local-vault://ai-config/1", has_api_key: true, is_default: true }] } };
     }
@@ -450,20 +471,31 @@ test("AI 分析任务创建期间停止按钮保持禁用，避免假停止", as
       return { code: 0, message: "ok", data: { items: [] } };
     }
     if (command === "analysis_task_create") {
-      return createTaskPromise;
+      return { code: 0, message: "ok", data: { task_id: "task-created-1" } };
     }
     throw new Error(`unexpected command ${command}`);
   });
 
-  renderPage("/analysis?symbol=CN:SZ:301217");
+  render(
+    <MemoryRouter initialEntries={["/analysis?symbol=CN:SZ:301217"]}>
+      <ConfigProvider theme={{ token: { fontFamily: APP_FONT, colorPrimary: "#1677ff" } }}>
+        <AntApp>
+          <AnalysisPage />
+          <RouteProbe />
+        </AntApp>
+      </ConfigProvider>
+    </MemoryRouter>,
+  );
 
   await screen.findByText("安徽铜冠铜箔集团股份有限公司");
   fireEvent.click(screen.getByRole("button", { name: /开始分析/ }));
 
-  expect(screen.getByRole("button", { name: /开始分析/ })).toBeDisabled();
-  expect(screen.getByRole("button", { name: /停止生成/ })).toBeDisabled();
-
-  resolveCreateTask?.({ code: 0, message: "ok", data: { task_id: "analysis-301217", status: "PENDING" } });
+  await waitFor(() => {
+    expect(currentRoute).toBe("/analysis/running?creating=1");
+  });
+  expect(calls.some((call) => call.command === "analysis_task_create")).toBe(false);
+  expect(JSON.stringify(currentState)).not.toContain("api_key_ref");
+  expect(JSON.stringify(currentState)).not.toContain("user_position");
 });
 
 test("分析类型切换会联动同分类 Prompt 模板", async () => {

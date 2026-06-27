@@ -1,4 +1,7 @@
-use crate::sidecar::{CoreState, SidecarError};
+use crate::{
+    commands::blocking::post_core_api,
+    sidecar::{CoreClient, CoreState, SidecarError},
+};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State, Window};
 
@@ -75,12 +78,22 @@ pub struct AnalysisTaskSubscribeResult {
 
 /// 创建分析任务，固定读取本地 vault 后转发到 Go core `/api/analysis/tasks`。
 #[tauri::command]
-pub fn analysis_task_create(
+pub async fn analysis_task_create(
     state: State<'_, CoreState>,
     payload: AnalysisTaskCreatePayload,
 ) -> Result<serde_json::Value, String> {
     validate_analysis_task_create_payload(&payload)?;
     let client = state.client().map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || analysis_task_create_blocking(client, payload))
+        .await
+        .map_err(|error| format!("analysis task create task failed: {error}"))?
+}
+
+/// 在线程池内创建分析任务，避免 vault 读取和 Core HTTP 请求阻塞 Tauri IPC。
+fn analysis_task_create_blocking(
+    client: CoreClient,
+    payload: AnalysisTaskCreatePayload,
+) -> Result<serde_json::Value, String> {
     let api_key_ref =
         resolve_ai_key_ref_for_config(&client, payload.ai_config_id, Some(&payload.api_key_ref))?;
     let resolved_api_key = resolve_ai_key_for_internal_request(&api_key_ref)?;
@@ -92,20 +105,23 @@ pub fn analysis_task_create(
 
 /// 取消分析任务，固定转发到 Go core `/api/tasks/cancel`。
 #[tauri::command]
-pub fn analysis_task_cancel(
+pub async fn analysis_task_cancel(
     state: State<'_, CoreState>,
     task_id: String,
 ) -> Result<serde_json::Value, String> {
     validate_task_id(&task_id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/tasks/cancel", &AnalysisTaskCancelRequest { task_id })
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/tasks/cancel",
+        AnalysisTaskCancelRequest { task_id },
+    )
+    .await
 }
 
 /// 订阅分析任务事件，固定读取 Go core SSE 后逐帧通过 Tauri event 分发。
 #[tauri::command]
-pub fn analysis_task_subscribe(
+pub async fn analysis_task_subscribe(
     window: Window,
     state: State<'_, CoreState>,
     task_id: String,
@@ -114,6 +130,20 @@ pub fn analysis_task_subscribe(
     validate_task_id(&task_id)?;
     validate_after_event_id(after_event_id)?;
     let client = state.client().map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        analysis_task_subscribe_blocking(window, client, task_id, after_event_id)
+    })
+    .await
+    .map_err(|error| format!("analysis task subscribe task failed: {error}"))?
+}
+
+/// 在线程池读取 Go core SSE 并转发 Tauri event，避免长连接占住 command 线程。
+fn analysis_task_subscribe_blocking(
+    window: Window,
+    client: CoreClient,
+    task_id: String,
+    after_event_id: i64,
+) -> Result<AnalysisTaskSubscribeResult, String> {
     let mut last_event_id = after_event_id;
     let task_id_for_event = task_id.clone();
     let emitted = client
@@ -142,27 +172,29 @@ pub fn analysis_task_subscribe(
 
 /// 读取任务历史列表，固定转发到 Go core `/api/tasks/list`。
 #[tauri::command]
-pub fn task_list(state: State<'_, CoreState>, limit: i32) -> Result<serde_json::Value, String> {
+pub async fn task_list(
+    state: State<'_, CoreState>,
+    limit: i32,
+) -> Result<serde_json::Value, String> {
     validate_task_list_limit(limit)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/tasks/list", &TaskListRequest { limit })
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/tasks/list", TaskListRequest { limit }).await
 }
 
 /// 读取任务详情，固定转发到 Go core `/api/tasks/get`。
 #[tauri::command]
-pub fn task_get(state: State<'_, CoreState>, task_id: String) -> Result<serde_json::Value, String> {
+pub async fn task_get(
+    state: State<'_, CoreState>,
+    task_id: String,
+) -> Result<serde_json::Value, String> {
     validate_task_id(&task_id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/tasks/get", &TaskGetRequest { task_id })
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/tasks/get", TaskGetRequest { task_id }).await
 }
 
 /// 增量读取任务事件，固定转发到 Go core `/api/tasks/events`。
 #[tauri::command]
-pub fn task_events(
+pub async fn task_events(
     state: State<'_, CoreState>,
     task_id: String,
     after_event_id: i64,
@@ -170,15 +202,15 @@ pub fn task_events(
     validate_task_id(&task_id)?;
     validate_after_event_id(after_event_id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(
-            "/api/tasks/events",
-            &TaskEventsRequest {
-                task_id,
-                after_event_id,
-            },
-        )
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/tasks/events",
+        TaskEventsRequest {
+            task_id,
+            after_event_id,
+        },
+    )
+    .await
 }
 
 /// 构造分析任务创建内部请求，安全凭据引用不进入 Go core 请求体。

@@ -38,6 +38,7 @@ type ReportSummary struct {
 	ID               int64  `json:"id"`
 	TaskID           string `json:"task_id"`
 	Symbol           string `json:"symbol"`
+	StockName        string `json:"stock_name"`
 	Title            string `json:"title"`
 	AnalysisType     string `json:"analysis_type"`
 	ModelName        string `json:"model_name"`
@@ -139,6 +140,7 @@ func reportsToSummaries(reports []report.Report) []ReportSummary {
 			ID:               item.ID,
 			TaskID:           item.TaskID,
 			Symbol:           item.Symbol,
+			StockName:        item.StockName,
 			Title:            item.Title,
 			AnalysisType:     item.AnalysisType,
 			ModelName:        item.ModelName,

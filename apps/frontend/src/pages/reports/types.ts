@@ -7,6 +7,7 @@ export type ReportItem = {
   title: string;
   stockName: string;
   stockCode: string;
+  stockSymbol?: string;
   analysisType: AnalysisType;
   model: string;
   generatedAt: string;

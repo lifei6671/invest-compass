@@ -48,6 +48,8 @@ const (
 	VariableQuote Variable = "quote"
 	// VariableKlineSummary 表示 K 线摘要。
 	VariableKlineSummary Variable = "kline_summary"
+	// VariableDailyKlines 表示逐日 K 线明细。
+	VariableDailyKlines Variable = "daily_klines"
 	// VariableIndicators 表示技术指标。
 	VariableIndicators Variable = "indicators"
 	// VariableNews 表示新闻资讯。
@@ -98,6 +100,7 @@ var (
 		VariableMarket:             {},
 		VariableQuote:              {},
 		VariableKlineSummary:       {},
+		VariableDailyKlines:        {},
 		VariableIndicators:         {},
 		VariableNews:               {},
 		VariableMarketNews:         {},

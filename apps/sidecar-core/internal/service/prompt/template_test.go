@@ -13,7 +13,7 @@ func TestValidateTemplateAcceptsSupportedTypesAndVariables(t *testing.T) {
 	template := Template{
 		Name:    "个股综合分析",
 		Type:    TemplateStockFull,
-		Content: "分析 {{stock_name}} {{stock_code}} {{market}} {{quote}} {{kline_summary}} {{indicators}} {{news}} {{data_asof}} {{context_quality}} {{prompt_key}} {{prompt_version}}，语言：{{analysis_language}}",
+		Content: "分析 {{stock_name}} {{stock_code}} {{market}} {{quote}} {{kline_summary}} {{daily_klines}} {{indicators}} {{news}} {{data_asof}} {{context_quality}} {{prompt_key}} {{prompt_version}}，语言：{{analysis_language}}",
 	}
 
 	if err := ValidateTemplate(template); err != nil {

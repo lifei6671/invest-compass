@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/pkg/xerr"
@@ -21,8 +22,13 @@ type BuildInput struct {
 	Market           string
 	Quote            string
 	KlineSummary     string
+	DailyKlines      string
 	Indicators       string
 	News             string
+	DataAsof         string
+	ContextQuality   string
+	PromptKey        string
+	PromptVersion    int
 	AnalysisLanguage string
 	UserQuestion     string
 	UserPosition     string
@@ -64,23 +70,34 @@ func buildPrompt(template Template, input BuildInput, analysisType string) (Buil
 	if err := validateBuildInput(input); err != nil {
 		return BuiltPrompt{}, err
 	}
+	if templateUsesVariable(template, VariableDailyKlines) && strings.TrimSpace(input.DailyKlines) == "" {
+		return BuiltPrompt{}, &xerr.Error{Code: xerr.PromptMissingData}
+	}
 
 	renderedTemplate := renderTemplate(template.Content, input)
+	contextLines := []string{
+		"分析类型：" + analysisType,
+		"股票名称：" + input.StockName,
+		"股票代码：" + input.StockCode,
+		"市场：" + input.Market,
+		"行情：" + input.Quote,
+		"K线摘要：" + input.KlineSummary,
+		"技术指标：" + input.Indicators,
+	}
+	if templateUsesVariable(template, VariableDailyKlines) {
+		contextLines = append(contextLines, "日K线数据："+input.DailyKlines)
+	}
+	if templateUsesVariable(template, VariableNews) {
+		contextLines = append(contextLines, "新闻资讯："+input.News)
+	}
+	contextLines = append(contextLines,
+		"模板内容："+renderedTemplate,
+		"输出语言："+input.AnalysisLanguage,
+	)
 	return BuiltPrompt{
-		System: complianceSystemPrompt,
-		Context: strings.Join([]string{
-			"分析类型：" + analysisType,
-			"股票名称：" + input.StockName,
-			"股票代码：" + input.StockCode,
-			"市场：" + input.Market,
-			"行情：" + input.Quote,
-			"K线摘要：" + input.KlineSummary,
-			"技术指标：" + input.Indicators,
-			"新闻资讯：" + input.News,
-			"模板内容：" + renderedTemplate,
-			"输出语言：" + input.AnalysisLanguage,
-		}, "\n"),
-		User: buildUserPrompt(input),
+		System:  complianceSystemPrompt,
+		Context: strings.Join(contextLines, "\n"),
+		User:    buildUserPrompt(template, input),
 	}, nil
 }
 
@@ -107,14 +124,21 @@ func validateBuildInput(input BuildInput) error {
 // renderTemplate 替换首版白名单变量，确保构建结果不残留模板占位符。
 func renderTemplate(content string, input BuildInput) string {
 	replacements := map[Variable]string{
-		VariableStockName:        input.StockName,
-		VariableStockCode:        input.StockCode,
-		VariableMarket:           input.Market,
-		VariableQuote:            input.Quote,
-		VariableKlineSummary:     input.KlineSummary,
-		VariableIndicators:       input.Indicators,
-		VariableNews:             input.News,
-		VariableAnalysisLanguage: input.AnalysisLanguage,
+		VariableStockName:          input.StockName,
+		VariableStockCode:          input.StockCode,
+		VariableMarket:             input.Market,
+		VariableQuote:              input.Quote,
+		VariableKlineSummary:       input.KlineSummary,
+		VariableDailyKlines:        input.DailyKlines,
+		VariableIndicators:         input.Indicators,
+		VariableNews:               input.News,
+		VariableFundamentalSummary: "未接入基本面结构化数据",
+		VariableUserPosition:       "见用户层一次性持仓输入",
+		VariableDataAsof:           input.DataAsof,
+		VariableContextQuality:     input.ContextQuality,
+		VariablePromptKey:          input.PromptKey,
+		VariablePromptVersion:      strconv.Itoa(input.PromptVersion),
+		VariableAnalysisLanguage:   input.AnalysisLanguage,
 	}
 
 	rendered := content
@@ -122,6 +146,16 @@ func renderTemplate(content string, input BuildInput) string {
 		rendered = replaceVariable(rendered, variable, value)
 	}
 	return rendered
+}
+
+// templateUsesVariable 判断模板正文是否显式引用变量，避免未声明上下文进入模型输入。
+func templateUsesVariable(template Template, variable Variable) bool {
+	for _, item := range ExtractVariables(template.Content) {
+		if item == variable {
+			return true
+		}
+	}
+	return false
 }
 
 // replaceVariable 替换单个变量，兼容变量名两侧带空格的写法。
@@ -135,10 +169,10 @@ func replaceVariable(content string, variable Variable, value string) string {
 	})
 }
 
-// buildUserPrompt 构建用户层 Prompt，一次性持仓输入只放在这里。
-func buildUserPrompt(input BuildInput) string {
+// buildUserPrompt 构建用户层 Prompt，一次性持仓输入只在模板显式声明时放入模型输入。
+func buildUserPrompt(template Template, input BuildInput) string {
 	lines := []string{"用户问题：" + strings.TrimSpace(input.UserQuestion)}
-	if strings.TrimSpace(input.UserPosition) != "" {
+	if templateUsesVariable(template, VariableUserPosition) && strings.TrimSpace(input.UserPosition) != "" {
 		lines = append(lines, "用户一次性持仓输入："+strings.TrimSpace(input.UserPosition))
 	}
 	return strings.Join(lines, "\n")

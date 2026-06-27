@@ -55,11 +55,14 @@ export function TaskHistoryPage() {
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? tasks[0];
   const drawerWidth = screens.xl ? "50vw" : "100vw";
   const taskSummary = useMemo<TaskSummary>(
-    () => ({
-      runningCount: tasks.filter((task) => task.status === "RUNNING").length,
-      successTodayCount: tasks.filter((task) => task.status === "SUCCESS").length,
-      failedCount: tasks.filter((task) => task.status === "FAILED").length,
-    }),
+    () => {
+      const today = todayDateKey();
+      return {
+        runningCount: tasks.filter((task) => task.status === "RUNNING").length,
+        successTodayCount: tasks.filter((task) => task.status === "SUCCESS" && task.completedDate === today).length,
+        failedCount: tasks.filter((task) => task.status === "FAILED").length,
+      };
+    },
     [tasks],
   );
 
@@ -237,12 +240,15 @@ export function TaskHistoryPage() {
           user_position: null,
         });
         message.success("重试任务已创建");
-        navigate(`/analysis/running?taskId=${encodeURIComponent(result.task_id)}`);
+        setSelectedTaskId(result.task_id);
+        setDetailOpen(false);
+        setLogDrawerOpen(false);
+        await loadTasks();
       } catch (error) {
         message.error(error instanceof Error ? error.message : "任务重试失败");
       }
     },
-    [message, navigate],
+    [loadTasks, message],
   );
 
   const handleCloseDetail = () => {
@@ -334,6 +340,7 @@ function mapCoreTaskItem(item: CoreTaskItem): TaskItem {
     startedAt: formatTaskDateTime(startedValue),
     startedDate: taskDateKey(startedValue),
     endedAt: formatTaskDateTime(finishedValue),
+    completedDate: taskDateKey(finishedValue),
     duration: formatTaskDuration(startedValue, item.finished_at),
     errorSummary: item.error_message || "—",
     reportId: item.report_id,
@@ -426,6 +433,14 @@ function taskDateKey(value?: string): string {
   if (Number.isNaN(date.getTime())) {
     return /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : "";
   }
+  return dateToLocalKey(date);
+}
+
+function todayDateKey(): string {
+  return dateToLocalKey(new Date());
+}
+
+function dateToLocalKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");

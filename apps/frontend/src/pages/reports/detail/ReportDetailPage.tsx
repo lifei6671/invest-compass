@@ -14,7 +14,6 @@ export function ReportDetailPage() {
   const navigate = useNavigate();
   const params = useParams();
   const [report, setReport] = useState<ReportDetail | null>(null);
-  const [inputSnapshot] = useState<InputSnapshot | null>(null);
   const [activeSection, setActiveSection] = useState("");
   const [loadError, setLoadError] = useState("");
   const [tocCollapsed, setTocCollapsed] = useState(false);
@@ -47,7 +46,8 @@ export function ReportDetailPage() {
     };
   }, [params.reportId]);
 
-  const reportSections = useMemo(() => buildReportSections(report?.markdown ?? ""), [report?.markdown]);
+  const displayMarkdown = useMemo(() => stripReportFrontMatter(report?.markdown ?? ""), [report?.markdown]);
+  const reportSections = useMemo(() => buildReportSections(displayMarkdown), [displayMarkdown]);
 
   const copyMarkdown = () => {
     if (!report?.markdown) {
@@ -162,11 +162,11 @@ export function ReportDetailPage() {
   };
 
   const copyInputSnapshot = () => {
-    if (!inputSnapshot) {
+    if (!report?.inputSnapshot) {
       return;
     }
     const writer = navigator.clipboard?.writeText;
-    const request = writer ? writer.call(navigator.clipboard, JSON.stringify(inputSnapshot, null, 2)) : Promise.resolve();
+    const request = writer ? writer.call(navigator.clipboard, JSON.stringify(report.inputSnapshot, null, 2)) : Promise.resolve();
     request
       .then(() => message.success("输入快照已复制"))
       .catch(() => message.error("输入快照复制失败"));
@@ -209,7 +209,7 @@ export function ReportDetailPage() {
         </header>
       )}
 
-      <div className="report-detail-layout">
+      <div className={tocCollapsed ? "report-detail-layout report-detail-layout-toc-collapsed" : "report-detail-layout"}>
         <ReportTocPanel
           sections={reportSections}
           activeSection={activeSection}
@@ -217,8 +217,8 @@ export function ReportDetailPage() {
           collapsed={tocCollapsed}
           onToggleCollapse={() => setTocCollapsed((current) => !current)}
         />
-        {report ? <ReportMarkdownContent markdown={report.markdown} /> : renderEmptyReport()}
-        <ReportSnapshotPanel snapshot={inputSnapshot} onCopySnapshot={copyInputSnapshot} />
+        {report ? <ReportMarkdownContent markdown={displayMarkdown} documentTitle={report.title} /> : renderEmptyReport()}
+        <ReportSnapshotPanel snapshot={report?.inputSnapshot ?? null} onCopySnapshot={copyInputSnapshot} />
       </div>
 
       <ReportDetailRiskNotice />
@@ -232,6 +232,7 @@ function reportIDFromRoute(value: string | undefined): number {
 }
 
 function reportDetailFromAnalysisReport(report: AnalysisReport): ReportDetail {
+  const inputSnapshot = enrichInputSnapshot(parseInputSnapshot(report.input_snapshot), report);
   return {
     id: String(report.id),
     title: report.title || "未命名报告",
@@ -248,7 +249,77 @@ function reportDetailFromAnalysisReport(report: AnalysisReport): ReportDetail {
     favorite: Boolean(report.favorite),
     markdown: report.content_markdown || "",
     riskSummary: report.risk_summary || "—",
+    inputSnapshot,
   };
+}
+
+function enrichInputSnapshot(snapshot: InputSnapshot | null, report: AnalysisReport): InputSnapshot | null {
+  if (!snapshot) {
+    if (!report.model_name && !report.prompt_template_id) {
+      return null;
+    }
+    snapshot = {};
+  }
+  const enriched: InputSnapshot = { ...snapshot };
+  const promptTemplate = firstSnapshotValue(snapshot.promptTemplate, snapshot.prompt_template, snapshot.prompt_template_id, report.prompt_template_id);
+  const model = firstSnapshotValue(snapshot.model, snapshot.model_name, report.model_name);
+  const temperature = firstSnapshotValue(snapshot.temperature, snapshot.temperature_value);
+  const maxTokens = firstSnapshotValue(snapshot.maxTokens, snapshot.max_tokens, snapshot.max_output_tokens);
+  const writableSnapshot = enriched as Record<string, unknown>;
+  if (promptTemplate !== undefined) {
+    writableSnapshot.promptTemplate = promptTemplate;
+  }
+  if (model !== undefined) {
+    writableSnapshot.model = model;
+  }
+  if (temperature !== undefined) {
+    writableSnapshot.temperature = temperature;
+  }
+  if (maxTokens !== undefined) {
+    writableSnapshot.maxTokens = maxTokens;
+  }
+  return enriched;
+}
+
+function firstSnapshotValue(...values: unknown[]): string | number | boolean | undefined {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    return value as string | number | boolean;
+  }
+  return undefined;
+}
+
+function parseInputSnapshot(value: unknown): InputSnapshot | null {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      return isSnapshotRecord(parsed) ? parsed : { raw_prompt: trimmed };
+    } catch {
+      return { raw_prompt: trimmed };
+    }
+  }
+  return isSnapshotRecord(value) ? value : null;
+}
+
+function isSnapshotRecord(value: unknown): value is InputSnapshot {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stripReportFrontMatter(markdown: string): string {
+  const trimmed = markdown.trimStart();
+  if (!trimmed.startsWith("---")) {
+    return markdown;
+  }
+  return trimmed.replace(/^---[ \t]*\n[\s\S]*?\n---[ \t]*(?:\n|$)/, "").trimStart();
 }
 
 function supportedReanalysisType(value: string | undefined): "stock_full" | "technical" | null {
@@ -291,13 +362,27 @@ function formatReportTime(value: string | undefined): string {
 }
 
 function buildReportSections(markdown: string): ReportSection[] {
+  let sectionIndex = 0;
   return markdown
     .split("\n")
     .map((line, index) => {
-      const matched = line.match(/^#{1,3}\s+(.+)$/);
-      return matched ? { id: `section-${index + 1}`, index: index + 1, title: matched[1].trim() } : null;
+      const matched = line.match(/^(#{2,3})\s+(.+)$/);
+      if (!matched) {
+        return null;
+      }
+      sectionIndex += 1;
+      return {
+        id: `section-${index + 1}`,
+        index: sectionIndex,
+        title: cleanMarkdownHeading(matched[2]),
+        level: matched[1].length,
+      };
     })
     .filter((section): section is ReportSection => section !== null);
+}
+
+function cleanMarkdownHeading(value: string): string {
+  return value.replace(/[*_`]/g, "").trim();
 }
 
 function ReportDetailRiskNotice() {

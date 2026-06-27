@@ -2,6 +2,7 @@ package reports
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -18,6 +19,7 @@ import (
 // Store 是 reports action 依赖的数据访问边界。
 type Store interface {
 	ListVisibleAnalysisReports(ctx context.Context) ([]model.AnalysisReport, error)
+	GetStocksBySymbols(ctx context.Context, symbols []string) (map[string]model.Stock, error)
 	SoftDeleteAnalysisReport(ctx context.Context, id int64) error
 	BatchSoftDeleteAnalysisReports(ctx context.Context, ids []int64) error
 	UpdateAnalysisReportFavorite(ctx context.Context, id int64, favorite bool) error
@@ -72,11 +74,13 @@ type reportData struct {
 	ID               int64  `json:"id"`
 	TaskID           string `json:"task_id"`
 	Symbol           string `json:"symbol"`
+	StockName        string `json:"stock_name,omitempty"`
 	Title            string `json:"title"`
 	AnalysisType     string `json:"analysis_type"`
 	ModelName        string `json:"model_name"`
 	PromptTemplateID int64  `json:"prompt_template_id"`
 	ContentMarkdown  string `json:"content_markdown,omitempty"`
+	InputSnapshot    any    `json:"input_snapshot,omitempty"`
 	RiskSummary      string `json:"risk_summary"`
 	Favorite         bool   `json:"favorite"`
 	CreatedAt        string `json:"created_at"`
@@ -109,12 +113,17 @@ func handleList(config Config) http.HandlerFunc {
 			writeStoreError(response, context, "读取报告列表失败", err)
 			return
 		}
-		reports := reportservice.UniqueByTaskID(reportservice.VisibleReports(modelReportsToService(modelReports)))
+		stocks, err := config.Store.GetStocksBySymbols(request.Context(), reportSymbols(modelReports))
+		if err != nil {
+			writeStoreError(response, context, "读取报告股票名称失败", err)
+			return
+		}
+		reports := reportservice.UniqueByTaskID(reportservice.VisibleReports(modelReportsToServiceWithStocks(modelReports, stocks)))
 		httpx.WriteOK(response, listData{Items: reportsToData(reports, false)}, context)
 	}
 }
 
-// handleGet 返回单个报告详情，仍然不回显完整 input_snapshot。
+// handleGet 返回单个报告详情。详情页可展示脱敏后的输入快照，列表和导出仍默认不暴露完整快照。
 func handleGet(config Config) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		context := httpx.ContextFrom(request)
@@ -446,6 +455,31 @@ func modelReportsToService(modelReports []model.AnalysisReport) []reportservice.
 	return reports
 }
 
+// modelReportsToServiceWithStocks 转换列表报告并补充股票名称；只依赖本地股票表的非敏感基础资料。
+func modelReportsToServiceWithStocks(modelReports []model.AnalysisReport, stocks map[string]model.Stock) []reportservice.Report {
+	reports := make([]reportservice.Report, 0, len(modelReports))
+	for _, modelReport := range modelReports {
+		report := modelReportToService(modelReport)
+		if stock, ok := stocks[modelReport.Symbol]; ok {
+			report.StockName = stock.Name
+		}
+		reports = append(reports, report)
+	}
+	return reports
+}
+
+// reportSymbols 收集报告关联股票代码，供列表接口一次性补齐股票名称。
+func reportSymbols(items []model.AnalysisReport) []string {
+	symbols := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Symbol == "" {
+			continue
+		}
+		symbols = append(symbols, item.Symbol)
+	}
+	return symbols
+}
+
 // modelReportToService 转换数据库报告模型为 service 模型。
 func modelReportToService(modelReport model.AnalysisReport) reportservice.Report {
 	var deletedAt *time.Time
@@ -480,12 +514,13 @@ func reportsToData(reports []reportservice.Report, includeContent bool) []report
 	return items
 }
 
-// reportToData 转换报告为 API 响应模型，明确不包含 input_snapshot。
+// reportToData 转换报告为 API 响应模型；仅详情响应带脱敏输入快照。
 func reportToData(report reportservice.Report, includeContent bool) reportData {
 	data := reportData{
 		ID:               report.ID,
 		TaskID:           report.TaskID,
 		Symbol:           report.Symbol,
+		StockName:        report.StockName,
 		Title:            report.Title,
 		AnalysisType:     report.AnalysisType,
 		ModelName:        report.ModelName,
@@ -497,8 +532,79 @@ func reportToData(report reportservice.Report, includeContent bool) reportData {
 	}
 	if includeContent {
 		data.ContentMarkdown = logger.RedactText(report.ContentMarkdown)
+		data.InputSnapshot = sanitizedInputSnapshot(report.InputSnapshot)
 	}
 	return data
+}
+
+// sanitizedInputSnapshot 返回报告详情可展示的输入快照，移除一次性持仓、密钥和令牌类字段。
+func sanitizedInputSnapshot(rawSnapshot string) map[string]any {
+	trimmed := strings.TrimSpace(rawSnapshot)
+	if trimmed == "" {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		redacted := strings.TrimSpace(logger.RedactText(trimmed))
+		if redacted == "" {
+			return nil
+		}
+		return map[string]any{"raw_snapshot_brief": redacted}
+	}
+	sanitized := sanitizeSnapshotMap(payload)
+	if len(sanitized) == 0 {
+		return nil
+	}
+	return sanitized
+}
+
+// sanitizeSnapshotMap 递归清理输入快照中的敏感字段，避免报告详情回显一次性持仓和渲染后的 Prompt。
+func sanitizeSnapshotMap(payload map[string]any) map[string]any {
+	sanitized := make(map[string]any, len(payload))
+	for key, value := range payload {
+		if isSensitiveSnapshotKey(key) {
+			continue
+		}
+		if cleanValue, ok := sanitizeSnapshotValue(value); ok {
+			sanitized[key] = cleanValue
+		}
+	}
+	return sanitized
+}
+
+// sanitizeSnapshotValue 递归处理字符串、对象和数组，避免嵌套字段泄露敏感信息。
+func sanitizeSnapshotValue(value any) (any, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		cleaned := sanitizeSnapshotMap(typed)
+		return cleaned, len(cleaned) > 0
+	case []any:
+		items := make([]any, 0, len(typed))
+		for _, item := range typed {
+			if cleanItem, ok := sanitizeSnapshotValue(item); ok {
+				items = append(items, cleanItem)
+			}
+		}
+		return items, len(items) > 0
+	case string:
+		return logger.RedactText(typed), true
+	case nil:
+		return nil, false
+	default:
+		return typed, true
+	}
+}
+
+// isSensitiveSnapshotKey 识别不能回显到报告详情页的快照字段。
+func isSensitiveSnapshotKey(key string) bool {
+	normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key))
+	switch normalized {
+	case "userposition", "apikey", "rawapikey", "resolvedapikey", "authorization", "proxyauthorization",
+		"password", "secret", "token", "authtoken", "accesstoken", "refreshtoken", "licensekey",
+		"rawprompt", "renderedprompt", "prompt":
+		return true
+	}
+	return strings.Contains(normalized, "apikey") || strings.Contains(normalized, "password") || strings.Contains(normalized, "secret")
 }
 
 // formatTime 统一输出 RFC3339 时间；零值保留为空字符串。

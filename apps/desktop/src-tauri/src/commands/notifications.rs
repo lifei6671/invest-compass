@@ -1,7 +1,4 @@
-use crate::{
-    desktop_runtime,
-    sidecar::{runtime_core_binary_path, CoreState},
-};
+use crate::{commands::blocking::post_core_api_with_recovery, sidecar::CoreState};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
@@ -24,95 +21,94 @@ struct EmptyRequest {}
 
 /// 读取应用内通知列表，固定转发到 Go core `/api/notifications/list`。
 #[tauri::command]
-pub fn notifications_list(
+pub async fn notifications_list(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: NotificationsListPayload,
 ) -> Result<serde_json::Value, String> {
     validate_list_payload(&payload)?;
-    post_notifications_api(&app_handle, &state, "/api/notifications/list", &payload)
+    post_notifications_api(
+        app_handle,
+        state.inner().clone(),
+        "/api/notifications/list",
+        payload,
+    )
+    .await
 }
 
 /// 读取应用内未读通知数量，固定转发到 Go core `/api/notifications/unread-count`。
 #[tauri::command]
-pub fn notifications_unread_count(
+pub async fn notifications_unread_count(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
 ) -> Result<serde_json::Value, String> {
     post_notifications_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/notifications/unread-count",
-        &EmptyRequest {},
+        EmptyRequest {},
     )
+    .await
 }
 
 /// 标记指定应用内通知为已读，固定转发到 Go core `/api/notifications/mark-read`。
 #[tauri::command]
-pub fn notifications_mark_read(
+pub async fn notifications_mark_read(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: NotificationsMarkReadPayload,
 ) -> Result<serde_json::Value, String> {
     validate_mark_read_payload(&payload)?;
     post_notifications_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/notifications/mark-read",
-        &payload,
+        payload,
     )
+    .await
 }
 
 /// 标记全部应用内通知为已读，固定转发到 Go core `/api/notifications/mark-all-read`。
 #[tauri::command]
-pub fn notifications_mark_all_read(
+pub async fn notifications_mark_all_read(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
 ) -> Result<serde_json::Value, String> {
     post_notifications_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/notifications/mark-all-read",
-        &EmptyRequest {},
+        EmptyRequest {},
     )
+    .await
 }
 
 /// 清理已读应用内通知，固定转发到 Go core `/api/notifications/clear-read`。
 #[tauri::command]
-pub fn notifications_clear_read(
+pub async fn notifications_clear_read(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
 ) -> Result<serde_json::Value, String> {
     post_notifications_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/notifications/clear-read",
-        &EmptyRequest {},
+        EmptyRequest {},
     )
+    .await
 }
 
 /// 通知命令统一通过状态恢复 API 调用 Go core，处理启动瞬间旧端口失效的连接竞态。
-fn post_notifications_api<TRequest>(
-    app_handle: &AppHandle,
-    state: &CoreState,
-    path: &str,
-    payload: &TRequest,
+async fn post_notifications_api<TRequest>(
+    app_handle: AppHandle,
+    state: CoreState,
+    path: &'static str,
+    payload: TRequest,
 ) -> Result<serde_json::Value, String>
 where
-    TRequest: Serialize,
+    TRequest: Serialize + Send + 'static,
 {
-    let binary_path = runtime_core_binary_path();
-    let workspace_path =
-        desktop_runtime::default_workspace_path(app_handle).map_err(|error| error.to_string())?;
-    state
-        .post_api_with_recovery(
-            &binary_path,
-            &workspace_path,
-            std::time::Duration::from_secs(5),
-            path,
-            payload,
-        )
-        .map_err(|error| error.to_string())
+    post_core_api_with_recovery(state, app_handle, path, payload).await
 }
 
 /// 校验通知分页请求，避免无界列表进入 Go core。

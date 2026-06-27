@@ -12,9 +12,9 @@ type ReportTocPanelProps = {
 
 export function ReportTocPanel(props: ReportTocPanelProps) {
   return (
-    <aside className="report-detail-card report-toc-panel">
+    <aside className={props.collapsed ? "report-detail-card report-toc-panel report-toc-panel-collapsed" : "report-detail-card report-toc-panel"}>
       <div className="report-detail-card-title">
-        <h2>目录</h2>
+        {props.collapsed ? null : <h2>目录</h2>}
         <Button
           size="small"
           type="text"
@@ -29,15 +29,21 @@ export function ReportTocPanel(props: ReportTocPanelProps) {
             <button
               key={section.id}
               type="button"
-              className={section.id === props.activeSection ? "report-toc-item report-toc-item-active" : "report-toc-item"}
+              className={[
+                section.id === props.activeSection ? "report-toc-item report-toc-item-active" : "report-toc-item",
+                `report-toc-level-${section.level}`,
+              ].join(" ")}
               onClick={() => props.onSectionClick(section)}
             >
-              <span>{section.index}.</span>
-              {section.title}
+              {sectionTitle(section)}
             </button>
           ))}
         </nav>
       )}
     </aside>
   );
+}
+
+function sectionTitle(section: ReportSection): string {
+  return /^\d+([.)、]|\.\d+)/.test(section.title) ? section.title : `${section.index}. ${section.title}`;
 }

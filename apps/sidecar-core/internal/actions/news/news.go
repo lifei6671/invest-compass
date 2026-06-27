@@ -40,8 +40,9 @@ type listRequest struct {
 }
 
 type marketRequest struct {
-	Market string `json:"market"`
-	Limit  int    `json:"limit"`
+	Market       string `json:"market"`
+	Limit        int    `json:"limit"`
+	ForceRefresh bool   `json:"force_refresh"`
 }
 
 type statsRequest struct {
@@ -185,13 +186,15 @@ func handleMarket(config Config) http.HandlerFunc {
 			return
 		}
 
+		var cachedItems []model.NewsItem
 		if config.Store != nil {
 			items, err := config.Store.ListMarketNews(request.Context(), market, payload.Limit, newsCacheMaxAge)
 			if err != nil {
 				writeCacheError(response, context, "市场新闻缓存读取失败", err)
 				return
 			}
-			if len(items) >= payload.Limit {
+			cachedItems = items
+			if !payload.ForceRefresh && len(items) >= payload.Limit {
 				httpx.WriteOK(response, listData{Items: itemDataFromModels(items)}, context)
 				return
 			}
@@ -203,6 +206,17 @@ func handleMarket(config Config) http.HandlerFunc {
 
 		items, err := config.NewsProvider.Market(request.Context(), newsservice.MarketRequest{Market: market, Limit: payload.Limit})
 		if err != nil {
+			if len(cachedItems) > 0 {
+				slog.Warn(
+					"市场新闻 Provider 调用失败，返回已有缓存",
+					logger.FieldRequestID, context.RequestID,
+					logger.FieldTraceID, context.TraceID,
+					logger.FieldProvider, config.NewsProvider.Name(),
+					"error", logger.RedactError(err),
+				)
+				httpx.WriteOK(response, listData{Items: itemDataFromModels(cachedItems)}, context)
+				return
+			}
 			writeProviderError(response, context, config.NewsProvider.Name(), "market", err)
 			return
 		}
@@ -213,8 +227,12 @@ func handleMarket(config Config) http.HandlerFunc {
 		}
 		if config.Store != nil {
 			if err := config.Store.SaveNewsItems(request.Context(), modelNewsItemsFromService(normalized, market)); err != nil {
-				writeCacheError(response, context, "市场新闻缓存写入失败", err)
-				return
+				slog.Warn(
+					"市场新闻缓存写入失败，返回本次 Provider 结果",
+					logger.FieldRequestID, context.RequestID,
+					logger.FieldTraceID, context.TraceID,
+					"error", logger.RedactError(err),
+				)
 			}
 		}
 

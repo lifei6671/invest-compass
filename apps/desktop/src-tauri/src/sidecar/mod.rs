@@ -7,7 +7,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
-    sync::{mpsc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -119,7 +119,12 @@ pub struct RunningCore {
     _stdin: ChildStdin,
 }
 
+#[derive(Clone)]
 pub struct CoreState {
+    inner: Arc<CoreStateInner>,
+}
+
+struct CoreStateInner {
     running: Mutex<Option<RunningCore>>,
 }
 
@@ -127,19 +132,21 @@ impl CoreState {
     /// 创建空的 core 状态，避免 UI 在 sidecar 未启动时拿到伪造数据。
     pub fn empty() -> Self {
         Self {
-            running: Mutex::new(None),
+            inner: Arc::new(CoreStateInner {
+                running: Mutex::new(None),
+            }),
         }
     }
 
     /// 安装已经启动的 sidecar 进程，作为 Rust command 的唯一数据源。
     pub fn install(&self, running: RunningCore) {
-        let mut guard = self.running.lock().expect("core state poisoned");
+        let mut guard = self.inner.running.lock().expect("core state poisoned");
         *guard = Some(running);
     }
 
     /// 获取当前 core 客户端副本，未启动时显式返回错误。
     pub fn client(&self) -> Result<CoreClient, SidecarError> {
-        let mut guard = self.running.lock().expect("core state poisoned");
+        let mut guard = self.inner.running.lock().expect("core state poisoned");
         if let Some(running) = guard.as_mut() {
             if running.child.try_wait()?.is_some() {
                 *guard = None;
@@ -157,7 +164,7 @@ impl CoreState {
         workspace_path: &Path,
         ready_timeout: Duration,
     ) -> Result<CoreClient, SidecarError> {
-        let mut guard = self.running.lock().expect("core state poisoned");
+        let mut guard = self.inner.running.lock().expect("core state poisoned");
         if let Some(running) = guard.as_mut() {
             if let Some(status) = running.child.try_wait()? {
                 append_sidecar_runtime_log(
@@ -188,7 +195,7 @@ impl CoreState {
         workspace_path: &Path,
         ready_timeout: Duration,
     ) -> Result<CoreClient, SidecarError> {
-        let mut guard = self.running.lock().expect("core state poisoned");
+        let mut guard = self.inner.running.lock().expect("core state poisoned");
         if let Some(running) = guard.as_mut() {
             if running.client.port != failed_client.port {
                 if let Some(status) = running.child.try_wait()? {
@@ -296,7 +303,7 @@ impl CoreState {
 
     /// 停止当前 sidecar，优先走内部 shutdown，再兜底 kill 本地子进程。
     pub fn stop(&self) {
-        let mut guard = self.running.lock().expect("core state poisoned");
+        let mut guard = self.inner.running.lock().expect("core state poisoned");
         if let Some(mut running) = guard.take() {
             let _ = running.client.shutdown();
             let _ = running.child.kill();
@@ -420,10 +427,15 @@ impl CoreClient {
     }
 }
 
-impl Drop for CoreState {
+impl Drop for CoreStateInner {
     /// 应用状态释放时停止 sidecar，避免桌面进程退出后残留本地服务。
     fn drop(&mut self) {
-        self.stop();
+        let mut guard = self.running.lock().expect("core state poisoned");
+        if let Some(mut running) = guard.take() {
+            let _ = running.client.shutdown();
+            let _ = running.child.kill();
+            let _ = running.child.wait();
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 import { Alert, App as AntApp, Button, ConfigProvider, Spin, Tag, Typography } from "antd";
-import { Component, lazy, Suspense, useEffect, useMemo, useState, type ErrorInfo, type FormEvent, type ReactNode } from "react";
+import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ErrorInfo, type FormEvent, type ReactNode } from "react";
 import { HashRouter, Link, Route, Routes, useParams } from "react-router-dom";
 import { KlineChart } from "../components/market/KlineChart";
 import { SchedulerBackfillDialog } from "../components/scheduler/SchedulerBackfillDialog";
@@ -393,6 +393,9 @@ type StockDetailViewState = {
 
 type StockDetailPeriod = "day" | "week" | "month";
 type StockDetailAdjust = "none" | "qfq" | "hfq";
+type StockDetailRefreshRequest = {
+  version: number;
+};
 
 type StockDetailSettings = {
   period: StockDetailPeriod;
@@ -823,7 +826,12 @@ export function StockDetailRoute() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingWatchlistNote, setSavingWatchlistNote] = useState(false);
-  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [refreshRequest, setRefreshRequest] = useState<StockDetailRefreshRequest>({ version: 0 });
+  const mountedRef = useRef(true);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -877,10 +885,10 @@ export function StockDetailRoute() {
     return () => {
       cancelled = true;
     };
-  }, [adjust, normalizedSymbol, period, refreshVersion, settingsReady]);
+  }, [adjust, normalizedSymbol, period, refreshRequest, settingsReady]);
   useAutoRefresh(() => {
     if (settingsReady && normalizedSymbol) {
-      setRefreshVersion((version) => version + 1);
+      setRefreshRequest((current) => ({ version: current.version + 1 }));
     }
   });
 
@@ -909,6 +917,25 @@ export function StockDetailRoute() {
     }
   };
 
+  const refreshQuoteFromProvider = () => {
+    if (!normalizedSymbol) {
+      return;
+    }
+    setLoadError(null);
+    void marketQuote(normalizedSymbol, { forceRefresh: true })
+      .then((quote) => {
+        if (mountedRef.current) {
+          setState((current) => (current ? { ...current, quote } : current));
+        }
+      })
+      .catch((cause) => {
+        if (mountedRef.current) {
+          const reason = cause instanceof Error ? cause.message : "刷新行情失败";
+          message.error(reason);
+        }
+      });
+  };
+
   return (
     <StockDetailPage
       stock={state ? toStockDetail(normalizedSymbol, state.quote, state.profile) : emptyStockDetailForSymbol(normalizedSymbol)}
@@ -923,7 +950,7 @@ export function StockDetailRoute() {
       adjust={adjust}
       onPeriodChange={setPeriod}
       onAdjustChange={setAdjust}
-      onRefresh={() => setRefreshVersion((version) => version + 1)}
+      onRefresh={refreshQuoteFromProvider}
       onSaveWatchlistNote={state?.watchlistItem ? saveWatchlistNote : undefined}
       savingWatchlistNote={savingWatchlistNote}
     />
@@ -1029,6 +1056,7 @@ function toTechnicalIndicators(indicators: Record<string, unknown>, period: Stoc
     indicatorRowFromPaths("MA.MA5", indicators, ["ma.ma5", "ma5"]),
     indicatorRowFromPaths("MA.MA10", indicators, ["ma.ma10", "ma10"]),
     indicatorRowFromPaths("MA.MA20", indicators, ["ma.ma20", "ma20"]),
+    indicatorRowFromPaths("MA.MA60", indicators, ["ma.ma60", "ma60"]),
     indicatorRowFromPaths("MACD.BAR", indicators, ["macd.bar", "macd_bar"]),
     indicatorRowFromPaths("MACD.DEA", indicators, ["macd.dea", "macd_dea"]),
     indicatorRowFromPaths("MACD.DIF", indicators, ["macd.dif", "macd_dif"]),

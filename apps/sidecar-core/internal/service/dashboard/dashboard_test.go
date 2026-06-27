@@ -60,6 +60,28 @@ func TestBuildSummaryKeepsRecentReportsTasksAndNews(t *testing.T) {
 	}
 }
 
+// TestBuildSummaryKeepsReportStockName 验证总览报告摘要带上已补齐的股票名称。
+func TestBuildSummaryKeepsReportStockName(t *testing.T) {
+	summary := BuildSummary(Input{
+		Reports: []report.Report{{
+			ID:           7,
+			TaskID:       "task-stock-name",
+			Symbol:       "CN:SH:600522",
+			StockName:    "中天科技",
+			Title:        "中天科技分析",
+			AnalysisType: "stock_full",
+			UpdatedAt:    time.Date(2026, 6, 27, 10, 0, 0, 0, time.UTC),
+		}},
+	})
+
+	if len(summary.RecentReports) != 1 {
+		t.Fatalf("expected one recent report, got %+v", summary.RecentReports)
+	}
+	if summary.RecentReports[0].StockName != "中天科技" {
+		t.Fatalf("dashboard report should keep stock name, got %+v", summary.RecentReports[0])
+	}
+}
+
 // TestProviderStatusRedactsLastError 验证数据源状态会脱敏最近错误。
 func TestProviderStatusRedactsLastError(t *testing.T) {
 	summary := BuildSummary(Input{

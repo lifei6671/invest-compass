@@ -26,6 +26,8 @@ const (
 	defaultSuggestURL        = "https://suggest3.sinajs.cn/suggest/"
 	defaultQuoteURL          = "https://hq.sinajs.cn/"
 	defaultValuationURL      = "https://push2.eastmoney.com/api/qt/stock/get"
+	eastMoneyQuoteUT         = "fa5fd1943c7b386f172d6893dbfba10b"
+	defaultTencentQuoteURL   = "http://qt.gtimg.cn/"
 	defaultKlineURL          = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 	defaultMinuteURL         = "https://web.ifzq.gtimg.cn/appstock/app/minute/query"
 	defaultProviderTimeout   = 8 * time.Second
@@ -51,6 +53,7 @@ type SinaConfig struct {
 
 // TencentConfig 描述腾讯 K 线接口的可替换运行参数。
 type TencentConfig struct {
+	QuoteURL   string
 	KlineURL   string
 	MinuteURL  string
 	HTTPClient *http.Client
@@ -70,6 +73,7 @@ type SinaTencentConfig struct {
 	// SuggestURL、QuoteURL 和 KlineURL 保留为便捷配置入口，避免测试和调用方为默认组合构造重复拆配置。
 	SuggestURL        string
 	QuoteURL          string
+	TencentQuoteURL   string
 	KlineURL          string
 	MinuteURL         string
 	EastMoneyKlineURL string
@@ -112,6 +116,7 @@ type SinaProvider struct {
 
 // TencentProvider 使用腾讯结构化接口实现 CN A 股 K 线。
 type TencentProvider struct {
+	quoteURL  string
 	klineURL  string
 	minuteURL string
 	client    *crawler.Client
@@ -164,6 +169,7 @@ func NewTencentProvider(config TencentConfig) (*TencentProvider, error) {
 		return nil, err
 	}
 	return &TencentProvider{
+		quoteURL:  firstNonEmpty(config.QuoteURL, defaultTencentQuoteURL),
 		klineURL:  firstNonEmpty(config.KlineURL, defaultKlineURL),
 		minuteURL: firstNonEmpty(config.MinuteURL, defaultMinuteURL),
 		client:    client,
@@ -205,6 +211,7 @@ func NewSinaTencentProvider(config SinaTencentConfig) (MarketProvider, error) {
 	sinaConfig.Now = firstNow(sinaConfig.Now, config.Now)
 
 	tencentConfig := config.Tencent
+	tencentConfig.QuoteURL = firstNonEmpty(tencentConfig.QuoteURL, config.TencentQuoteURL)
 	tencentConfig.KlineURL = firstNonEmpty(tencentConfig.KlineURL, config.KlineURL)
 	tencentConfig.MinuteURL = firstNonEmpty(tencentConfig.MinuteURL, config.MinuteURL)
 	tencentConfig.HTTPClient = firstHTTPClient(tencentConfig.HTTPClient, config.HTTPClient)
@@ -324,12 +331,60 @@ func (provider *SinaProvider) Quote(ctx context.Context, symbol stock.Symbol) (Q
 	if isCNStockSymbol(symbol) {
 		// 东财 push2 quote 只补充估值类展示字段；该接口失败时不阻断新浪基础行情。
 		if valuation, valuationErr := provider.quoteValuation(ctx, symbol); valuationErr == nil {
-			quote.TurnoverRate = valuation.TurnoverRate
-			quote.PE = valuation.PE
-			quote.PB = valuation.PB
-			quote.TotalMarketCap = valuation.TotalMarketCap
-			quote.FloatMarketCap = valuation.FloatMarketCap
+			quote.applyValuation(valuation)
 		}
+	}
+	quote.Provider = sinaTencentProviderName
+	return quote, nil
+}
+
+// applyValuation 合并东财 quote 增强字段，并在换手率缺失时用成交量和流通市值推导。
+func (quote *Quote) applyValuation(valuation eastMoneyQuoteValuation) {
+	if valuation.HasTurnoverRate {
+		quote.TurnoverRate = valuation.TurnoverRate
+	}
+	if valuation.HasPE {
+		quote.PE = valuation.PE
+	}
+	if valuation.HasPB {
+		quote.PB = valuation.PB
+	}
+	if valuation.HasTotalMarketCap {
+		quote.TotalMarketCap = valuation.TotalMarketCap
+	}
+	if valuation.HasFloatMarketCap {
+		quote.FloatMarketCap = valuation.FloatMarketCap
+	}
+	if quote.TurnoverRate <= 0 && quote.Volume > 0 && quote.Price > 0 && quote.FloatMarketCap > 0 {
+		quote.TurnoverRate = quote.Volume * quote.Price / quote.FloatMarketCap * 100
+	}
+}
+
+// Quote 调用腾讯实时行情接口；腾讯 A 股字段包含换手率和市值，适合作为沪深个股 quote 主源。
+func (provider *TencentProvider) Quote(ctx context.Context, symbol stock.Symbol) (Quote, error) {
+	if !isCNStockSymbol(symbol) {
+		return Quote{}, NewProviderError("tencent-market-source", "quote_symbol", fmt.Errorf("code %s is not supported by tencent quote", symbol.Code))
+	}
+	tencentCode, err := sinaCodeFromSymbol(symbol)
+	if err != nil {
+		return Quote{}, NewProviderError("tencent-market-source", "quote_symbol", err)
+	}
+	result, err := provider.client.Fetch(ctx, crawler.Request{
+		URL: provider.quoteURL,
+		Query: map[string]string{
+			"q": tencentCode,
+		},
+		Decoder: gb18030ToUTF8,
+		Headers: map[string]string{
+			"Referer": "https://gu.qq.com/",
+		},
+	})
+	if err != nil {
+		return Quote{}, NewProviderError("tencent-market-source", "quote", err)
+	}
+	quote, err := parseTencentQuote(result.Body, symbol)
+	if err != nil {
+		return Quote{}, NewProviderError("tencent-market-source", "quote_parse", err)
 	}
 	quote.Provider = sinaTencentProviderName
 	return quote, nil
@@ -427,13 +482,29 @@ func (provider *CompositeMarketProvider) Search(ctx context.Context, keyword str
 	return provider.sina.Search(ctx, keyword)
 }
 
-// Quote 将实时行情请求委派给新浪数据源。
+// Quote 读取实时行情；沪深个股优先使用腾讯完整字段，指数和腾讯失败时回落到新浪。
 func (provider *CompositeMarketProvider) Quote(ctx context.Context, symbol stock.Symbol) (Quote, error) {
 	if provider.sina == nil {
 		return Quote{}, NewProviderError(provider.Name(), "quote", fmt.Errorf("sina source is required"))
 	}
+	var tencentErr error
+	if isCNStockSymbol(symbol) {
+		if tencent, ok := provider.tencent.(interface {
+			Quote(context.Context, stock.Symbol) (Quote, error)
+		}); ok {
+			quote, err := tencent.Quote(ctx, symbol)
+			if err == nil {
+				quote.Provider = provider.Name()
+				return quote, nil
+			}
+			tencentErr = err
+		}
+	}
 	quote, err := provider.sina.Quote(ctx, symbol)
 	if err != nil {
+		if tencentErr != nil {
+			return Quote{}, NewProviderError(provider.Name(), "quote", fmt.Errorf("tencent: %v; sina: %w", tencentErr, err))
+		}
 		return Quote{}, err
 	}
 	quote.Provider = provider.Name()
@@ -561,11 +632,16 @@ func markKlineProvider(bars []KlineBar, providerName string) {
 }
 
 type eastMoneyQuoteValuation struct {
-	TurnoverRate   float64
-	PE             float64
-	PB             float64
-	TotalMarketCap float64
-	FloatMarketCap float64
+	TurnoverRate      float64
+	HasTurnoverRate   bool
+	PE                float64
+	HasPE             bool
+	PB                float64
+	HasPB             bool
+	TotalMarketCap    float64
+	HasTotalMarketCap bool
+	FloatMarketCap    float64
+	HasFloatMarketCap bool
 }
 
 type eastMoneyQuoteValuationResponse struct {
@@ -595,6 +671,7 @@ func (provider *SinaProvider) quoteValuation(ctx context.Context, symbol stock.S
 		Query: map[string]string{
 			"secid":  secID,
 			"fields": "f168,f162,f167,f116,f117",
+			"ut":     eastMoneyQuoteUT,
 			"_":      strconv.FormatInt(provider.now().UnixMilli(), 10),
 		},
 		Headers: map[string]string{
@@ -617,40 +694,61 @@ func parseEastMoneyQuoteValuation(response eastMoneyQuoteValuationResponse) (eas
 	if response.Code != 0 {
 		return eastMoneyQuoteValuation{}, fmt.Errorf("eastmoney quote code %d: %s", response.Code, response.Message)
 	}
-	turnoverRate, ok, err := parseEastMoneyQuoteFloat(response.Data.TurnoverRate, "turnover_rate")
+	var presentFields int
+	turnoverRate, hasTurnoverRate, err := parseEastMoneyQuoteFloat(response.Data.TurnoverRate, "turnover_rate")
 	if err != nil {
 		return eastMoneyQuoteValuation{}, err
 	}
-	if !ok {
-		return eastMoneyQuoteValuation{}, fmt.Errorf("eastmoney quote turnover_rate missing")
+	if hasTurnoverRate {
+		presentFields++
+		turnoverRate = turnoverRate / 100
 	}
-	pe, ok, err := parseEastMoneyQuoteFloat(response.Data.PE, "pe")
+	pe, hasPE, err := parseEastMoneyQuoteFloat(response.Data.PE, "pe")
 	if err != nil {
 		return eastMoneyQuoteValuation{}, err
 	}
-	if !ok {
-		return eastMoneyQuoteValuation{}, fmt.Errorf("eastmoney quote pe missing")
+	if hasPE {
+		presentFields++
+		pe = pe / 100
 	}
-	pb, _, err := parseEastMoneyQuoteFloat(response.Data.PB, "pb")
+	pb, hasPB, err := parseEastMoneyQuoteFloat(response.Data.PB, "pb")
 	if err != nil {
 		return eastMoneyQuoteValuation{}, err
 	}
-	totalMarketCap, _, err := parseEastMoneyQuoteFloat(response.Data.TotalMarketCap, "total_market_cap")
+	if hasPB {
+		presentFields++
+		pb = pb / 100
+	}
+	totalMarketCap, hasTotalMarketCap, err := parseEastMoneyQuoteFloat(response.Data.TotalMarketCap, "total_market_cap")
 	if err != nil {
 		return eastMoneyQuoteValuation{}, err
 	}
-	floatMarketCap, _, err := parseEastMoneyQuoteFloat(response.Data.FloatMarketCap, "float_market_cap")
+	if hasTotalMarketCap {
+		presentFields++
+	}
+	floatMarketCap, hasFloatMarketCap, err := parseEastMoneyQuoteFloat(response.Data.FloatMarketCap, "float_market_cap")
 	if err != nil {
 		return eastMoneyQuoteValuation{}, err
+	}
+	if hasFloatMarketCap {
+		presentFields++
+	}
+	if presentFields == 0 {
+		return eastMoneyQuoteValuation{}, fmt.Errorf("eastmoney quote valuation missing")
 	}
 	// 东财 quote 的 f168/f162/f167 返回的是放大 100 倍后的展示值。
 	// Quote 模型和前端统一使用真实百分数/倍数口径，避免卡片展示再被放大。
 	return eastMoneyQuoteValuation{
-		TurnoverRate:   turnoverRate / 100,
-		PE:             pe / 100,
-		PB:             pb / 100,
-		TotalMarketCap: totalMarketCap,
-		FloatMarketCap: floatMarketCap,
+		TurnoverRate:      turnoverRate,
+		HasTurnoverRate:   hasTurnoverRate,
+		PE:                pe,
+		HasPE:             hasPE,
+		PB:                pb,
+		HasPB:             hasPB,
+		TotalMarketCap:    totalMarketCap,
+		HasTotalMarketCap: hasTotalMarketCap,
+		FloatMarketCap:    floatMarketCap,
+		HasFloatMarketCap: hasFloatMarketCap,
 	}, nil
 }
 
@@ -789,6 +887,140 @@ func parseSinaCNQuote(payload string, symbol stock.Symbol) (Quote, error) {
 		quote.Price = bid1
 	}
 	return NormalizeQuote(quote), nil
+}
+
+// parseTencentQuote 解析腾讯 qt.gtimg.cn 响应，并统一单位：成交量为股、成交额/市值为元。
+func parseTencentQuote(payload string, symbol stock.Symbol) (Quote, error) {
+	content, err := quotedScriptPayload(payload)
+	if err != nil {
+		return Quote{}, err
+	}
+	fields := strings.Split(content, "~")
+	if len(fields) < 47 {
+		return Quote{}, fmt.Errorf("tencent quote field count %d is less than 47", len(fields))
+	}
+	price, err := parseFloatField(fields[3], "price")
+	if err != nil {
+		return Quote{}, err
+	}
+	preClose, err := parseFloatField(fields[4], "pre_close")
+	if err != nil {
+		return Quote{}, err
+	}
+	open, err := parseFloatField(fields[5], "open")
+	if err != nil {
+		return Quote{}, err
+	}
+	volumeHands, err := parseTencentQuoteVolumeHands(fields)
+	if err != nil {
+		return Quote{}, err
+	}
+	amount, err := parseTencentQuoteAmount(fields)
+	if err != nil {
+		return Quote{}, err
+	}
+	high, err := parseFloatField(fields[33], "high")
+	if err != nil {
+		return Quote{}, err
+	}
+	low, err := parseFloatField(fields[34], "low")
+	if err != nil {
+		return Quote{}, err
+	}
+	quoteTime, err := parseTencentQuoteTime(fields[30])
+	if err != nil {
+		return Quote{}, err
+	}
+	pe, err := parseOptionalFloatField(fields[39], "pe")
+	if err != nil {
+		return Quote{}, err
+	}
+	pb, err := parseOptionalFloatField(fields[46], "pb")
+	if err != nil {
+		return Quote{}, err
+	}
+	turnoverRate, err := parseOptionalFloatField(fields[38], "turnover_rate")
+	if err != nil {
+		return Quote{}, err
+	}
+	totalMarketCap, err := parseTencentQuoteMarketCap(fields[44], "total_market_cap")
+	if err != nil {
+		return Quote{}, err
+	}
+	floatMarketCap, err := parseTencentQuoteMarketCap(fields[45], "float_market_cap")
+	if err != nil {
+		return Quote{}, err
+	}
+	return NormalizeQuote(Quote{
+		Symbol:         symbol,
+		Price:          price,
+		Open:           open,
+		High:           high,
+		Low:            low,
+		PreClose:       preClose,
+		Volume:         volumeHands * 100,
+		Amount:         amount,
+		TurnoverRate:   turnoverRate,
+		PE:             pe,
+		PB:             pb,
+		TotalMarketCap: totalMarketCap,
+		FloatMarketCap: floatMarketCap,
+		QuoteTime:      quoteTime,
+	}), nil
+}
+
+// parseTencentQuoteVolumeHands 优先读取腾讯行情汇总字段中的成交量，字段单位为手。
+func parseTencentQuoteVolumeHands(fields []string) (float64, error) {
+	if len(fields) > 35 {
+		summary := strings.Split(fields[35], "/")
+		if len(summary) >= 2 && strings.TrimSpace(summary[1]) != "" {
+			return parseFloatField(summary[1], "volume_hands")
+		}
+	}
+	if len(fields) > 36 && strings.TrimSpace(fields[36]) != "" {
+		return parseFloatField(fields[36], "volume_hands")
+	}
+	return parseFloatField(fields[6], "volume_hands")
+}
+
+// parseTencentQuoteAmount 优先读取腾讯汇总字段里的精确成交额；备用字段单位为万元。
+func parseTencentQuoteAmount(fields []string) (float64, error) {
+	if len(fields) > 35 {
+		summary := strings.Split(fields[35], "/")
+		if len(summary) >= 3 && strings.TrimSpace(summary[2]) != "" {
+			return parseFloatField(summary[2], "amount")
+		}
+	}
+	if len(fields) > 37 && strings.TrimSpace(fields[37]) != "" {
+		amountWan, err := parseFloatField(fields[37], "amount_wan")
+		if err != nil {
+			return 0, err
+		}
+		return amountWan * 10000, nil
+	}
+	return 0, nil
+}
+
+// parseTencentQuoteMarketCap 将腾讯 quote 的亿元口径市值转换为元。
+func parseTencentQuoteMarketCap(value string, fieldName string) (float64, error) {
+	parsed, err := parseOptionalFloatField(value, fieldName)
+	if err != nil {
+		return 0, err
+	}
+	return parsed * 100000000, nil
+}
+
+// parseTencentQuoteTime 将腾讯 YYYYMMDDHHmmss 时间按中国市场时区解析。
+func parseTencentQuoteTime(value string) (time.Time, error) {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) != 14 {
+		return time.Time{}, fmt.Errorf("tencent quote time invalid %q", value)
+	}
+	parsed, err := time.ParseInLocation("20060102150405", trimmed, sinaQuoteLocation)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse tencent quote time: %w", err)
+	}
+	return parsed, nil
 }
 
 type tencentKlineResponse struct {
@@ -1095,6 +1327,15 @@ func parseFloatField(value string, fieldName string) (float64, error) {
 		return 0, fmt.Errorf("parse %s: %w", fieldName, err)
 	}
 	return parsed, nil
+}
+
+// parseOptionalFloatField 解析可缺省数值字段，空值和 "-" 统一视为缺失。
+func parseOptionalFloatField(value string, fieldName string) (float64, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || trimmed == "-" || trimmed == "--" {
+		return 0, nil
+	}
+	return parseFloatField(trimmed, fieldName)
 }
 
 // gb18030ToUTF8 将新浪 GB18030 响应体转换为 UTF-8 文本。

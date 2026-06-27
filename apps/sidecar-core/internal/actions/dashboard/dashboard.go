@@ -21,6 +21,7 @@ import (
 type Store interface {
 	ListActiveWatchlists(ctx context.Context) ([]model.Watchlist, error)
 	LatestQuote(ctx context.Context, symbol string, maxAge time.Duration) (model.Quote, bool, error)
+	GetStocksBySymbols(ctx context.Context, symbols []string) (map[string]model.Stock, error)
 	ListVisibleAnalysisReports(ctx context.Context) ([]model.AnalysisReport, error)
 	ListTasks(ctx context.Context, limit int) ([]model.Task, error)
 	ListMarketNews(ctx context.Context, market string, limit int, maxAge time.Duration) ([]model.NewsItem, error)
@@ -89,6 +90,10 @@ func loadDashboardInput(ctx context.Context, config Config) (dashboardservice.In
 	if err != nil {
 		return dashboardservice.Input{}, err
 	}
+	reportStocks, err := config.Store.GetStocksBySymbols(ctx, reportSymbols(reports))
+	if err != nil {
+		return dashboardservice.Input{}, err
+	}
 	tasks, err := config.Store.ListTasks(ctx, 5)
 	if err != nil {
 		return dashboardservice.Input{}, err
@@ -105,7 +110,7 @@ func loadDashboardInput(ctx context.Context, config Config) (dashboardservice.In
 	newsStatus := newsservice.ProviderStatusFromProvider(ctx, config.NewsProvider)
 	return dashboardservice.Input{
 		WatchlistQuotes: watchlistQuotes,
-		Reports:         reportModelsToService(reports),
+		Reports:         reportModelsToService(reports, reportStocks),
 		Tasks:           taskModelsToService(tasks),
 		MarketNews:      newsModelsToService(newsItems),
 		ProviderStatuses: []dashboardservice.ProviderStatus{
@@ -140,8 +145,20 @@ func quoteModelToService(item model.Quote) (market.Quote, error) {
 	}), nil
 }
 
-// reportModelsToService 转换报告缓存为 Dashboard 业务模型。
-func reportModelsToService(items []model.AnalysisReport) []reportservice.Report {
+// reportSymbols 收集报告关联股票代码，供 Dashboard 一次性补齐股票名称。
+func reportSymbols(items []model.AnalysisReport) []string {
+	symbols := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Symbol == "" {
+			continue
+		}
+		symbols = append(symbols, item.Symbol)
+	}
+	return symbols
+}
+
+// reportModelsToService 转换报告缓存为 Dashboard 业务模型，并带上股票基础资料名称。
+func reportModelsToService(items []model.AnalysisReport, stocks map[string]model.Stock) []reportservice.Report {
 	reports := make([]reportservice.Report, 0, len(items))
 	for _, item := range items {
 		var deletedAt *time.Time
@@ -149,10 +166,15 @@ func reportModelsToService(items []model.AnalysisReport) []reportservice.Report 
 			value := item.DeletedAt.Time
 			deletedAt = &value
 		}
+		stockName := ""
+		if stock, ok := stocks[item.Symbol]; ok {
+			stockName = stock.Name
+		}
 		reports = append(reports, reportservice.Report{
 			ID:               item.ID,
 			TaskID:           item.TaskID,
 			Symbol:           item.Symbol,
+			StockName:        stockName,
 			Title:            item.Title,
 			AnalysisType:     item.AnalysisType,
 			ModelName:        item.ModelName,

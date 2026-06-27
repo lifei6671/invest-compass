@@ -20,6 +20,7 @@ import {
   stockProfile,
   stockSearch,
   type AIConfig,
+  type AnalysisTaskCreatePayload,
   type MarketIndicatorsResult,
   type MarketKlineItem,
   type MarketQuote,
@@ -27,6 +28,7 @@ import {
   type PromptTemplate,
   type PromptTemplateType,
 } from "../../services/coreClient";
+import { putAnalysisTaskCreateDraft } from "../analysis-running/analysisTaskCreateDraft";
 
 export function AnalysisPage() {
   const { message } = AntApp.useApp();
@@ -209,7 +211,7 @@ export function AnalysisPage() {
     setContextReady(false);
     Promise.allSettled([
       stockProfile(config.stock.symbol),
-      marketQuote(config.stock.symbol),
+      marketQuote(config.stock.symbol, { forceRefresh: true }),
       marketKline({ symbol: config.stock.symbol, period: "day", adjust: "qfq", limit: 120 }),
       marketIndicators({ symbol: config.stock.symbol, period: "day", adjust: "qfq", limit: 120, indicators: ["ma", "rsi", "macd", "kdj", "boll"] }),
       newsList({ symbol: config.stock.symbol, limit: 20 }),
@@ -325,7 +327,7 @@ export function AnalysisPage() {
     message.success("Markdown 已导出");
   };
 
-  const startAnalysis = async () => {
+  const startAnalysis = () => {
     if (!selectedModel?.has_api_key) {
       message.error("请先配置可用 AI 模型");
       return;
@@ -342,22 +344,25 @@ export function AnalysisPage() {
       message.error("当前分析类型暂未接入任务执行");
       return;
     }
+    const createPayload: AnalysisTaskCreatePayload = {
+      symbol: config.stock.symbol,
+      analysis_type: selectedPromptType,
+      ai_config_id: selectedModel.id,
+      api_key_ref: selectedModel.api_key_ref,
+      prompt_template_id: selectedPrompt.id,
+      user_position: buildUserPositionPayload(holdingContext),
+    };
+    const createDraftId = putAnalysisTaskCreateDraft(() => analysisTaskCreate(createPayload));
     setCreatingTask(true);
-    try {
-      const result = await analysisTaskCreate({
-        symbol: config.stock.symbol,
-        analysis_type: selectedPromptType,
-        ai_config_id: selectedModel.id,
-        api_key_ref: selectedModel.api_key_ref,
-        prompt_template_id: selectedPrompt.id,
-        user_position: buildUserPositionPayload(holdingContext),
-      });
-      navigate(`/analysis/running?taskId=${encodeURIComponent(result.task_id)}`);
-    } catch (cause) {
-      message.error(cause instanceof Error ? cause.message : "AI 分析任务创建失败");
-    } finally {
-      setCreatingTask(false);
-    }
+    navigate("/analysis/running?creating=1", {
+      state: {
+        stockName: config.stock.name,
+        stockCode: config.stock.symbol,
+        analysisType: selectedPromptType,
+        analysisTypeLabel: config.analysisType,
+        createDraftId,
+      },
+    });
   };
 
   return (
@@ -397,12 +402,13 @@ export function AnalysisPage() {
       </div>
       <AnalysisActionBar
         generating={generating}
+        startLoading={creatingTask}
         startDisabled={!selectedModel?.has_api_key || !selectedPrompt || !isExecutableAnalysisType(selectedPromptType) || creatingTask || generating}
         stopDisabled={creatingTask || !generating}
         saveDisabled
         copyDisabled={!hasPreviewOutput}
         exportDisabled={!hasPreviewOutput}
-        onStart={() => void startAnalysis()}
+        onStart={startAnalysis}
         onStop={() => {
           setGenerating(false);
           message.info("已停止生成");
@@ -458,6 +464,7 @@ function buildContextSummary(
       ma20: formatMovingAverage(closes, 20),
       ma60: formatMovingAverage(closes, 60),
       ma120: formatMovingAverage(closes, 120),
+      dailyKlines: formatDailyKlines(klines),
     },
     indicators: {
       ma: formatIndicatorGroup(indicators?.indicators?.["ma"], ["ma5"]),
@@ -554,6 +561,7 @@ function buildPromptPreview(
     quote: quoteSummary,
     current_price: context.quote.price,
     kline_summary: klineSummary,
+    daily_klines: context.kline.dailyKlines || dataMissing,
     indicators: indicatorSummary,
     news: newsSummary,
     news_summary: newsSummary,
@@ -666,6 +674,27 @@ function formatKlineChange(values: number[], windowSize: number) {
     return "暂无";
   }
   return `${(((latest - base) / base) * 100).toFixed(2)}%`;
+}
+
+function formatDailyKlines(klines: MarketKlineItem[]) {
+  if (!klines.length) {
+    return "";
+  }
+  return klines
+    .slice(-60)
+    .map(
+      (item) =>
+        `date=${item.trade_date} open=${formatKlineNumber(item.open)} high=${formatKlineNumber(item.high)} low=${formatKlineNumber(item.low)} close=${formatKlineNumber(item.close)} volume=${formatKlineInteger(item.volume)} amount=${formatKlineInteger(item.amount)}`,
+    )
+    .join("\n");
+}
+
+function formatKlineNumber(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "暂无";
+}
+
+function formatKlineInteger(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.round(value).toString() : "暂无";
 }
 
 function formatIndicatorGroup(indicators: unknown, keys: string[]) {

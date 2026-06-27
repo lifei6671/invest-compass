@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,7 +100,7 @@ func TestNotifyTaskSuccessRoutesToReportWhenReportExists(t *testing.T) {
 	task := model.Task{
 		ID:     "task-success",
 		Status: "SUCCESS",
-		Title:  "浦发银行分析",
+		Title:  "CN:SH:600522 stock_full",
 	}
 	created, err := NewService(store).NotifyTaskTerminal(context.Background(), task)
 	if err != nil {
@@ -119,6 +120,9 @@ func TestNotifyTaskSuccessRoutesToReportWhenReportExists(t *testing.T) {
 	}
 	if store.created.Route != "/reports/88" {
 		t.Fatalf("success notification should route to report detail, got %q", store.created.Route)
+	}
+	if strings.Contains(store.created.Content, "stock_full") || store.created.Content != "CN:SH:600522 个股综合分析报告已生成，可点击查看。" {
+		t.Fatalf("unexpected friendly content: %q", store.created.Content)
 	}
 }
 

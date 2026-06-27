@@ -80,11 +80,11 @@ func TestSinaTencentProviderQuoteParsesSinaCNQuote(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, err := NewSinaTencentProvider(SinaTencentConfig{
+	provider, err := NewSinaProvider(SinaConfig{
 		QuoteURL: server.URL + "/quote",
 	})
 	if err != nil {
-		t.Fatalf("NewSinaTencentProvider returned error: %v", err)
+		t.Fatalf("NewSinaProvider returned error: %v", err)
 	}
 	symbol := mustParseMarketSymbol(t, "CN:SH:600519")
 
@@ -116,11 +116,11 @@ func TestSinaTencentProviderQuoteNormalizesPreOpenZeroPrice(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, err := NewSinaTencentProvider(SinaTencentConfig{
+	provider, err := NewSinaProvider(SinaConfig{
 		QuoteURL: server.URL + "/quote",
 	})
 	if err != nil {
-		t.Fatalf("NewSinaTencentProvider returned error: %v", err)
+		t.Fatalf("NewSinaProvider returned error: %v", err)
 	}
 	symbol := mustParseMarketSymbol(t, "CN:SH:603026")
 
@@ -155,6 +155,9 @@ func TestSinaTencentProviderQuoteEnrichesValuationFields(t *testing.T) {
 			if request.URL.Query().Get("secid") != "0.000001" {
 				t.Fatalf("unexpected valuation request: %s", request.URL.String())
 			}
+			if request.URL.Query().Get("ut") == "" {
+				t.Fatalf("valuation request must include eastmoney ut token: %s", request.URL.String())
+			}
 			if request.URL.Query().Get("fields") != "f168,f162,f167,f116,f117" {
 				t.Fatalf("unexpected valuation fields: %s", request.URL.String())
 			}
@@ -165,14 +168,12 @@ func TestSinaTencentProviderQuoteEnrichesValuationFields(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, err := NewSinaTencentProvider(SinaTencentConfig{
-		Sina: SinaConfig{
-			QuoteURL:     server.URL + "/quote",
-			ValuationURL: server.URL + "/valuation",
-		},
+	provider, err := NewSinaProvider(SinaConfig{
+		QuoteURL:     server.URL + "/quote",
+		ValuationURL: server.URL + "/valuation",
 	})
 	if err != nil {
-		t.Fatalf("NewSinaTencentProvider returned error: %v", err)
+		t.Fatalf("NewSinaProvider returned error: %v", err)
 	}
 	symbol := mustParseMarketSymbol(t, "CN:SZ:000001")
 
@@ -188,30 +189,83 @@ func TestSinaTencentProviderQuoteEnrichesValuationFields(t *testing.T) {
 	}
 }
 
-// TestParseEastMoneyQuoteValuationRejectsMissingRequiredFields 验证东财估值缺失时不把缺失字段伪装成 0。
-func TestParseEastMoneyQuoteValuationRejectsMissingRequiredFields(t *testing.T) {
-	_, err := parseEastMoneyQuoteValuation(eastMoneyQuoteValuationResponse{
+// TestSinaTencentProviderQuoteDoesNotOverwriteMissingValuationFields 验证东财部分增强字段缺失时不把已有行情字段覆盖成 0。
+func TestSinaTencentProviderQuoteDoesNotOverwriteMissingValuationFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/quote":
+			parts := []string{
+				"铜冠铜箔", "175.00", "183.27", "170.30", "176.00", "160.96", "170.30", "170.31",
+				"57412732", "9679600141.69", "27637", "170.30", "4900", "170.29", "39300", "170.28",
+				"1400", "170.27", "200", "170.26", "58600", "170.31", "200", "170.34",
+				"1100", "170.35", "200", "170.38", "100", "170.44", "2026-06-26", "15:35:00",
+			}
+			_, _ = writer.Write(mustGB18030(t, `var hq_str_sz301217="`+strings.Join(parts, ",")+`";`))
+		case "/valuation":
+			_, _ = writer.Write([]byte(`{"rc":0,"data":{"f168":"-","f162":35210,"f167":239072,"f116":352100000000,"f117":180000000000}}`))
+		default:
+			t.Fatalf("unexpected request path: %s", request.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	provider, err := NewSinaProvider(SinaConfig{
+		QuoteURL:     server.URL + "/quote",
+		ValuationURL: server.URL + "/valuation",
+	})
+	if err != nil {
+		t.Fatalf("NewSinaProvider returned error: %v", err)
+	}
+	symbol := mustParseMarketSymbol(t, "CN:SZ:301217")
+
+	quote, err := provider.Quote(context.Background(), symbol)
+	if err != nil {
+		t.Fatalf("Quote returned error: %v", err)
+	}
+	if quote.TurnoverRate < 5.43 || quote.TurnoverRate > 5.44 {
+		t.Fatalf("expected turnover rate to be derived from volume and float market cap, got %+v", quote)
+	}
+	if quote.PE != 352.10 || quote.PB != 2390.72 {
+		t.Fatalf("unexpected valuation fields: %+v", quote)
+	}
+}
+
+// TestParseEastMoneyQuoteValuationKeepsPartialFields 验证东财估值部分缺失时仍保留可用字段。
+func TestParseEastMoneyQuoteValuationKeepsPartialFields(t *testing.T) {
+	valuation, err := parseEastMoneyQuoteValuation(eastMoneyQuoteValuationResponse{
 		RC:   0,
 		Code: 0,
 		Data: eastMoneyQuoteValuationData{
-			TurnoverRate: []byte(`"-"`),
-			PE:           []byte(`35210`),
+			TurnoverRate:   []byte(`398`),
+			PE:             []byte(`null`),
+			PB:             []byte(`239072`),
+			TotalMarketCap: []byte(`123456789000`),
+			FloatMarketCap: []byte(`98765432100`),
 		},
 	})
-	if err == nil {
-		t.Fatal("expected missing turnover rate to return error")
+	if err != nil {
+		t.Fatalf("parseEastMoneyQuoteValuation returned error: %v", err)
+	}
+	if valuation.TurnoverRate != 3.98 || valuation.PE != 0 || valuation.PB != 2390.72 {
+		t.Fatalf("unexpected partial valuation fields: %+v", valuation)
+	}
+	if valuation.TotalMarketCap != 123456789000 || valuation.FloatMarketCap != 98765432100 {
+		t.Fatalf("unexpected partial market cap fields: %+v", valuation)
 	}
 
 	_, err = parseEastMoneyQuoteValuation(eastMoneyQuoteValuationResponse{
 		RC:   0,
 		Code: 0,
 		Data: eastMoneyQuoteValuationData{
-			TurnoverRate: []byte(`398`),
-			PE:           []byte(`null`),
+			TurnoverRate:   []byte(`"-"`),
+			PE:             []byte(`null`),
+			PB:             []byte(`"-"`),
+			TotalMarketCap: []byte(`null`),
+			FloatMarketCap: []byte(`"-"`),
 		},
 	})
 	if err == nil {
-		t.Fatal("expected missing PE to return error")
+		t.Fatal("expected fully missing valuation to return error")
 	}
 }
 
@@ -342,8 +396,8 @@ func TestSinaTencentProviderRejectsNonStockCNCode(t *testing.T) {
 	}
 }
 
-// TestTencentProviderDoesNotExposeSearchOrQuote 验证腾讯数据源只负责 K 线，不承载新浪搜索和实时行情职责。
-func TestTencentProviderDoesNotExposeSearchOrQuote(t *testing.T) {
+// TestTencentProviderDoesNotExposeSearch 验证腾讯数据源不承载新浪搜索职责。
+func TestTencentProviderDoesNotExposeSearch(t *testing.T) {
 	provider, err := NewTencentProvider(TencentConfig{})
 	if err != nil {
 		t.Fatalf("NewTencentProvider returned error: %v", err)
@@ -353,10 +407,45 @@ func TestTencentProviderDoesNotExposeSearchOrQuote(t *testing.T) {
 	}); ok {
 		t.Fatal("TencentProvider must not implement Search")
 	}
-	if _, ok := any(provider).(interface {
-		Quote(context.Context, stock.Symbol) (Quote, error)
-	}); ok {
-		t.Fatal("TencentProvider must not implement Quote")
+}
+
+// TestTencentProviderQuoteParsesTencentStockQuote 验证腾讯实时行情字段按 go-stock 口径归一化为 Quote。
+func TestTencentProviderQuoteParsesTencentStockQuote(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/quote" || request.URL.Query().Get("q") != "sz301217" {
+			t.Fatalf("unexpected tencent quote request: %s", request.URL.String())
+		}
+		payload := `v_sz301217="51~铜冠铜箔~301217~170.30~183.27~175.00~574127~260165~313962~170.30~276~170.29~49~170.28~393~170.27~14~170.26~2~170.31~586~170.34~2~170.35~11~170.38~2~170.44~1~~20260626161451~-12.97~-7.08~176.00~160.96~170.30/574127/9679600142~574127~967960~6.93~859.58~~176.00~160.96~8.21~1411.81~1411.81~25.66~219.92~146.62~1.15~132~168.60~331.89~2253.50~~~3.12~967960.0142~161.7850~95~ AR~GP-A-CYB~396.79~-14.85~0.01~2.99~2.10~202.15~12.01~33.07~43.01~349.46~829015544~829015544~9.88~423.68~829015544~~~1267.87~-0.70~~CNY~0~~170.20~159~";`
+		_, _ = writer.Write(mustGB18030(t, payload))
+	}))
+	defer server.Close()
+
+	provider, err := NewTencentProvider(TencentConfig{
+		QuoteURL: server.URL + "/quote",
+	})
+	if err != nil {
+		t.Fatalf("NewTencentProvider returned error: %v", err)
+	}
+	symbol := mustParseMarketSymbol(t, "CN:SZ:301217")
+
+	quote, err := provider.Quote(context.Background(), symbol)
+	if err != nil {
+		t.Fatalf("Quote returned error: %v", err)
+	}
+	if quote.Symbol.String() != "CN:SZ:301217" || quote.Price != 170.30 || quote.PreClose != 183.27 {
+		t.Fatalf("unexpected core quote fields: %+v", quote)
+	}
+	if quote.Volume != 57412700 || quote.Amount != 9679600142 {
+		t.Fatalf("unexpected normalized turnover base fields: %+v", quote)
+	}
+	if quote.TurnoverRate != 6.93 || quote.TotalMarketCap != 141181000000 || quote.FloatMarketCap != 141181000000 {
+		t.Fatalf("unexpected valuation fields: %+v", quote)
+	}
+	if quote.PE != 859.58 || quote.PB != 25.66 {
+		t.Fatalf("unexpected PE/PB fields: %+v", quote)
+	}
+	if quote.QuoteTime.UTC() != time.Date(2026, 6, 26, 8, 14, 51, 0, time.UTC) {
+		t.Fatalf("unexpected quote time: %s", quote.QuoteTime)
 	}
 }
 
@@ -613,6 +702,56 @@ func TestCompositeMarketProviderCombinesSinaAndTencent(t *testing.T) {
 	status := provider.Status(context.Background())
 	if status.Name != "composite-test" || !status.Available || !status.Supports(MarketCN) {
 		t.Fatalf("unexpected composite status: %+v", status)
+	}
+}
+
+// TestCompositeMarketProviderPrefersTencentQuoteForCNStock 验证沪深个股实时行情优先走腾讯字段完整链路。
+func TestCompositeMarketProviderPrefersTencentQuoteForCNStock(t *testing.T) {
+	sina := &recordingSinaSource{
+		quoteResult: Quote{Symbol: mustParseMarketSymbol(t, "CN:SZ:301217"), Price: 170.30},
+	}
+	tencent := &recordingTencentQuoteSource{
+		quoteResult: Quote{
+			Symbol:       mustParseMarketSymbol(t, "CN:SZ:301217"),
+			Price:        170.30,
+			TurnoverRate: 6.93,
+		},
+	}
+	provider := NewCompositeMarketProvider("composite-test", sina, tencent, nil)
+	symbol := mustParseMarketSymbol(t, "CN:SZ:301217")
+
+	quote, err := provider.Quote(context.Background(), symbol)
+	if err != nil {
+		t.Fatalf("Quote returned error: %v", err)
+	}
+	if !tencent.quoteCalled || sina.quoteCalled {
+		t.Fatalf("expected tencent quote only, sina=%+v tencent=%+v", sina, tencent)
+	}
+	if quote.Provider != "composite-test" || quote.TurnoverRate != 6.93 {
+		t.Fatalf("unexpected composite quote: %+v", quote)
+	}
+}
+
+// TestCompositeMarketProviderUsesSinaQuoteForCNIndex 验证指数行情继续使用新浪，避免腾讯个股字段解析污染指数。
+func TestCompositeMarketProviderUsesSinaQuoteForCNIndex(t *testing.T) {
+	sina := &recordingSinaSource{
+		quoteResult: Quote{Symbol: mustParseMarketSymbol(t, "CN:SH:000001"), Price: 4042.86},
+	}
+	tencent := &recordingTencentQuoteSource{
+		quoteResult: Quote{Symbol: mustParseMarketSymbol(t, "CN:SH:000001"), Price: 1},
+	}
+	provider := NewCompositeMarketProvider("composite-test", sina, tencent, nil)
+	symbol := mustParseMarketSymbol(t, "CN:SH:000001")
+
+	quote, err := provider.Quote(context.Background(), symbol)
+	if err != nil {
+		t.Fatalf("Quote returned error: %v", err)
+	}
+	if !sina.quoteCalled || tencent.quoteCalled {
+		t.Fatalf("expected sina index quote only, sina=%+v tencent=%+v", sina, tencent)
+	}
+	if quote.Provider != "composite-test" || quote.Price != 4042.86 {
+		t.Fatalf("unexpected index quote: %+v", quote)
 	}
 }
 
@@ -937,6 +1076,22 @@ func (source *recordingTencentSource) Kline(context.Context, KlineRequest) ([]Kl
 		return nil, source.klineErr
 	}
 	return source.klineResult, nil
+}
+
+type recordingTencentQuoteSource struct {
+	recordingTencentSource
+	quoteCalled bool
+	quoteResult Quote
+	quoteErr    error
+}
+
+// Quote 记录腾讯实时行情调用并返回固定 quote。
+func (source *recordingTencentQuoteSource) Quote(context.Context, stock.Symbol) (Quote, error) {
+	source.quoteCalled = true
+	if source.quoteErr != nil {
+		return Quote{}, source.quoteErr
+	}
+	return source.quoteResult, nil
 }
 
 type recordingEastMoneySource struct {

@@ -71,6 +71,7 @@ export type ContextSummary = {
     ma20: string;
     ma60: string;
     ma120: string;
+    dailyKlines: string;
   };
   indicators: {
     ma: string;

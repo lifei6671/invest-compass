@@ -148,7 +148,27 @@ func (store *Store) SaveQuote(ctx context.Context, quote *model.Quote) error {
 
 	quote.ID = existing.ID
 	quote.CreatedAt = existing.CreatedAt
+	preserveQuoteValuationFields(quote, existing)
 	return store.db.WithContext(ctx).Save(quote).Error
+}
+
+// preserveQuoteValuationFields 保留已有的有效估值字段，避免外部行情源偶发缺字段时用 0 覆盖分析上下文。
+func preserveQuoteValuationFields(next *model.Quote, existing model.Quote) {
+	if next.TurnoverRate <= 0 && existing.TurnoverRate > 0 {
+		next.TurnoverRate = existing.TurnoverRate
+	}
+	if next.PE == 0 && existing.PE > 0 {
+		next.PE = existing.PE
+	}
+	if next.PB <= 0 && existing.PB > 0 {
+		next.PB = existing.PB
+	}
+	if next.TotalMarketCap <= 0 && existing.TotalMarketCap > 0 {
+		next.TotalMarketCap = existing.TotalMarketCap
+	}
+	if next.FloatMarketCap <= 0 && existing.FloatMarketCap > 0 {
+		next.FloatMarketCap = existing.FloatMarketCap
+	}
 }
 
 // LatestQuote 返回指定 symbol 在最大缓存年龄内的最新 quote。

@@ -17,6 +17,7 @@ import {
 } from "klinecharts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_FONT } from "../../../styles/fonts";
+import { goStockCandleIndicators, goStockPaneIndicators, registerGoStockIndicators } from "../goStockIndicators";
 import type { ChartPeriod, IndicatorKey, IndicatorSeries, KlineBar, StockChartQuote } from "../types";
 
 type KlineMultiPaneChartProps = {
@@ -29,12 +30,14 @@ type KlineMultiPaneChartProps = {
 
 const upColor = "#ff4d4f";
 const downColor = "#16a34a";
-const supportedPaneIndicators: IndicatorKey[] = ["VOL", "MACD", "KDJ", "RSI", "WR", "OBV", "CCI", "AO", "TRIX", "ROC", "PVT", "DMI"];
-const supportedCandleIndicators: IndicatorKey[] = ["MA", "EMA", "BOLL", "SAR"];
+const supportedPaneIndicators = goStockPaneIndicators;
+const supportedCandleIndicators = goStockCandleIndicators;
 const indicatorPaneHeight = 104;
 const xAxisPaneHeight = 28;
 const dashedLine = "dashed" as const;
 export const klineChartLocale = "zh-CN";
+
+registerGoStockIndicators();
 
 type ChartWithCrosshair = Chart & { getCrosshair?: () => Crosshair };
 
@@ -56,8 +59,8 @@ export function KlineMultiPaneChart(props: KlineMultiPaneChartProps) {
   const [indicatorHoverPoint, setIndicatorHoverPoint] = useState<IndicatorHoverPoint | null>(null);
   const chartData = useMemo(() => toKLineChartData(props.bars, props.indicators), [props.bars, props.indicators]);
   const period = useMemo(() => toKLineChartPeriod(props.activePeriod), [props.activePeriod]);
-  const layout = useMemo(() => buildKLineChartLayout(props.activeIndicators), [props.activeIndicators]);
-  const chartStyles = useMemo(() => buildKLineChartStyles(), []);
+  const layout = useMemo(() => buildKLineChartLayout(props.activeIndicators, props.activePeriod), [props.activeIndicators, props.activePeriod]);
+  const chartStyles = useMemo(() => buildKLineChartStyles(props.activePeriod), [props.activePeriod]);
   const paneIndicators = useMemo(() => activePaneIndicators(props.activeIndicators), [props.activeIndicators]);
 
   useEffect(() => {
@@ -117,33 +120,15 @@ export function KlineMultiPaneChart(props: KlineMultiPaneChartProps) {
   }, [chartData, chartStyles, layout, period, props.activePeriod, props.quote.code, props.quote.symbol]);
 
   return (
-    <section className="mx-4 min-h-0 flex-1 rounded-t-lg border border-[#e5eaf3] border-b-0 bg-white px-3 pb-2 pt-2">
+    <section className="mx-4 mt-2 min-h-0 flex-1 rounded-t-lg border border-[#e5eaf3] border-b-0 bg-white px-3 pb-2 pt-2">
       <div
         className="relative h-full min-h-[520px] overflow-hidden rounded-lg bg-white"
         onMouseLeave={() => setIndicatorHoverPoint(null)}
       >
-        <IndicatorPaneBorders indicators={paneIndicators} />
         <IndicatorHoverTooltips indicators={paneIndicators} hoverPoint={indicatorHoverPoint} />
         <div ref={containerRef} aria-label="全屏K线趋势图" className="h-full w-full" />
       </div>
     </section>
-  );
-}
-
-function IndicatorPaneBorders(props: { indicators: IndicatorKey[] }) {
-  return (
-    <>
-      {props.indicators.map((indicator, index) => {
-        const bottom = xAxisPaneHeight + (props.indicators.length - index - 1) * indicatorPaneHeight;
-        return (
-          <div
-            key={indicator}
-            className="pointer-events-none absolute left-[10px] right-[58px] z-10 border border-[#e5eaf3]"
-            style={{ bottom, height: indicatorPaneHeight }}
-          />
-        );
-      })}
-    </>
   );
 }
 
@@ -234,10 +219,12 @@ export function toKLineChartPeriod(period: ChartPeriod): Period {
   }
 }
 
-export function buildKLineChartLayout(activeIndicators: IndicatorKey[]): Layout {
-  const candleContent = activeIndicators
-    .filter((indicator) => supportedCandleIndicators.includes(indicator))
-    .map((indicator) => toCandleIndicatorContent(indicator));
+export function buildKLineChartLayout(activeIndicators: IndicatorKey[], activePeriod: ChartPeriod = "day"): Layout {
+  const candleContent = activePeriod === "minute"
+    ? [{ name: "MA", calcParams: [5, 10, 20] }]
+    : activeIndicators
+      .filter((indicator) => supportedCandleIndicators.includes(indicator))
+      .map((indicator) => toCandleIndicatorContent(indicator));
   const panes: Layout["panes"] = [
     {
       type: "candle",
@@ -271,12 +258,18 @@ function toCandleIndicatorContent(indicator: IndicatorKey): LayoutPaneContentChi
   if (indicator === "MA") {
     return { name: "MA", calcParams: [5, 10, 20, 60] };
   }
+  if (indicator === "EMA") {
+    return { name: "EMA", calcParams: [5, 10, 20, 60] };
+  }
   return indicator;
 }
 
 function toPaneIndicatorContent(indicator: IndicatorKey): LayoutPaneContentChild {
   if (indicator === "VOL") {
     return { name: "VOL", calcParams: [5, 10] };
+  }
+  if (indicator === "DMI") {
+    return "ADX";
   }
   return indicator;
 }
@@ -349,16 +342,26 @@ const indicatorHoverColors: Partial<Record<IndicatorKey, string[]>> = {
   TRIX: ["#f97316", "#a855f7"],
   ROC: ["#3b82f6", "#f97316"],
   PVT: ["#10b981"],
+  ADX: ["#f97316", "#a855f7", "#3b82f6", "#fb7185"],
   DMI: ["#f97316", "#a855f7", "#3b82f6", "#fb7185"],
 };
 
 function toIndicatorKey(name: string): IndicatorKey | null {
-  const normalized = name.toUpperCase();
+  const normalized = name.toUpperCase() === "DMI" ? "ADX" : name.toUpperCase();
   return supportedPaneIndicators.includes(normalized as IndicatorKey) ? (normalized as IndicatorKey) : null;
 }
 
 function formatIndicatorDisplayName(indicator: IndicatorKey) {
-  return indicator === "DMI" ? "ADX" : indicator;
+  if (indicator === "DMI") {
+    return "ADX";
+  }
+  if (indicator === "SIGNALRATIO") {
+    return "信号比";
+  }
+  if (indicator === "AVGAMP") {
+    return "均幅";
+  }
+  return indicator;
 }
 
 function normalizeIndicatorTitle(figure: IndicatorFigure) {
@@ -426,7 +429,8 @@ export function buildCandleTooltipLegendTemplate(): TooltipLegend[] {
   ];
 }
 
-export function buildKLineChartStyles(): DeepPartial<Styles> {
+export function buildKLineChartStyles(activePeriod: ChartPeriod = "day"): DeepPartial<Styles> {
+  const isTimeSharing = activePeriod === "minute";
   return {
   grid: {
     horizontal: { show: true, color: "#edf1f7", size: 1, style: dashedLine, dashedValue: [4, 3] },
@@ -449,7 +453,26 @@ export function buildKLineChartStyles(): DeepPartial<Styles> {
     activeBackgroundColor: "rgba(22,119,255,0.06)",
   },
   candle: {
-    type: "candle_solid" as const,
+    type: isTimeSharing ? "area" as const : "candle_solid" as const,
+    area: {
+      lineSize: 2,
+      lineColor: "#1677ff",
+      value: "close",
+      smooth: false,
+      backgroundColor: [
+        { offset: 0, color: "rgba(22,119,255,0.16)" },
+        { offset: 1, color: "rgba(22,119,255,0.02)" },
+      ],
+      point: {
+        show: false,
+        color: "#1677ff",
+        radius: 3,
+        rippleColor: "rgba(22,119,255,0.2)",
+        rippleRadius: 6,
+        animation: false,
+        animationDuration: 0,
+      },
+    },
     bar: {
       upColor,
       downColor,

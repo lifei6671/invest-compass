@@ -1,4 +1,4 @@
-use crate::sidecar::CoreState;
+use crate::{commands::blocking::post_core_api, sidecar::CoreState};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -47,67 +47,68 @@ pub struct ReportExportResult {
 
 /// 读取报告历史列表，固定转发到 Go core `/api/reports/list`。
 #[tauri::command]
-pub fn report_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub async fn report_list(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/reports/list", &ReportListRequest {})
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/reports/list", ReportListRequest {}).await
 }
 
 /// 读取报告详情，固定转发到 Go core `/api/reports/get`。
 #[tauri::command]
-pub fn report_get(state: State<'_, CoreState>, id: i64) -> Result<serde_json::Value, String> {
+pub async fn report_get(state: State<'_, CoreState>, id: i64) -> Result<serde_json::Value, String> {
     validate_report_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/reports/get", &ReportIDRequest { id })
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/reports/get", ReportIDRequest { id }).await
 }
 
 /// 读取报告聚合统计，固定转发到 Go core `/api/reports/stats`。
 #[tauri::command]
-pub fn report_stats(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
+pub async fn report_stats(state: State<'_, CoreState>) -> Result<serde_json::Value, String> {
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/reports/stats", &ReportListRequest {})
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/reports/stats", ReportListRequest {}).await
 }
 
 /// 删除报告，固定转发到 Go core `/api/reports/delete`。
 #[tauri::command]
-pub fn report_delete(state: State<'_, CoreState>, id: i64) -> Result<serde_json::Value, String> {
+pub async fn report_delete(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<serde_json::Value, String> {
     validate_report_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/reports/delete", &ReportIDRequest { id })
-        .map_err(|error| error.to_string())
+    post_core_api(client, "/api/reports/delete", ReportIDRequest { id }).await
 }
 
 /// 批量删除报告，固定转发到 Go core `/api/reports/batch-delete`。
 #[tauri::command]
-pub fn report_batch_delete(
+pub async fn report_batch_delete(
     state: State<'_, CoreState>,
     ids: Vec<i64>,
 ) -> Result<serde_json::Value, String> {
     validate_report_ids(&ids)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/reports/batch-delete", &ReportIDsRequest { ids })
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/reports/batch-delete",
+        ReportIDsRequest { ids },
+    )
+    .await
 }
 
 /// 更新报告收藏状态，固定转发到 Go core `/api/reports/update`。
 #[tauri::command]
-pub fn report_update(
+pub async fn report_update(
     state: State<'_, CoreState>,
     id: i64,
     favorite: bool,
 ) -> Result<serde_json::Value, String> {
     validate_report_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api("/api/reports/update", &ReportUpdateRequest { id, favorite })
-        .map_err(|error| error.to_string())
+    post_core_api(
+        client,
+        "/api/reports/update",
+        ReportUpdateRequest { id, favorite },
+    )
+    .await
 }
 
 /// 导出报告 Markdown。保存路径必须由系统保存对话框返回，前端不能传入任意写入路径。
@@ -119,9 +120,8 @@ pub async fn report_export(
 ) -> Result<ReportExportResult, String> {
     validate_report_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    let response: CoreResponse<ReportExportBundle> = client
-        .post_api("/api/reports/export", &ReportIDRequest { id })
-        .map_err(|error| error.to_string())?;
+    let response: CoreResponse<ReportExportBundle> =
+        post_core_api(client, "/api/reports/export", ReportIDRequest { id }).await?;
     let default_file_name = safe_report_export_file_name(&response.data.file_name)?.to_string();
     let Some(file_path) = app_handle
         .dialog()
@@ -140,7 +140,13 @@ pub async fn report_export(
     let output_path = file_path
         .into_path()
         .map_err(|error| format!("解析导出路径失败: {error}"))?;
-    write_report_export_bundle(&output_path, &response.data)?;
+    let bundle = response.data;
+    tauri::async_runtime::spawn_blocking({
+        let output_path = output_path.clone();
+        move || write_report_export_bundle(&output_path, &bundle)
+    })
+    .await
+    .map_err(|error| format!("report export task failed: {error}"))??;
     Ok(ReportExportResult {
         saved: true,
         file_path: output_path.to_string_lossy().to_string(),

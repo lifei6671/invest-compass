@@ -119,8 +119,9 @@ test("Dashboard 总览最近报告查看入口进入报告详情路由", () => {
         recent_reports: [
           {
             id: 7,
-            title: "贵州茅台分析报告",
-            symbol: "CN:SH:600519",
+            title: "CN:SH:600522 stock_full AI 分析报告",
+            symbol: "CN:SH:600522",
+            stock_name: "中天科技",
             analysis_type: "stock_full",
             model_name: "gpt-test",
             created_at: "2026-06-25T15:00:00+08:00",
@@ -150,6 +151,9 @@ test("Dashboard 总览最近报告查看入口进入报告详情路由", () => {
     </MemoryRouter>,
   );
 
+  expect(screen.getByText("中天科技（CN:SH:600522）")).toBeInTheDocument();
+  expect(screen.getByText("个股综合分析")).toBeInTheDocument();
+  expect(screen.queryByText("stock_full")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("link", { name: "查看" }));
 
   expect(screen.getByText("chart:/reports/7")).toBeInTheDocument();

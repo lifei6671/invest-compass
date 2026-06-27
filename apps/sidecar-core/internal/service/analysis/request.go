@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/stock"
@@ -45,6 +46,14 @@ type ValidatedCreateRequest struct {
 	PromptTemplateID int64
 	RetryOfTaskID    string
 	UserPosition     *UserPosition
+}
+
+// ReportSnapshotMeta 是报告详情可审计展示的模型和模板元数据，不包含密钥。
+type ReportSnapshotMeta struct {
+	PromptTemplate string
+	Model          string
+	Temperature    float64
+	MaxTokens      int
 }
 
 var supportedAnalysisTypes = map[AnalysisType]struct{}{
@@ -97,6 +106,21 @@ func (request ValidatedCreateRequest) InputSnapshotForLog() string {
 
 // InputSnapshotForReport 返回报告审计用输入快照，可包含一次性持仓输入但不得包含密钥。
 func (request ValidatedCreateRequest) InputSnapshotForReport() string {
+	return request.inputSnapshotForReport("", ReportSnapshotMeta{})
+}
+
+// InputSnapshotForReportWithPrompt 返回带原始 Prompt 的报告输入快照，用于报告详情审计回放。
+func (request ValidatedCreateRequest) InputSnapshotForReportWithPrompt(rawPrompt string) string {
+	return request.inputSnapshotForReport(rawPrompt, ReportSnapshotMeta{})
+}
+
+// InputSnapshotForReportWithContext 返回带 Prompt 和模型上下文的报告输入快照。
+func (request ValidatedCreateRequest) InputSnapshotForReportWithContext(rawPrompt string, meta ReportSnapshotMeta) string {
+	return request.inputSnapshotForReport(rawPrompt, meta)
+}
+
+// inputSnapshotForReport 统一生成报告快照，避免日志快照和报告快照字段漂移。
+func (request ValidatedCreateRequest) inputSnapshotForReport(rawPrompt string, meta ReportSnapshotMeta) string {
 	payload := map[string]any{
 		"symbol":             request.Symbol.String(),
 		"analysis_type":      request.AnalysisType,
@@ -105,11 +129,26 @@ func (request ValidatedCreateRequest) InputSnapshotForReport() string {
 		"retry_of_task_id":   request.RetryOfTaskID,
 		"user_position":      request.UserPosition,
 	}
+	if prompt := strings.TrimSpace(rawPrompt); prompt != "" {
+		payload["raw_prompt"] = logger.RedactText(prompt)
+	}
+	if value := strings.TrimSpace(meta.PromptTemplate); value != "" {
+		payload["prompt_template"] = value
+	}
+	if value := strings.TrimSpace(meta.Model); value != "" {
+		payload["model"] = value
+	}
+	if meta.Temperature > 0 {
+		payload["temperature"] = meta.Temperature
+	}
+	if meta.MaxTokens > 0 {
+		payload["max_tokens"] = meta.MaxTokens
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return ""
 	}
-	return logger.RedactText(string(encoded))
+	return string(encoded)
 }
 
 // CreateTask 将已校验分析请求转换为待执行任务和创建事件。

@@ -117,8 +117,7 @@ func (service Service) NotifyTaskTerminal(ctx context.Context, task model.Task) 
 		notificationType = TypeTaskSuccess
 		level = LevelSuccess
 		title = "任务完成"
-		content = notificationTaskTitle(task) + " 已完成"
-		route = service.taskSuccessRoute(ctx, task.ID)
+		content, route = service.taskSuccessNotification(ctx, task)
 	case "FAILED":
 		notificationType = TypeTaskFailed
 		level = LevelError
@@ -259,13 +258,57 @@ func (service Service) createOnce(ctx context.Context, notification model.Notifi
 	return true, nil
 }
 
-// taskSuccessRoute 返回任务成功通知的目标路由，有报告时优先打开报告详情。
-func (service Service) taskSuccessRoute(ctx context.Context, taskID string) string {
-	report, ok, err := service.store.GetAnalysisReportByTaskID(ctx, taskID)
+// taskSuccessNotification 生成任务成功通知的中文文案和跳转目标，避免把内部 prompt key 暴露给用户。
+func (service Service) taskSuccessNotification(ctx context.Context, task model.Task) (string, string) {
+	report, ok, err := service.store.GetAnalysisReportByTaskID(ctx, task.ID)
+	subject := friendlyAnalysisTaskSubject(task, report)
 	if err != nil || !ok || report.ID <= 0 {
-		return "/tasks"
+		return subject + "已完成，可在任务历史中查看。", "/tasks"
 	}
-	return "/reports/" + strconv.FormatInt(report.ID, 10)
+	return subject + "报告已生成，可点击查看。", "/reports/" + strconv.FormatInt(report.ID, 10)
+}
+
+// friendlyAnalysisTaskSubject 将任务标题中的内部类型名转换为通知里可读的中文分析对象。
+func friendlyAnalysisTaskSubject(task model.Task, report model.AnalysisReport) string {
+	rawTitle := strings.TrimSpace(task.Title)
+	symbol := strings.TrimSpace(report.Symbol)
+	analysisType := strings.TrimSpace(report.AnalysisType)
+	if rawTitle != "" {
+		parts := strings.Fields(rawTitle)
+		if len(parts) > 0 {
+			symbol = strings.TrimSpace(parts[0])
+		}
+		if len(parts) > 1 {
+			analysisType = strings.TrimSpace(parts[1])
+		}
+	}
+	label := analysisTypeNotificationLabel(analysisType)
+	if symbol != "" {
+		return symbol + " " + label
+	}
+	if rawTitle != "" {
+		return rawTitle
+	}
+	if strings.TrimSpace(task.ID) != "" {
+		return strings.TrimSpace(task.ID) + " " + label
+	}
+	return label
+}
+
+// analysisTypeNotificationLabel 映射首版内置分析类型到通知文案。
+func analysisTypeNotificationLabel(analysisType string) string {
+	switch strings.ToLower(strings.TrimSpace(analysisType)) {
+	case "stock_full":
+		return "个股综合分析"
+	case "technical":
+		return "技术面分析"
+	case "fundamental":
+		return "基本面分析"
+	case "news":
+		return "消息面分析"
+	default:
+		return "AI 分析"
+	}
 }
 
 // notificationTaskTitle 返回任务标题，缺失时用 task_id 保证通知仍可识别来源。

@@ -20,6 +20,7 @@ export type TaskItem = {
   startedAt: string;
   startedDate: string;
   endedAt?: string;
+  completedDate: string;
   duration: string;
   errorSummary?: string;
   reportId?: number;

@@ -1,7 +1,4 @@
-use crate::{
-    desktop_runtime,
-    sidecar::{runtime_core_binary_path, CoreState},
-};
+use crate::{commands::blocking::post_core_api_with_recovery, sidecar::CoreState};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
@@ -45,53 +42,56 @@ pub struct DataSourceCredentialTestPayload {
 
 /// 读取数据源凭据页数据，固定转发到 Go core `/api/data-source/credentials/list`。
 #[tauri::command]
-pub fn data_source_credentials_list(
+pub async fn data_source_credentials_list(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
 ) -> Result<serde_json::Value, String> {
     post_data_source_credential_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/data-source/credentials/list",
-        &DataSourceCredentialListRequest {},
+        DataSourceCredentialListRequest {},
     )
+    .await
 }
 
 /// 保存数据源凭据配置，固定转发到 Go core `/api/data-source/credentials/save`。
 #[tauri::command]
-pub fn data_source_credentials_save(
+pub async fn data_source_credentials_save(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: DataSourceCredentialSavePayload,
 ) -> Result<serde_json::Value, String> {
     validate_save_payload(&payload)?;
     post_data_source_credential_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/data-source/credentials/save",
-        &payload,
+        payload,
     )
+    .await
 }
 
 /// 清除数据源凭据，固定转发到 Go core `/api/data-source/credentials/clear`。
 #[tauri::command]
-pub fn data_source_credentials_clear(
+pub async fn data_source_credentials_clear(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: DataSourceCredentialProviderPayload,
 ) -> Result<serde_json::Value, String> {
     validate_provider_id(&payload.provider_id)?;
     post_data_source_credential_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/data-source/credentials/clear",
-        &payload,
+        payload,
     )
+    .await
 }
 
 /// 执行数据源凭据真实连接测试，固定转发到 Go core `/api/data-source/credentials/test`。
 #[tauri::command]
-pub fn data_source_credentials_test(
+pub async fn data_source_credentials_test(
     app_handle: AppHandle,
     state: State<'_, CoreState>,
     payload: DataSourceCredentialTestPayload,
@@ -101,35 +101,25 @@ pub fn data_source_credentials_test(
         return Err("invalid test target".to_string());
     }
     post_data_source_credential_api(
-        &app_handle,
-        &state,
+        app_handle,
+        state.inner().clone(),
         "/api/data-source/credentials/test",
-        &payload,
+        payload,
     )
+    .await
 }
 
 /// 数据源凭据命令统一通过恢复式调用 Go core，避免启动瞬间旧端口失效。
-fn post_data_source_credential_api<TRequest>(
-    app_handle: &AppHandle,
-    state: &CoreState,
-    path: &str,
-    payload: &TRequest,
+async fn post_data_source_credential_api<TRequest>(
+    app_handle: AppHandle,
+    state: CoreState,
+    path: &'static str,
+    payload: TRequest,
 ) -> Result<serde_json::Value, String>
 where
-    TRequest: Serialize,
+    TRequest: Serialize + Send + 'static,
 {
-    let binary_path = runtime_core_binary_path();
-    let workspace_path =
-        desktop_runtime::default_workspace_path(app_handle).map_err(|error| error.to_string())?;
-    state
-        .post_api_with_recovery(
-            &binary_path,
-            &workspace_path,
-            std::time::Duration::from_secs(5),
-            path,
-            payload,
-        )
-        .map_err(|error| error.to_string())
+    post_core_api_with_recovery(state, app_handle, path, payload).await
 }
 
 /// 校验保存 payload，明文凭据可以为空但基础配置不能缺失。

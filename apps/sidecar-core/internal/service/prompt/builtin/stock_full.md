@@ -2,7 +2,7 @@
 key: builtin_stock_full
 name: 个股综合分析
 type: stock_full
-version: 1
+version: 2
 is_builtin: true
 builtin_locked: true
 variables:

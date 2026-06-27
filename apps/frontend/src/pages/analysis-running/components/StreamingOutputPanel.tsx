@@ -3,6 +3,7 @@ import { Button, Empty, Switch } from "antd";
 
 type StreamingOutputPanelProps = {
   autoScroll: boolean;
+  generating: boolean;
   markdown: string;
   onAutoScrollChange: (checked: boolean) => void;
   onClear: () => void;
@@ -15,7 +16,7 @@ export function StreamingOutputPanel(props: StreamingOutputPanelProps) {
     <section className="analysis-running-card analysis-running-stream-card">
       <div className="analysis-running-card-header">
         <h2 className="analysis-running-card-title">
-          流式输出 {hasContent ? <span>（正在生成中...）</span> : null}
+          流式输出 {hasContent && props.generating ? <span>（正在生成中...）</span> : null}
         </h2>
         <div className="analysis-running-stream-tools">
           <span>自动滚动</span>
@@ -29,7 +30,7 @@ export function StreamingOutputPanel(props: StreamingOutputPanelProps) {
       <div className="analysis-running-stream-body">
         {hasContent ? <MarkdownPreview markdown={props.markdown} /> : <Empty description="暂无流式输出" />}
       </div>
-      {hasContent ? (
+      {hasContent && props.generating ? (
         <div className="analysis-running-generating-note">
           <LoadingOutlined />
           <span>内容持续生成中...</span>

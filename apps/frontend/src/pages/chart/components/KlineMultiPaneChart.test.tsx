@@ -75,31 +75,89 @@ test("分时周期映射为 klinecharts 的 1 分钟周期", () => {
 });
 
 test("根据激活指标生成 klinecharts 多窗格布局", () => {
-  const layout = buildKLineChartLayout(["MA", "VOL", "MACD", "KDJ"]);
+  const layout = buildKLineChartLayout(["MA", "VOL", "MACD", "KDJ"], "day");
+  const panes = layout.panes ?? [];
 
-  expect(layout.panes).toEqual([
+  expect(panes[0]).toEqual(
     expect.objectContaining({ type: "candle", content: [expect.objectContaining({ name: "MA", calcParams: [5, 10, 20, 60] })] }),
+  );
+  expect(panes).toEqual(expect.arrayContaining([
     expect.objectContaining({ type: "indicator", content: [expect.objectContaining({ name: "VOL", calcParams: [5, 10] })] }),
     expect.objectContaining({ type: "indicator", content: ["MACD"] }),
     expect.objectContaining({ type: "indicator", content: ["KDJ"] }),
     expect.objectContaining({ type: "xAxis" }),
-  ]);
+  ]));
 });
 
-test("第一批内置扩展指标映射到对应窗格", () => {
-  const layout = buildKLineChartLayout(["MA", "SAR", "VOL", "CCI", "AO", "TRIX", "ROC", "PVT", "DMI"]);
+test("go-stock 指标映射到主图和副图窗格", () => {
+  const layout = buildKLineChartLayout([
+    "MA",
+    "EMA",
+    "KAMA",
+    "STREND",
+    "SAR",
+    "ICHI",
+    "DEMA",
+    "SATS",
+    "GATOR",
+    "HULL",
+    "TEMA",
+    "BOLL",
+    "KELT",
+    "DONCH",
+    "VWAP",
+    "VWBAND",
+    "PIVOT",
+    "ZIGZAG",
+    "FRACTAL",
+    "SMC",
+    "VOL",
+    "CCI",
+    "AO",
+    "TRIX",
+    "ROC",
+    "PVT",
+    "ADX",
+  ], "day");
+  const panes = layout.panes ?? [];
 
-  expect(layout.panes).toEqual([
-    expect.objectContaining({ type: "candle", content: [expect.objectContaining({ name: "MA" }), "SAR"] }),
+  expect(panes[0]).toEqual(
+    expect.objectContaining({
+      type: "candle",
+      content: expect.arrayContaining([
+        expect.objectContaining({ name: "MA" }),
+        expect.objectContaining({ name: "EMA" }),
+        "KAMA",
+        "STREND",
+        "SAR",
+        "ICHI",
+        "DEMA",
+        "SATS",
+        "GATOR",
+        "HULL",
+        "TEMA",
+        "BOLL",
+        "KELT",
+        "DONCH",
+        "VWAP",
+        "VWBAND",
+        "PIVOT",
+        "ZIGZAG",
+        "FRACTAL",
+        "SMC",
+      ]),
+    }),
+  );
+  expect(panes).toEqual(expect.arrayContaining([
     expect.objectContaining({ type: "indicator", content: [expect.objectContaining({ name: "VOL", calcParams: [5, 10] })] }),
     expect.objectContaining({ type: "indicator", content: ["CCI"] }),
     expect.objectContaining({ type: "indicator", content: ["AO"] }),
     expect.objectContaining({ type: "indicator", content: ["TRIX"] }),
     expect.objectContaining({ type: "indicator", content: ["ROC"] }),
     expect.objectContaining({ type: "indicator", content: ["PVT"] }),
-    expect.objectContaining({ type: "indicator", content: ["DMI"] }),
+    expect.objectContaining({ type: "indicator", content: ["ADX"] }),
     expect.objectContaining({ type: "xAxis" }),
-  ]);
+  ]));
 });
 
 test("klinecharts 使用中文行情术语", () => {
@@ -120,6 +178,23 @@ test("主图启用 klinecharts 原生中文 tooltip", () => {
 
   expect(styles.candle?.tooltip?.showRule).toBe("follow_cross");
   expect(styles.candle?.tooltip?.legend?.template).toEqual(buildCandleTooltipLegendTemplate());
+});
+
+test("分时主图使用分时线并只挂均线", () => {
+  const styles = buildKLineChartStyles("minute");
+  const layout = buildKLineChartLayout(["BOLL", "SAR", "MACD"], "minute");
+  const panes = layout.panes ?? [];
+
+  expect(styles.candle?.type).toBe("area");
+  expect(panes[0]).toEqual(
+    expect.objectContaining({ type: "candle", content: [expect.objectContaining({ name: "MA", calcParams: [5, 10, 20] })] }),
+  );
+  expect(panes[0]).not.toEqual(expect.objectContaining({ content: expect.arrayContaining(["BOLL", "SAR"]) }));
+});
+
+test("非分时主图仍使用蜡烛图样式", () => {
+  expect(buildKLineChartStyles("5m").candle?.type).toBe("candle_solid");
+  expect(buildKLineChartStyles("day").candle?.type).toBe("candle_solid");
 });
 
 test("副图浮层按指标窗格展示当前值", () => {

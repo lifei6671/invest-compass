@@ -155,6 +155,38 @@ test("数据源概览从真实 Provider、缓存和调度状态派生展示", as
   expect(screen.getByText("4")).toBeInTheDocument();
 });
 
+test("数据源概览将后端 Provider 技术来源说明转成中文展示", async () => {
+  providersStatusMock.mockResolvedValueOnce({
+    items: [
+      {
+        name: "sina-tencent-market",
+        source: "Sina public quote endpoint, Tencent public kline/minute endpoints, TDX minute kline endpoint, and EastMoney public kline fallback endpoint",
+        available: true,
+        last_error: "",
+      },
+      {
+        name: "multi-market-news",
+        source: "Cailianpress web telegraph endpoint, Sina finance live feed endpoint, Wallstreetcn live news endpoint, TradingView Chinese news endpoint",
+        available: true,
+        last_error: "",
+      },
+    ],
+  });
+
+  render(
+    <AntApp>
+      <DataSourceSettingsPage />
+    </AntApp>,
+  );
+
+  await waitFor(() => {
+    expect(screen.getByText("新浪公开行情接口、腾讯 K 线/分时接口、通达信分钟 K 线接口、东方财富 K 线兜底接口")).toBeInTheDocument();
+  });
+  expect(screen.getByText("财联社电报、新浪财经直播、华尔街见闻快讯、TradingView 中文资讯")).toBeInTheDocument();
+  expect(screen.queryByText(/Sina public quote endpoint/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Cailianpress web telegraph endpoint/)).not.toBeInTheDocument();
+});
+
 test("数据源概览动作使用真实刷新、清理缓存和已有调度入口", async () => {
   window.location.hash = "#/settings";
   render(

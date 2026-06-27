@@ -216,7 +216,7 @@ function marketDataSourcesFromProviders(providers: ProviderStatusItem[]): Market
     .filter((provider) => !isNewsProvider(provider))
     .map((provider) => ({
       label: provider.name,
-      source: provider.source || "后端未返回",
+      source: providerSourceText(provider.source),
       status: providerStatus(provider),
     }));
 }
@@ -226,9 +226,21 @@ function newsSourcesFromProviders(providers: ProviderStatusItem[]): NewsSourceIt
     .filter(isNewsProvider)
     .map((provider) => ({
       label: provider.name,
-      source: provider.source || "后端未返回",
+      source: providerSourceText(provider.source),
       status: providerStatus(provider),
     }));
+}
+
+const providerSourceTextMap: Record<string, string> = {
+  "Sina public quote endpoint, Tencent public kline/minute endpoints, TDX minute kline endpoint, and EastMoney public kline fallback endpoint":
+    "新浪公开行情接口、腾讯 K 线/分时接口、通达信分钟 K 线接口、东方财富 K 线兜底接口",
+  "Cailianpress web telegraph endpoint, Sina finance live feed endpoint, Wallstreetcn live news endpoint, TradingView Chinese news endpoint":
+    "财联社电报、新浪财经直播、华尔街见闻快讯、TradingView 中文资讯",
+  "Sina finance live feed endpoint": "新浪财经直播",
+};
+
+function providerSourceText(source: string): string {
+  return providerSourceTextMap[source] ?? (source || "后端未返回");
 }
 
 function healthItemsFromOverview(overview: DataSourceOverviewState): HealthStatusItem[] {

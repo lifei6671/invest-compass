@@ -286,7 +286,7 @@ func TestBuildActionsConfigInjectsProductionAIConfigTester(t *testing.T) {
 	}
 }
 
-// TestBuildActionsConfigInjectsRealProviders 验证生产配置注入真实行情 Provider，并让资讯 Provider 受凭据状态约束。
+// TestBuildActionsConfigInjectsRealProviders 验证生产配置注入真实行情 Provider 和多来源资讯 Provider。
 func TestBuildActionsConfigInjectsRealProviders(t *testing.T) {
 	store := newMainTestStore(t)
 	logSource := logexportservice.NewMemorySource(nil, 10)
@@ -316,8 +316,16 @@ func TestBuildActionsConfigInjectsRealProviders(t *testing.T) {
 		t.Fatal("production news provider must expose status")
 	}
 	newsProviderStatus := newsStatus.Status(context.Background())
-	if newsProviderStatus.Available || newsProviderStatus.LastError != "data_source_credential_not_configured" {
-		t.Fatalf("news provider must require credential before reporting available: %+v", newsProviderStatus)
+	if !newsProviderStatus.Available {
+		t.Fatalf("news provider must stay available when at least one public source is usable: %+v", newsProviderStatus)
+	}
+	for _, source := range []string{"Cailianpress", "Sina", "Wallstreetcn", "TradingView", "东方财富"} {
+		if !strings.Contains(newsProviderStatus.Source, source) {
+			t.Fatalf("news provider status must include %s source, got %+v", source, newsProviderStatus)
+		}
+	}
+	if !strings.Contains(newsProviderStatus.LastError, "cailianpress-news:data_source_credential_not_configured") {
+		t.Fatalf("news provider should keep partial credential warning for cls, got %+v", newsProviderStatus)
 	}
 }
 

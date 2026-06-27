@@ -116,7 +116,7 @@ struct BootStatusData {
 
 /// 读取应用启动初始化状态；该命令是前端启动页唯一状态源，不暴露任意 Go API 路径。
 #[tauri::command]
-pub fn app_boot_status(
+pub async fn app_boot_status(
     app_handle: AppHandle,
     _state: State<'_, CoreState>,
 ) -> Result<serde_json::Value, String> {

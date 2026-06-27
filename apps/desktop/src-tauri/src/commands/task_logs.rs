@@ -1,4 +1,4 @@
-use crate::sidecar::CoreState;
+use crate::{commands::blocking::post_core_api, sidecar::CoreState};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -55,7 +55,7 @@ pub struct TaskLogsExportResult {
 
 /// 读取任务结构化日志列表，固定转发到 Go core `/api/tasks/logs/list`。
 #[tauri::command]
-pub fn task_logs_list(
+pub async fn task_logs_list(
     state: State<'_, CoreState>,
     task_id: String,
     level: Option<String>,
@@ -84,51 +84,50 @@ pub fn task_logs_list(
         return Err("invalid task log limit".to_string());
     }
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(TASK_LOGS_LIST_PATH, &request)
-        .map_err(|error| error.to_string())
+    post_core_api(client, TASK_LOGS_LIST_PATH, request).await
 }
 
 /// 读取单条任务结构化日志详情，固定转发到 Go core `/api/tasks/logs/get`。
 #[tauri::command]
-pub fn task_log_get(state: State<'_, CoreState>, id: i64) -> Result<serde_json::Value, String> {
+pub async fn task_log_get(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<serde_json::Value, String> {
     validate_task_log_id(id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(TASK_LOG_GET_PATH, &TaskLogGetRequest { id })
-        .map_err(|error| error.to_string())
+    post_core_api(client, TASK_LOG_GET_PATH, TaskLogGetRequest { id }).await
 }
 
 /// 读取日志抽屉基础摘要，固定转发到 Go core `/api/tasks/logs/summary`。
 #[tauri::command]
-pub fn task_log_summary(
+pub async fn task_log_summary(
     state: State<'_, CoreState>,
     task_id: String,
 ) -> Result<serde_json::Value, String> {
-    post_task_log_task_id(state, TASK_LOG_SUMMARY_PATH, task_id)
+    post_task_log_task_id(state, TASK_LOG_SUMMARY_PATH, task_id).await
 }
 
 /// 读取失败诊断，固定转发到 Go core `/api/tasks/logs/diagnosis`。
 #[tauri::command]
-pub fn task_log_diagnosis(
+pub async fn task_log_diagnosis(
     state: State<'_, CoreState>,
     task_id: String,
 ) -> Result<serde_json::Value, String> {
-    post_task_log_task_id(state, TASK_LOG_DIAGNOSIS_PATH, task_id)
+    post_task_log_task_id(state, TASK_LOG_DIAGNOSIS_PATH, task_id).await
 }
 
 /// 读取安全上下文摘要，固定转发到 Go core `/api/tasks/logs/context`。
 #[tauri::command]
-pub fn task_log_context(
+pub async fn task_log_context(
     state: State<'_, CoreState>,
     task_id: String,
 ) -> Result<serde_json::Value, String> {
-    post_task_log_task_id(state, TASK_LOG_CONTEXT_PATH, task_id)
+    post_task_log_task_id(state, TASK_LOG_CONTEXT_PATH, task_id).await
 }
 
 /// 导出单个任务的脱敏日志包，并写入调用方明确选择的本地目录。
 #[tauri::command]
-pub fn task_logs_export(
+pub async fn task_logs_export(
     state: State<'_, CoreState>,
     task_id: String,
     target_dir: String,
@@ -137,27 +136,34 @@ pub fn task_logs_export(
     let target_dir = PathBuf::from(target_dir);
     validate_task_log_export_target_dir(&target_dir)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    let response: CoreResponse<TaskLogExportBundle> = client
-        .post_api(TASK_LOG_EXPORT_PATH, &TaskLogTaskIDRequest { task_id })
-        .map_err(|error| error.to_string())?;
-    let output_path = write_task_log_export_bundle(&target_dir, &response.data)?;
+    let response: CoreResponse<TaskLogExportBundle> = post_core_api(
+        client,
+        TASK_LOG_EXPORT_PATH,
+        TaskLogTaskIDRequest { task_id },
+    )
+    .await?;
+    let bundle = response.data;
+    let file_name = bundle.file_name.clone();
+    let output_path = tauri::async_runtime::spawn_blocking(move || {
+        write_task_log_export_bundle(&target_dir, &bundle)
+    })
+    .await
+    .map_err(|error| format!("task log export task failed: {error}"))??;
     Ok(TaskLogsExportResult {
         file_path: output_path.to_string_lossy().to_string(),
-        file_name: response.data.file_name,
+        file_name,
     })
 }
 
 // post_task_log_task_id 将任务 ID 类查询固定转发到指定 Go API 路径。
-fn post_task_log_task_id(
+async fn post_task_log_task_id(
     state: State<'_, CoreState>,
-    path: &str,
+    path: &'static str,
     task_id: String,
 ) -> Result<serde_json::Value, String> {
     validate_task_id(&task_id)?;
     let client = state.client().map_err(|error| error.to_string())?;
-    client
-        .post_api(path, &TaskLogTaskIDRequest { task_id })
-        .map_err(|error| error.to_string())
+    post_core_api(client, path, TaskLogTaskIDRequest { task_id }).await
 }
 
 // validate_task_id 校验任务 ID 不能为空。

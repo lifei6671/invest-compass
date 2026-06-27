@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
 	aiservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/ai"
+	marketservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
+	stockservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/stock"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/task"
 )
 
@@ -33,17 +36,21 @@ func TestExecutorCompletesTaskAndSavesReport(t *testing.T) {
 		Content: "请基于 {{ quote }}、{{ kline_summary }}、{{ indicators }}、{{ news }} 输出 {{ analysis_language }} 报告。",
 	}
 	store.quote = model.Quote{
-		Symbol:        "US:AAPL",
-		Price:         210.5,
-		ChangePercent: 1.25,
-		QuoteTime:     time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC),
-		Provider:      "test-provider",
-		UpdatedAt:     time.Now().UTC(),
+		Symbol:         "US:AAPL",
+		Price:          210.5,
+		ChangePercent:  1.25,
+		Volume:         1200000,
+		Amount:         252600000,
+		TurnoverRate:   3.98,
+		PE:             28.6,
+		PB:             8.2,
+		TotalMarketCap: 123456789000,
+		FloatMarketCap: 98765432100,
+		QuoteTime:      time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC),
+		Provider:       "test-provider",
+		UpdatedAt:      time.Now().UTC(),
 	}
-	store.klines = []model.Kline{
-		{Symbol: "US:AAPL", Period: "day", Adjust: "none", TradeDate: "2026-06-17", Close: 200, High: 205, Low: 198, Volume: 1000},
-		{Symbol: "US:AAPL", Period: "day", Adjust: "none", TradeDate: "2026-06-18", Close: 210, High: 212, Low: 199, Volume: 1200},
-	}
+	store.klines = makeAnalysisIndicatorKlines(defaultKlineLimit)
 	store.news = []model.NewsItem{
 		{Title: "新品发布", Summary: "公司发布新产品", PublishedAt: time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)},
 	}
@@ -85,9 +92,19 @@ func TestExecutorCompletesTaskAndSavesReport(t *testing.T) {
 	joinedMessages := chat.requests[0].Messages[0].Content + "\n" + chat.requests[0].Messages[1].Content
 	if !strings.Contains(joinedMessages, "不构成投资建议") ||
 		!strings.Contains(joinedMessages, "210.50") ||
-		!strings.Contains(joinedMessages, "新品发布") ||
-		!strings.Contains(joinedMessages, "用户一次性持仓输入") {
+		!strings.Contains(joinedMessages, "turnover_rate=3.98%") ||
+		!strings.Contains(joinedMessages, "total_market_cap=123456789000") ||
+		!strings.Contains(joinedMessages, "float_market_cap=98765432100") ||
+		!strings.Contains(joinedMessages, "MA ma5=") ||
+		!strings.Contains(joinedMessages, "MACD dif=") ||
+		!strings.Contains(joinedMessages, "RSI rsi6=") ||
+		!strings.Contains(joinedMessages, "KDJ k=") ||
+		!strings.Contains(joinedMessages, "BOLL middle=") ||
+		!strings.Contains(joinedMessages, "新品发布") {
 		t.Fatalf("AI request missing analysis context: %#v", chat.requests[0].Messages)
+	}
+	if strings.Contains(joinedMessages, "用户一次性持仓输入") || strings.Contains(joinedMessages, "123.45") {
+		t.Fatalf("AI request must omit user position when template does not use user_position: %#v", chat.requests[0].Messages)
 	}
 
 	taskModel := store.tasks["task-1"]
@@ -99,10 +116,24 @@ func TestExecutorCompletesTaskAndSavesReport(t *testing.T) {
 		store.events[len(store.events)-1].EventType != string(task.EventSuccess) {
 		t.Fatalf("unexpected task events: %+v", store.events)
 	}
+	assertProgressEvents(t, store.events, []expectedProgressEvent{
+		{stage: "quote_fetch", progress: 20, message: "行情快照已读取"},
+		{stage: "kline_fetch", progress: 35, message: "K 线数据已准备"},
+		{stage: "calc_macd", progress: 50, message: "技术指标已计算"},
+		{stage: "prompt_build", progress: 65, message: "Prompt 已构建"},
+		{stage: "stream_start", progress: 80, message: "AI 模型已响应"},
+		{stage: "stream_chunk", progress: 90, message: "AI 输出已生成"},
+	})
 	if store.report.TaskID != "task-1" ||
 		store.report.ContentMarkdown != "报告正文\n风险提示：市场波动。" ||
 		!strings.Contains(store.report.InputSnapshot, "123.45") ||
 		!strings.Contains(store.report.InputSnapshot, "medium") ||
+		!strings.Contains(store.report.InputSnapshot, "System:") ||
+		!strings.Contains(store.report.InputSnapshot, "请基于") ||
+		!strings.Contains(store.report.InputSnapshot, `"model":"gpt-analysis"`) ||
+		!strings.Contains(store.report.InputSnapshot, `"temperature":0.2`) ||
+		!strings.Contains(store.report.InputSnapshot, `"max_tokens":2048`) ||
+		!strings.Contains(store.report.InputSnapshot, `"prompt_template":"综合分析"`) ||
 		strings.Contains(store.report.InputSnapshot, "sk-runtime-secret") {
 		t.Fatalf("unexpected saved report: %+v", store.report)
 	}
@@ -152,6 +183,133 @@ func TestExecutorDefaultChatClientUsesInjectedHTTPClient(t *testing.T) {
 	}
 	if !called || response.Content != "报告正文" {
 		t.Fatalf("expected injected HTTP client to be used, called=%v response=%+v", called, response)
+	}
+}
+
+// TestDailyKlinesKeepsDailyBarsSeparateFromSummary 验证每日 K 线明细独立填入 Prompt，不混在 K 线摘要里。
+func TestDailyKlinesKeepsDailyBarsSeparateFromSummary(t *testing.T) {
+	klines := []model.Kline{
+		{TradeDate: "2025-06-27", Open: 10.1, High: 10.8, Low: 9.9, Close: 10.5, Volume: 1000, Amount: 10500},
+		{TradeDate: "2026-06-26", Open: 12.1, High: 12.8, Low: 11.9, Close: 12.5, Volume: 1200, Amount: 15000},
+	}
+	summary := klineSummary(klines)
+	daily := dailyKlines(klines)
+
+	if strings.Contains(summary, "date=2025-06-27") || strings.Contains(summary, "daily_kline") {
+		t.Fatalf("kline summary must not contain daily bars: %s", summary)
+	}
+	for _, expected := range []string{
+		"date=2025-06-27 open=10.10 high=10.80 low=9.90 close=10.50 volume=1000 amount=10500",
+		"date=2026-06-26 open=12.10 high=12.80 low=11.90 close=12.50 volume=1200 amount=15000",
+	} {
+		if !strings.Contains(daily, expected) {
+			t.Fatalf("daily klines missing %q: %s", expected, daily)
+		}
+	}
+}
+
+// TestDefaultKlineLimitUsesRecentSixtyDailyBars 验证分析任务默认只拉取最近 60 日 K 数据。
+func TestDefaultKlineLimitUsesRecentSixtyDailyBars(t *testing.T) {
+	if defaultKlineLimit != 60 {
+		t.Fatalf("defaultKlineLimit must be 60 daily bars, got %d", defaultKlineLimit)
+	}
+}
+
+// TestIndicatorSummaryIncludesCommonTechnicalIndicators 验证个股综合分析会把常用技术指标填入 AI 输入。
+func TestIndicatorSummaryIncludesCommonTechnicalIndicators(t *testing.T) {
+	summary := indicatorSummary(makeAnalysisIndicatorKlines(defaultKlineLimit))
+
+	for _, expected := range []string{
+		"MA ma5=",
+		"ma10=",
+		"ma20=",
+		"ma60=",
+		"EMA ema12=",
+		"ema26=",
+		"MACD dif=",
+		"dea=",
+		"bar=",
+		"RSI rsi6=",
+		"rsi12=",
+		"rsi24=",
+		"KDJ k=",
+		"d=",
+		"j=",
+		"BOLL middle=",
+		"upper=",
+		"lower=",
+		"volatility=",
+		"max_drawdown=",
+	} {
+		if !strings.Contains(summary, expected) {
+			t.Fatalf("indicator summary missing %q: %s", expected, summary)
+		}
+	}
+}
+
+// TestExecutorFetchesMissingKlinesFromMarketProvider 验证分析任务不会要求前端先打开 K 线页预热缓存。
+func TestExecutorFetchesMissingKlinesFromMarketProvider(t *testing.T) {
+	store := newExecutionStore()
+	store.aiConfig = model.AIConfig{ID: 7, Provider: aiservice.ProviderOpenAICompatible, ModelName: "gpt-analysis"}
+	store.template = model.PromptTemplate{
+		ID:      9,
+		Name:    "综合分析",
+		Type:    "stock_full",
+		Content: "请基于 {{ quote }}、{{ kline_summary }}、{{ indicators }} 输出报告。",
+	}
+	store.quote = model.Quote{
+		Symbol:    "CN:SH:600522",
+		Price:     12.3,
+		QuoteTime: time.Date(2026, 6, 26, 15, 0, 0, 0, time.UTC),
+		Provider:  "cache-provider",
+		UpdatedAt: time.Now().UTC(),
+	}
+	provider := &recordingMarketProvider{
+		klines: []marketservice.KlineBar{
+			{
+				Symbol:    mustParseStockSymbol(t, "CN:SH:600522"),
+				Period:    marketservice.PeriodDay,
+				Adjust:    marketservice.AdjustNone,
+				TradeDate: "2026-06-25",
+				Open:      11.8,
+				High:      12.5,
+				Low:       11.6,
+				Close:     12.3,
+				Volume:    1000,
+				Amount:    12300,
+				Provider:  "provider-kline",
+			},
+		},
+	}
+	executor := Executor{
+		Store:          store,
+		MarketProvider: provider,
+		NewChatClient: func(aiservice.Config, string) ChatClient {
+			return &recordingChatClient{response: aiservice.ChatResponse{Content: "报告正文"}}
+		},
+		Now: func() time.Time {
+			return time.Date(2026, 6, 26, 15, 30, 0, 0, time.UTC)
+		},
+	}
+	validated := mustValidateCreateRequest(t, CreateRequest{
+		Symbol:           "CN:SH:600522",
+		AnalysisType:     AnalysisStockFull,
+		AIConfigID:       7,
+		PromptTemplateID: 9,
+	})
+
+	if err := executor.Execute(context.Background(), "task-fetch-klines", validated, "sk-runtime-secret"); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if provider.klineCalls != 1 {
+		t.Fatalf("expected one provider kline call, got %d", provider.klineCalls)
+	}
+	if len(store.klines) != 1 || store.klines[0].Symbol != "CN:SH:600522" || store.klines[0].Provider != "provider-kline" {
+		t.Fatalf("expected provider klines cached, got %+v", store.klines)
+	}
+	if store.tasks["task-fetch-klines"].Status != string(task.StatusSuccess) {
+		t.Fatalf("expected success task, got %+v", store.tasks["task-fetch-klines"])
 	}
 }
 
@@ -289,8 +447,10 @@ func TestExecutorDoesNotOverwriteCancelledTaskAsFailed(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled error, got %v", err)
 	}
-	if len(store.events) != 1 || store.events[0].EventType != string(task.EventStarted) {
-		t.Fatalf("cancelled execution must only keep started event, got %+v", store.events)
+	for _, event := range store.events {
+		if event.EventType == string(task.EventFailed) {
+			t.Fatalf("cancelled execution must not write failed event, got %+v", store.events)
+		}
 	}
 	if store.tasks["task-cancelled"].Status != string(task.StatusRunning) {
 		t.Fatalf("cancelled execution must not overwrite task status, got %+v", store.tasks["task-cancelled"])
@@ -429,6 +589,12 @@ func (store *executionStore) ListKlines(context.Context, string, string, string,
 	return store.klines, nil
 }
 
+// SaveKlines 保存测试 K 线缓存。
+func (store *executionStore) SaveKlines(_ context.Context, klines []model.Kline) error {
+	store.klines = append([]model.Kline(nil), klines...)
+	return nil
+}
+
 // ListNewsBySymbol 返回测试用新闻序列。
 func (store *executionStore) ListNewsBySymbol(context.Context, string, int, time.Duration) ([]model.NewsItem, error) {
 	return store.news, nil
@@ -518,6 +684,40 @@ type recordingChatClient struct {
 	err      error
 }
 
+type recordingMarketProvider struct {
+	klines     []marketservice.KlineBar
+	klineCalls int
+}
+
+// Name 返回测试行情 Provider 名称。
+func (provider *recordingMarketProvider) Name() string {
+	return "recording-market"
+}
+
+// Status 返回测试行情 Provider 状态。
+func (provider *recordingMarketProvider) Status(context.Context) marketservice.ProviderStatus {
+	return marketservice.ProviderStatus{Name: provider.Name(), Available: true}
+}
+
+// Search 在分析执行器测试中不使用。
+func (provider *recordingMarketProvider) Search(context.Context, string) ([]marketservice.StockBasic, error) {
+	return nil, errors.New("unexpected search")
+}
+
+// Quote 在当前测试中不使用。
+func (provider *recordingMarketProvider) Quote(context.Context, stockservice.Symbol) (marketservice.Quote, error) {
+	return marketservice.Quote{}, errors.New("unexpected quote")
+}
+
+// Kline 记录测试 K 线请求。
+func (provider *recordingMarketProvider) Kline(_ context.Context, request marketservice.KlineRequest) ([]marketservice.KlineBar, error) {
+	provider.klineCalls++
+	if request.Symbol.String() != "CN:SH:600522" || request.Period != marketservice.PeriodDay || request.Adjust != marketservice.AdjustNone || request.Limit != defaultKlineLimit {
+		return nil, errors.New("unexpected kline request")
+	}
+	return provider.klines, nil
+}
+
 type analysisRoundTripFunc func(*http.Request) (*http.Response, error)
 
 // RoundTrip 让分析执行器测试用函数捕获外部 HTTP 请求。
@@ -580,6 +780,38 @@ func assertTaskLogStages(t *testing.T, entries []model.TaskLogEntry, expectedSta
 	}
 }
 
+type expectedProgressEvent struct {
+	stage    string
+	progress int
+	message  string
+}
+
+// assertProgressEvents 验证分析阶段会写入可被 SSE 实时推送的任务进度事件。
+func assertProgressEvents(t *testing.T, events []model.TaskEvent, expected []expectedProgressEvent) {
+	t.Helper()
+	seen := make(map[string]map[string]any, len(events))
+	for _, event := range events {
+		if event.EventType != string(task.EventProgress) {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+			t.Fatalf("progress event payload must be valid json: %+v", event)
+		}
+		stage, _ := payload["stage"].(string)
+		seen[stage] = payload
+	}
+	for _, item := range expected {
+		payload, ok := seen[item.stage]
+		if !ok {
+			t.Fatalf("missing progress event for stage %q in %+v", item.stage, events)
+		}
+		if payload["message"] != item.message || int(payload["progress"].(float64)) != item.progress {
+			t.Fatalf("unexpected progress payload for stage %q: %+v", item.stage, payload)
+		}
+	}
+}
+
 // mustValidateCreateRequest 校验测试请求并在失败时终止测试。
 func mustValidateCreateRequest(t *testing.T, request CreateRequest) ValidatedCreateRequest {
 	t.Helper()
@@ -588,4 +820,35 @@ func mustValidateCreateRequest(t *testing.T, request CreateRequest) ValidatedCre
 		t.Fatalf("ValidateCreateRequest returned error: %v", err)
 	}
 	return validated
+}
+
+// mustParseStockSymbol 解析测试用标准股票代码。
+func mustParseStockSymbol(t *testing.T, raw string) stockservice.Symbol {
+	t.Helper()
+	symbol, err := stockservice.ParseSymbol(raw)
+	if err != nil {
+		t.Fatalf("ParseSymbol returned error: %v", err)
+	}
+	return symbol
+}
+
+// makeAnalysisIndicatorKlines 构造足够覆盖 60 日均线和常用指标的日 K 序列。
+func makeAnalysisIndicatorKlines(count int) []model.Kline {
+	klines := make([]model.Kline, 0, count)
+	for index := 0; index < count; index++ {
+		closePrice := 10 + float64(index)*0.18 + float64(index%5)*0.03
+		klines = append(klines, model.Kline{
+			Symbol:    "CN:SH:600522",
+			Period:    "day",
+			Adjust:    "none",
+			TradeDate: time.Date(2026, 4, 1+index, 0, 0, 0, 0, time.UTC).Format("2006-01-02"),
+			Open:      closePrice - 0.08,
+			High:      closePrice + 0.32,
+			Low:       closePrice - 0.28,
+			Close:     closePrice,
+			Volume:    1000000 + float64(index)*12000,
+			Amount:    closePrice * (1000000 + float64(index)*12000),
+		})
+	}
+	return klines
 }

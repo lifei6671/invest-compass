@@ -18,11 +18,23 @@ import { ChartHeaderBar } from "./components/ChartHeaderBar";
 import { KlineMultiPaneChart } from "./components/KlineMultiPaneChart";
 import { QuoteSummaryStrip } from "./components/QuoteSummaryStrip";
 import type { AdjustType, ChartPeriod, IndicatorKey, IndicatorSeries, KlineBar, StockChartQuote } from "./types";
+import { useAutoRefresh } from "../../hooks/useAutoRefresh";
 
 const defaultIndicators: IndicatorKey[] = ["MA", "VOL", "MACD", "KDJ"];
 const indicatorRequestKeys = ["ma", "rsi", "macd", "kdj", "boll"];
 const defaultKlineLimit = 120;
 const minuteKlineLimit = 240;
+const indexDisplayNames: Record<string, string> = {
+  "SH:000001": "上证指数",
+  "SH:000016": "上证50",
+  "SH:000688": "科创50",
+  "SH:000300": "沪深300",
+  "SH:000905": "中证500",
+  "SH:000852": "中证1000",
+  "SZ:399001": "深证成指",
+  "SZ:399006": "创业板指",
+  "SZ:399005": "中小100",
+};
 
 type FullscreenChartState = {
   quote: StockChartQuote;
@@ -41,6 +53,7 @@ export function FullscreenKlinePage() {
   const [state, setState] = useState<FullscreenChartState | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const currentSymbolRef = useRef<string | null>(null);
   const currentStateRef = useRef<FullscreenChartState | null>(null);
   const marketPeriod = toMarketKlinePeriod(activePeriod);
@@ -98,7 +111,13 @@ export function FullscreenKlinePage() {
     return () => {
       cancelled = true;
     };
-  }, [activeAdjust, activePeriod, klineLimit, marketPeriod, symbol]);
+  }, [activeAdjust, activePeriod, klineLimit, marketPeriod, refreshVersion, symbol]);
+
+  useAutoRefresh(() => {
+    if (symbol) {
+      setRefreshVersion((version) => version + 1);
+    }
+  });
 
   const toggleIndicator = (indicator: IndicatorKey) => {
     setActiveIndicators((current) =>
@@ -176,7 +195,7 @@ export function FullscreenKlinePage() {
 async function loadFullscreenChartState(
   symbol: string,
   displayPeriod: ChartPeriod,
-  sourcePeriod: ChartPeriod,
+  sourcePeriod: string,
   adjust: AdjustType,
   limit: number,
 ): Promise<FullscreenChartState> {
@@ -197,7 +216,8 @@ async function loadFullscreenChartState(
     marketKline({ symbol, period: sourcePeriod, adjust, limit }),
     indicatorsPromise,
   ]);
-  const bars = toKlineBars(kline.items);
+  const rawBars = toKlineBars(kline.items);
+  const bars = displayPeriod === "minute" ? filterLatestTradingDayBars(rawBars) : rawBars;
   return {
     quote: toStockChartQuote(symbol, quote, profile),
     bars,
@@ -242,10 +262,10 @@ function chartKlinePath(symbol: string, period: ChartPeriod, adjust: AdjustType)
   return `/chart/kline?symbol=${encodeURIComponent(symbol)}&period=${period}&adjust=${adjust}`;
 }
 
-function toMarketKlinePeriod(period: ChartPeriod): ChartPeriod {
+function toMarketKlinePeriod(period: ChartPeriod): string {
   switch (period) {
     case "minute":
-      return "minute";
+      return "1m";
     case "5m":
     case "15m":
     case "30m":
@@ -274,8 +294,9 @@ function shouldRequestBackendIndicators(period: ChartPeriod) {
 
 function toStockChartQuote(symbol: string, quote: MarketQuote, profile: StockProfile | null): StockChartQuote {
   const resolvedSymbol = quote.symbol || profile?.symbol || symbol;
+  const displayName = profile?.name || resolveIndexDisplayName(resolvedSymbol) || resolvedSymbol;
   return {
-    name: profile?.name || resolvedSymbol,
+    name: displayName,
     code: profile?.code || stockCodeFromSymbol(resolvedSymbol) || resolvedSymbol,
     symbol: resolvedSymbol,
     price: quote.price,
@@ -295,7 +316,7 @@ function toStockChartQuote(symbol: string, quote: MarketQuote, profile: StockPro
 
 function loadingPlaceholderQuote(symbol: string): StockChartQuote {
   return {
-    name: symbol,
+    name: resolveIndexDisplayName(symbol) || symbol,
     code: stockCodeFromSymbol(symbol) || symbol,
     symbol,
     price: 0,
@@ -323,6 +344,37 @@ function toKlineBars(items: MarketKlineItem[]): KlineBar[] {
     volume: item.volume ?? 0,
     amount: item.amount,
   }));
+}
+
+export function filterLatestTradingDayBars(bars: KlineBar[]): KlineBar[] {
+  if (bars.length === 0) {
+    return [];
+  }
+  const latest = bars.reduce((current, next) => (tradeDateTime(next.date) >= tradeDateTime(current.date) ? next : current), bars[0]);
+  const latestDay = tradeDateDayKey(latest.date);
+  return bars.filter((bar) => tradeDateDayKey(bar.date) === latestDay);
+}
+
+function tradeDateDayKey(value: string) {
+  const normalized = value.trim();
+  const compact = /^(\d{4})(\d{2})(\d{2})/.exec(normalized);
+  if (compact) {
+    const [, year, month, day] = compact;
+    return `${year}-${month}-${day}`;
+  }
+  const dashed = /^(\d{4}-\d{2}-\d{2})/.exec(normalized);
+  if (dashed) {
+    return dashed[1];
+  }
+  const timestamp = tradeDateTime(value);
+  if (timestamp > 0) {
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, "0");
+    const day = `${date.getDate()}`.padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+  return normalized;
 }
 
 function tradeDateTime(value: string) {
@@ -475,6 +527,17 @@ function formatQuoteTime(value: string | undefined) {
 function stockCodeFromSymbol(symbol: string) {
   const parts = symbol.split(/[.:]/).filter(Boolean);
   return parts.find((part) => /^\d{5,6}$/.test(part)) ?? "";
+}
+
+export function resolveIndexDisplayName(symbol: string) {
+  const parts = symbol.toUpperCase().split(/[.:]/).filter(Boolean);
+  const code = parts.find((part) => /^\d{5,6}$/.test(part));
+  const exchange = parts.find((part) => part === "SH" || part === "SSE" || part === "SS")
+    ? "SH"
+    : parts.find((part) => part === "SZ" || part === "SZSE" || part === "SHE")
+      ? "SZ"
+      : "";
+  return code && exchange ? indexDisplayNames[`${exchange}:${code}`] ?? "" : "";
 }
 
 function round2(value: number) {

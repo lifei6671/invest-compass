@@ -4141,8 +4141,10 @@ body {
 .analysis-running-page {
   display: flex;
   min-height: calc(100vh - 120px);
+  min-width: 0;
   flex-direction: column;
   gap: 14px;
+  overflow-x: hidden;
 }
 
 .analysis-running-header {
@@ -4252,9 +4254,12 @@ body {
 
 .analysis-running-workspace {
   display: grid;
+  min-width: 0;
   min-height: 620px;
-  grid-template-columns: 280px minmax(0, 1fr) 410px;
+  max-width: 100%;
+  grid-template-columns: minmax(248px, 0.78fr) minmax(360px, 1.4fr) minmax(320px, 1fr);
   gap: 16px;
+  overflow-x: hidden;
 }
 
 .analysis-running-card {
@@ -4440,6 +4445,7 @@ body {
 .analysis-running-stream-body::-webkit-scrollbar,
 .analysis-running-log-list::-webkit-scrollbar,
 .analysis-running-step-list::-webkit-scrollbar {
+  height: 6px;
   width: 6px;
 }
 
@@ -6112,6 +6118,10 @@ body {
   min-width: 0;
 }
 
+.report-detail-layout-toc-collapsed {
+  grid-template-columns: 44px minmax(0, 1fr) 340px;
+}
+
 .report-detail-card {
   border: 1px solid #e5eaf3;
   border-radius: 10px;
@@ -6140,8 +6150,23 @@ body {
   padding: 16px;
 }
 
+.report-toc-panel-collapsed {
+  align-self: start;
+  min-height: 44px;
+  padding: 6px;
+}
+
+.report-toc-panel-collapsed .report-detail-card-title {
+  justify-content: center;
+  margin-bottom: 0;
+}
+
 .report-toc-panel .report-detail-card-title {
   margin-bottom: 12px;
+}
+
+.report-toc-panel-collapsed .report-detail-card-title {
+  margin-bottom: 0;
 }
 
 .report-toc-list {
@@ -6165,6 +6190,13 @@ body {
   font-size: 14px;
   text-align: left;
   cursor: pointer;
+}
+
+.report-toc-level-3 {
+  min-height: 34px;
+  padding-left: 26px;
+  color: #64748b;
+  font-size: 13px;
 }
 
 .report-toc-item:hover {
@@ -6197,40 +6229,90 @@ body {
   scrollbar-width: thin;
 }
 
-.report-md-section {
-  scroll-margin-top: 16px;
-  border-bottom: 1px solid #edf1f7;
-  padding-bottom: 24px;
-}
-
-.report-md-section+.report-md-section {
-  margin-top: 28px;
-}
-
-.report-md-section:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-
-.report-md-section h2 {
-  margin: 0 0 16px;
+.report-markdown-content h1,
+.report-markdown-content h2,
+.report-markdown-content h3 {
   color: #111827;
-  font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0;
+}
+
+.report-markdown-content h1 {
+  margin: 0 0 24px;
+  font-size: 24px;
+  line-height: 34px;
+}
+
+.report-markdown-content h2 {
+  margin: 30px 0 14px;
+  scroll-margin-top: 16px;
+  border-top: 1px solid #edf1f7;
+  padding-top: 22px;
+  font-size: 20px;
   line-height: 28px;
 }
 
-.report-md-section p {
-  margin: 0;
+.report-markdown-content h1+h2 {
+  margin-top: 0;
 }
 
-.report-md-section ul {
-  margin: 0;
+.report-markdown-content h3 {
+  margin: 22px 0 10px;
+  scroll-margin-top: 16px;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.report-markdown-content p {
+  margin: 0 0 12px;
+}
+
+.report-markdown-content ul,
+.report-markdown-content ol {
+  margin: 0 0 18px;
   padding-left: 18px;
 }
 
-.report-md-section li+li {
+.report-markdown-content li+li {
   margin-top: 6px;
+}
+
+.report-markdown-content strong {
+  color: #111827;
+  font-weight: 700;
+}
+
+.report-markdown-content a {
+  color: #1677ff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.report-markdown-content a:hover {
+  text-decoration: underline;
+}
+
+.report-markdown-content code {
+  border-radius: 4px;
+  background: #f1f5f9;
+  padding: 1px 5px;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+.report-md-code {
+  overflow-x: auto;
+  margin: 0 0 18px;
+  border: 1px solid #e5eaf3;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px 14px;
+}
+
+.report-md-code code {
+  background: transparent;
+  padding: 0;
 }
 
 .report-md-info-box {
@@ -6338,6 +6420,19 @@ body {
   color: #111827;
   font-size: 13px;
   font-weight: 700;
+}
+
+.report-snapshot-prompt {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  scrollbar-width: thin;
 }
 
 .report-snapshot-quote-grid {
@@ -8107,6 +8202,10 @@ body {
 
   .report-detail-layout {
     grid-template-columns: 180px minmax(0, 1fr);
+  }
+
+  .report-detail-layout-toc-collapsed {
+    grid-template-columns: 44px minmax(0, 1fr);
   }
 
   .report-detail-side {
