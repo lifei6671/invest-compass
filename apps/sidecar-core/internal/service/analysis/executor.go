@@ -14,6 +14,7 @@ import (
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
 	aiservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/ai"
+	fundamentalservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/fundamental"
 	indicatorservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/indicator"
 	marketservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	promptservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/prompt"
@@ -58,13 +59,14 @@ type TaskNotifier interface {
 
 // Executor 负责执行单个分析任务，不处理 HTTP 路由和桌面 command。
 type Executor struct {
-	Store          ExecutionStore
-	NewChatClient  ChatClientFactory
-	MarketProvider marketservice.MarketProvider
-	HTTPClient     *http.Client
-	Now            func() time.Time
-	TaskLogWriter  tasklogservice.StageWriter
-	TaskNotifier   TaskNotifier
+	Store               ExecutionStore
+	NewChatClient       ChatClientFactory
+	MarketProvider      marketservice.MarketProvider
+	FundamentalProvider fundamentalservice.Provider
+	HTTPClient          *http.Client
+	Now                 func() time.Time
+	TaskLogWriter       tasklogservice.StageWriter
+	TaskNotifier        TaskNotifier
 }
 
 // Execute 拉取已缓存上下文、调用 AI、保存报告并推进任务事件。
@@ -213,23 +215,26 @@ func (executor Executor) executeBody(ctx context.Context, taskID string, request
 	}); err != nil {
 		return model.AnalysisReport{}, "", err
 	}
+	fundamentalSummary, financialSummary := executor.fundamentalSummaries(ctx, request)
 
 	promptInput := promptservice.BuildInput{
-		StockName:        request.Symbol.String(),
-		StockCode:        request.Symbol.String(),
-		Market:           request.Symbol.Market,
-		Quote:            quoteSummary(quote),
-		KlineSummary:     klineSummary(klines),
-		DailyKlines:      dailyKlines(klines),
-		Indicators:       indicators,
-		News:             newsSummary(newsItems),
-		DataAsof:         dataAsof(quote, klines, executor.now()),
-		ContextQuality:   contextQuality(klines, indicators),
-		PromptKey:        promptKey(promptTemplate),
-		PromptVersion:    promptTemplate.Version,
-		AnalysisLanguage: "简体中文",
-		UserQuestion:     "请生成符合投研罗盘首版合规要求的个股分析报告。",
-		UserPosition:     userPositionSummary(request.UserPosition),
+		StockName:          request.Symbol.String(),
+		StockCode:          request.Symbol.String(),
+		Market:             request.Symbol.Market,
+		Quote:              quoteSummary(quote),
+		KlineSummary:       klineSummary(klines),
+		DailyKlines:        dailyKlines(klines),
+		Indicators:         indicators,
+		News:               newsSummary(newsItems),
+		FundamentalSummary: fundamentalSummary,
+		FinancialSummary:   financialSummary,
+		DataAsof:           dataAsof(quote, klines, executor.now()),
+		ContextQuality:     contextQuality(klines, indicators),
+		PromptKey:          promptKey(promptTemplate),
+		PromptVersion:      promptTemplate.Version,
+		AnalysisLanguage:   "简体中文",
+		UserQuestion:       "请生成符合投研罗盘首版合规要求的个股分析报告。",
+		UserPosition:       userPositionSummary(request.UserPosition),
 	}
 	var builtPrompt promptservice.BuiltPrompt
 	if err := executor.runStage(ctx, stageMeta, tasklogservice.StagePromptBuild, func(ctx context.Context) error {
@@ -290,6 +295,49 @@ func (executor Executor) executeBody(ctx context.Context, taskID string, request
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}, content, nil
+}
+
+// fundamentalSummaries 拉取分析任务可用的基本面上下文；失败只降低上下文质量，不阻断 AI 分析主链路。
+func (executor Executor) fundamentalSummaries(ctx context.Context, request ValidatedCreateRequest) (string, string) {
+	if request.AnalysisType != AnalysisStockFull {
+		return "当前分析类型未请求基本面结构化数据。", "当前分析类型未请求财务结构化数据。"
+	}
+	if executor.FundamentalProvider == nil {
+		return "未接入基本面结构化数据。", "未接入财务结构化数据。"
+	}
+	return executor.fetchFundamentalMarkdown(ctx, request, fundamentalservice.ReportLatestFinance),
+		executor.fetchFundamentalMarkdown(ctx, request, fundamentalservice.ReportQuarterFinance)
+}
+
+// fetchFundamentalMarkdown 将单类 F10 数据渲染为 Prompt 可读 Markdown，并保留明确的数据缺失说明。
+func (executor Executor) fetchFundamentalMarkdown(ctx context.Context, request ValidatedCreateRequest, kind fundamentalservice.ReportKind) string {
+	dataset, err := executor.FundamentalProvider.Fetch(ctx, fundamentalservice.Request{
+		Symbol: request.Symbol,
+		Kind:   kind,
+		Limit:  0,
+	})
+	if err != nil {
+		slog.Warn(
+			"获取分析基本面数据失败",
+			"symbol", request.Symbol.String(),
+			"kind", string(kind),
+			"error", logger.RedactError(err),
+		)
+		return fmt.Sprintf("## %s\n\n数据获取失败：%s", fundamentalReportTitle(kind), logger.RedactError(err))
+	}
+	return fundamentalservice.RenderMarkdown(dataset)
+}
+
+// fundamentalReportTitle 返回 Provider 失败时仍可读的报表标题。
+func fundamentalReportTitle(kind fundamentalservice.ReportKind) string {
+	switch kind {
+	case fundamentalservice.ReportLatestFinance:
+		return "最新财务主要数据"
+	case fundamentalservice.ReportQuarterFinance:
+		return "季度主要财务指标"
+	default:
+		return string(kind)
+	}
 }
 
 // rawPromptForSnapshot 合并实际发送给模型的 System/User Prompt，供报告详情审计回放。

@@ -12,6 +12,7 @@ import (
 
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/model"
 	aiservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/ai"
+	fundamentalservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/fundamental"
 	marketservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	stockservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/stock"
 	"github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/task"
@@ -183,6 +184,96 @@ func TestExecutorDefaultChatClientUsesInjectedHTTPClient(t *testing.T) {
 	}
 	if !called || response.Content != "报告正文" {
 		t.Fatalf("expected injected HTTP client to be used, called=%v response=%+v", called, response)
+	}
+}
+
+// TestExecutorIncludesFundamentalDataInAIPrompt 验证分析任务会把结构化财务和基本面数据传给 AI。
+func TestExecutorIncludesFundamentalDataInAIPrompt(t *testing.T) {
+	store := newExecutionStore()
+	store.aiConfig = model.AIConfig{ID: 7, Provider: aiservice.ProviderOpenAICompatible, ModelName: "gpt-analysis"}
+	store.template = model.PromptTemplate{
+		ID:      9,
+		Name:    "综合分析",
+		Type:    "stock_full",
+		Content: "请结合 {{ quote }}、{{ kline_summary }}、{{ indicators }}、{{ fundamental_summary }}、{{ financial_summary }} 输出报告。",
+	}
+	store.quote = model.Quote{
+		Symbol:    "CN:SH:600519",
+		Price:     1700.5,
+		QuoteTime: time.Date(2026, 6, 26, 15, 0, 0, 0, time.UTC),
+		Provider:  "test-provider",
+		UpdatedAt: time.Now().UTC(),
+	}
+	store.klines = makeAnalysisIndicatorKlines(defaultKlineLimit)
+	fundamentalProvider := &recordingFundamentalProvider{
+		datasets: map[fundamentalservice.ReportKind]fundamentalservice.Dataset{
+			fundamentalservice.ReportLatestFinance: {
+				Title: "最新财务主要数据",
+				Kind:  fundamentalservice.ReportLatestFinance,
+				Columns: []fundamentalservice.Column{
+					{Key: "REPORT_DATE", Label: "报告日期", Format: fundamentalservice.FormatDate},
+					{Key: "TOTAL_OPERATE_INCOME", Label: "营业总收入", Format: fundamentalservice.FormatMoney},
+					{Key: "PARENT_NETPROFIT", Label: "归属净利润", Format: fundamentalservice.FormatMoney},
+					{Key: "ROE_WEIGHT", Label: "ROE(加权)", Format: fundamentalservice.FormatPercent},
+					{Key: "ZCFZL", Label: "资产负债率", Format: fundamentalservice.FormatPercent},
+				},
+				Rows: []fundamentalservice.Row{{
+					"REPORT_DATE":          "2026-03-31 00:00:00",
+					"TOTAL_OPERATE_INCOME": 12345678900.0,
+					"PARENT_NETPROFIT":     2345678900.0,
+					"ROE_WEIGHT":           21.35,
+					"ZCFZL":                42.5,
+				}},
+			},
+			fundamentalservice.ReportQuarterFinance: {
+				Title: "季度主要财务指标",
+				Kind:  fundamentalservice.ReportQuarterFinance,
+				Columns: []fundamentalservice.Column{
+					{Key: "REPORT_DATE", Label: "报告日期", Format: fundamentalservice.FormatDate},
+					{Key: "TOTAL_OPERATE_INCOME", Label: "营业总收入", Format: fundamentalservice.FormatMoney},
+					{Key: "TOTALOPERATEREVETZ", Label: "营收同比增长", Format: fundamentalservice.FormatPercent},
+				},
+				Rows: []fundamentalservice.Row{{
+					"REPORT_DATE":          "2026-03-31 00:00:00",
+					"TOTAL_OPERATE_INCOME": 12345678900.0,
+					"TOTALOPERATEREVETZ":   12.34,
+				}},
+			},
+		},
+	}
+	chat := &recordingChatClient{response: aiservice.ChatResponse{Content: "报告正文"}}
+	executor := Executor{
+		Store:               store,
+		FundamentalProvider: fundamentalProvider,
+		NewChatClient: func(aiservice.Config, string) ChatClient {
+			return chat
+		},
+		Now: func() time.Time {
+			return time.Date(2026, 6, 26, 15, 30, 0, 0, time.UTC)
+		},
+	}
+	validated := mustValidateCreateRequest(t, CreateRequest{
+		Symbol:           "CN:SH:600519",
+		AnalysisType:     AnalysisStockFull,
+		AIConfigID:       7,
+		PromptTemplateID: 9,
+	})
+
+	if err := executor.Execute(context.Background(), "task-fundamental", validated, "sk-runtime-secret"); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if len(fundamentalProvider.calls) != 2 {
+		t.Fatalf("expected latest and quarter finance fetches, got %+v", fundamentalProvider.calls)
+	}
+	joinedMessages := chat.requests[0].Messages[0].Content + "\n" + chat.requests[0].Messages[1].Content
+	for _, expected := range []string{"最新财务主要数据", "季度主要财务指标", "营业总收入", "123.46亿", "归属净利润", "23.46亿", "ROE(加权)", "21.35%", "资产负债率", "42.50%", "营收同比增长", "12.34%"} {
+		if !strings.Contains(joinedMessages, expected) {
+			t.Fatalf("AI request missing fundamental value %q: %s", expected, joinedMessages)
+		}
+	}
+	if strings.Contains(joinedMessages, "未接入基本面结构化数据") {
+		t.Fatalf("AI request must not keep old fundamental placeholder: %s", joinedMessages)
 	}
 }
 
@@ -687,6 +778,35 @@ type recordingChatClient struct {
 type recordingMarketProvider struct {
 	klines     []marketservice.KlineBar
 	klineCalls int
+}
+
+type recordingFundamentalProvider struct {
+	datasets map[fundamentalservice.ReportKind]fundamentalservice.Dataset
+	calls    []fundamentalservice.Request
+	err      error
+}
+
+// Name 返回测试基本面 Provider 名称。
+func (provider *recordingFundamentalProvider) Name() string {
+	return "recording-fundamental"
+}
+
+// Status 返回测试基本面 Provider 状态。
+func (provider *recordingFundamentalProvider) Status(context.Context) fundamentalservice.ProviderStatus {
+	return fundamentalservice.ProviderStatus{Name: provider.Name(), Available: provider.err == nil}
+}
+
+// Fetch 记录测试基本面请求，并返回指定报告类型的数据集。
+func (provider *recordingFundamentalProvider) Fetch(_ context.Context, request fundamentalservice.Request) (fundamentalservice.Dataset, error) {
+	provider.calls = append(provider.calls, request)
+	if provider.err != nil {
+		return fundamentalservice.Dataset{}, provider.err
+	}
+	dataset, ok := provider.datasets[request.Kind]
+	if !ok {
+		return fundamentalservice.Dataset{}, errors.New("unexpected fundamental report kind")
+	}
+	return dataset, nil
 }
 
 // Name 返回测试行情 Provider 名称。

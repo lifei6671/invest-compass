@@ -25,6 +25,7 @@ import (
 	aiservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/ai"
 	analysisservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/analysis"
 	datasourcecredentialservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/datasourcecredential"
+	fundamentalservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/fundamental"
 	logexportservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/logexport"
 	marketservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/market"
 	netproxyservice "github.com/lifei6671/invest-compass/apps/sidecar-core/internal/service/netproxy"
@@ -478,6 +479,7 @@ func buildActionsConfig(token string, workspace string, store *dao.Store, schedu
 	dataSourceCredentials.HTTPClient = externalDataHTTPClient(store, 15*time.Second)
 	marketProvider := buildMarketProvider(store)
 	newsProvider := buildNewsProvider(dataSourceCredentialCookieResolver{Service: dataSourceCredentials}, store)
+	fundamentalProvider := buildFundamentalProvider(store)
 	documentSearchService := searchservice.NewScopedDocumentSearchService(searchservice.DocumentSearchConfig{Store: store, Tokenizer: searchTokenizer})
 	return actions.Config{
 		Version:               version,
@@ -499,7 +501,14 @@ func buildActionsConfig(token string, workspace string, store *dao.Store, schedu
 		AIConfigTester:        aiservice.OpenAIConfigTester{HTTPClient: aiHTTPClient},
 		ProviderNotifier:      notificationService,
 		AnalysisStore:         store,
-		AnalysisExecutor:      analysisservice.Executor{Store: store, MarketProvider: marketProvider, HTTPClient: aiHTTPClient, TaskLogWriter: taskLogWriter, TaskNotifier: notificationService},
+		AnalysisExecutor: analysisservice.Executor{
+			Store:               store,
+			MarketProvider:      marketProvider,
+			FundamentalProvider: fundamentalProvider,
+			HTTPClient:          aiHTTPClient,
+			TaskLogWriter:       taskLogWriter,
+			TaskNotifier:        notificationService,
+		},
 		AnalysisTransact: func(ctx context.Context, run func(analysisaction.Store) error) error {
 			return store.WithTransaction(ctx, func(tx *dao.Store) error {
 				return run(tx)
@@ -574,6 +583,18 @@ func buildNewsProvider(resolver newsservice.CookieCredentialResolver, store *dao
 		tradingView,
 		eastMoneyResearch,
 	})
+}
+
+// buildFundamentalProvider 创建生产基本面/F10 Provider，失败时让分析 Prompt 明确展示缺失状态。
+func buildFundamentalProvider(store *dao.Store) fundamentalservice.Provider {
+	provider, err := fundamentalservice.NewEastMoneyF10Provider(fundamentalservice.EastMoneyF10Config{
+		HTTPClient: externalDataHTTPClient(store, 15*time.Second),
+	})
+	if err != nil {
+		slog.Warn("初始化东方财富 F10 Provider 失败", "error", logger.RedactError(err))
+		return nil
+	}
+	return provider
 }
 
 // externalDataHTTPClient 创建外部数据请求 HTTP client，每次请求按最新 settings 解析代理模式。

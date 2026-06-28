@@ -62,6 +62,44 @@ func TestBuildStockFullPromptCreatesSeparatedLayers(t *testing.T) {
 	}
 }
 
+// TestBuildStockFullPromptRendersFundamentalVariables 验证基本面和财务摘要会进入 AI 上下文，而不是保留缺失占位。
+func TestBuildStockFullPromptRendersFundamentalVariables(t *testing.T) {
+	template := Template{
+		Key:     "builtin_stock_full",
+		Name:    "个股综合分析",
+		Type:    TemplateStockFull,
+		Content: "基本面：{{fundamental_summary}}\n财务：{{financial_summary}}",
+		Version: 2,
+	}
+	input := BuildInput{
+		StockName:          "贵州茅台",
+		StockCode:          "CN:SH:600519",
+		Market:             "A股",
+		Quote:              "现价 100",
+		KlineSummary:       "近 20 日震荡上行",
+		DailyKlines:        "date=2026-06-26 close=100.00",
+		Indicators:         "RSI 60",
+		News:               "公司发布经营公告",
+		FundamentalSummary: "## 最新财务主要数据\n\n| 指标 | 数值 |\n| --- | --- |\n| 营业总收入 | 123.46亿 |\n| ROE(加权) | 21.35% |",
+		FinancialSummary:   "## 季度主要财务指标\n\n| 报告日期 | 营业总收入 | 资产负债率 |\n| --- | --- | --- |\n| 2026-03-31 | 123.46亿 | 42.50% |",
+		AnalysisLanguage:   "简体中文",
+	}
+
+	built, err := BuildStockFullPrompt(template, input)
+	if err != nil {
+		t.Fatalf("BuildStockFullPrompt returned error: %v", err)
+	}
+
+	for _, expected := range []string{"营业总收入", "123.46亿", "ROE(加权)", "21.35%", "资产负债率", "42.50%"} {
+		if !strings.Contains(built.Context, expected) {
+			t.Fatalf("context prompt missing fundamental value %q: %s", expected, built.Context)
+		}
+	}
+	if strings.Contains(built.Context, "未接入基本面结构化数据") {
+		t.Fatalf("context prompt must not keep old missing-data placeholder: %s", built.Context)
+	}
+}
+
 // TestBuildTechnicalPromptOmitsUserPositionWhenAbsent 验证没有一次性持仓输入时不会生成持仓占位文案。
 func TestBuildTechnicalPromptOmitsUserPositionWhenAbsent(t *testing.T) {
 	template := Template{

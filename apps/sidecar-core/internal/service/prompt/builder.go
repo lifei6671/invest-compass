@@ -17,21 +17,23 @@ const complianceSystemPrompt = `你是投研罗盘的 AI 投研辅助助手。
 
 // BuildInput 是构建单次分析 Prompt 所需的上下文。
 type BuildInput struct {
-	StockName        string
-	StockCode        string
-	Market           string
-	Quote            string
-	KlineSummary     string
-	DailyKlines      string
-	Indicators       string
-	News             string
-	DataAsof         string
-	ContextQuality   string
-	PromptKey        string
-	PromptVersion    int
-	AnalysisLanguage string
-	UserQuestion     string
-	UserPosition     string
+	StockName          string
+	StockCode          string
+	Market             string
+	Quote              string
+	KlineSummary       string
+	DailyKlines        string
+	Indicators         string
+	News               string
+	FundamentalSummary string
+	FinancialSummary   string
+	DataAsof           string
+	ContextQuality     string
+	PromptKey          string
+	PromptVersion      int
+	AnalysisLanguage   string
+	UserQuestion       string
+	UserPosition       string
 }
 
 // BuiltPrompt 表示分层后的 System、Context、User Prompt。
@@ -132,7 +134,8 @@ func renderTemplate(content string, input BuildInput) string {
 		VariableDailyKlines:        input.DailyKlines,
 		VariableIndicators:         input.Indicators,
 		VariableNews:               input.News,
-		VariableFundamentalSummary: "未接入基本面结构化数据",
+		VariableFundamentalSummary: input.FundamentalSummary,
+		VariableFinancialSummary:   input.FinancialSummary,
 		VariableUserPosition:       "见用户层一次性持仓输入",
 		VariableDataAsof:           input.DataAsof,
 		VariableContextQuality:     input.ContextQuality,
