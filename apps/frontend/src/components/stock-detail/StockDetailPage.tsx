@@ -31,6 +31,7 @@ type StockDetailPageProps = {
   onPeriodChange?: (period: StockDetailPeriod) => void;
   onAdjustChange?: (adjust: AdjustType) => void;
   onRefresh?: () => void;
+  onOpenNewsOriginal?: (item: StockNewsItem) => void;
   onSaveWatchlistNote?: (value: { tags: string[]; note: string }) => Promise<void> | void;
   savingWatchlistNote?: boolean;
 };
@@ -93,7 +94,21 @@ export function StockDetailPage(props: StockDetailPageProps) {
             }
           />
           <TechnicalIndicatorCard items={props.technicalIndicators ?? []} />
-          <StockNewsTabsCard items={props.newsItems ?? []} onViewMore={() => navigate("/news")} />
+          <StockNewsTabsCard
+            items={props.newsItems ?? []}
+            onOpenOriginal={props.onOpenNewsOriginal}
+            onViewMore={() =>
+              navigate("/news", {
+                state: {
+                  newsStock: {
+                    symbol: stock.symbol,
+                    name: stock.name,
+                    code: newsRouteStockCode(stock),
+                  },
+                },
+              })
+            }
+          />
         </main>
         <aside className="min-w-0 space-y-3">
           <StockInfoCard items={props.basicInfo ?? []} concepts={props.stock?.concepts ?? []} />
@@ -113,6 +128,15 @@ export function StockDetailPage(props: StockDetailPageProps) {
       <StockDetailRiskNotice />
     </section>
   );
+}
+
+function newsRouteStockCode(stock: StockDetail) {
+  const code = stock.code.trim();
+  if (code && code !== stock.symbol) {
+    return code.split(".")[0] || code;
+  }
+  const symbolPart = stock.symbol.split(":").at(-1) ?? stock.symbol;
+  return symbolPart.split(".")[0] || symbolPart;
 }
 
 function StockDetailRiskNotice() {

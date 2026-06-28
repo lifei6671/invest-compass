@@ -1322,7 +1322,10 @@ P7 跨平台桌面能力、打包、发布验收
 - 当前进展：
   - 已新增 `/news` 资讯中心页面，通过 typed invoke service 调用 `news_market` 读取 CN 市场新闻，并支持输入股票代码后调用 `news_list` 读取个股新闻；无关键词手动刷新会传 `forceRefresh`，避免 60 分钟缓存已满时一直展示旧市场资讯。
   - 页面只合并展示后端返回的市场新闻和个股新闻，不提供公告、研报、资金流等首版未闭环入口。
-  - 页面会过滤非 HTTPS URL，并支持按后端返回的 `tags` 做标签筛选；新闻列表、空状态和错误状态已有前端测试覆盖。
+  - 页面会过滤非 HTTPS URL，并支持按后端返回的 `tags` 做标签筛选；后端已透传财联社、新浪、TradingView、华尔街见闻和东方财富研报/公告等来源的真实主题标签。
+  - 新闻响应已新增本地规则情绪标签 `sentiment`，资讯中心按 `positive/neutral/negative` 展示“看涨/中性/看跌”，侧栏统计从本地缓存新闻计算情绪数量和摘要，不再展示“暂未接入情绪分类”。
+  - `search_news` 搜索结果已区分业务主键 `ref_id` 和原文外链 `url`；新闻 Provider 回源入库后只增量写入 active 文档索引，不再在普通资讯读取路径制造完整搜索重建任务。
+  - 新闻列表、空状态、错误状态和情绪标签展示已有前端测试覆盖。
   - `apps/frontend/src/services/coreClient.test.ts` 覆盖 `news_market` 固定 command 契约。
   - `apps/frontend/src/app/App.test.tsx` 覆盖资讯中心导航、市场/个股新闻读取、非 HTTPS 新闻过滤、标签筛选、空状态和错误状态。
   - 新闻外链已通过 Rust `open_external_url` 白名单 command 打开系统浏览器；真实 News Provider 授权和跨平台桌面打开验收仍待 T44 阶段收口，因此 T38 暂保持 `[~]`。

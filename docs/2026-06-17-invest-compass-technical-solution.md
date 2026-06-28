@@ -578,6 +578,7 @@ type NewsItem struct {
     PublishedAt time.Time
     Symbols     []string
     Tags        []string
+    Sentiment   string // positive / neutral / negative，本地规则情绪标签
 }
 ```
 
@@ -1529,7 +1530,8 @@ POST /api/news/market
         "content_hash": "content-hash",
         "published_at": "2026-06-18T09:30:00Z",
         "symbols": ["CN:SH:600519"],
-        "tags": ["company"]
+        "tags": ["company"],
+        "sentiment": "neutral"
       }
     ]
   },
@@ -1540,7 +1542,7 @@ POST /api/news/market
 
 新闻 `limit` 必须为 1-100。Rust `news_list` 和 `news_market` 必须在转发前做同样校验，非法参数不得进入 Go core。`news_market` 的 `force_refresh` 默认为 `false`；资讯中心手动刷新可传 `true` 绕过市场新闻数量充足的短缓存，直接调用新闻 Provider 获取最新列表。Provider 失败时仍可返回已有缓存，避免资讯中心空白。
 
-Go core 输出新闻前必须执行 HTTP(S) URL scheme 校验和 `content_hash` 去重。新闻缓存写入 `news_items`，按 30-120 分钟缓存策略读取；缓存不足时通过合规 `news.Provider` 拉取。首版不接公告、研报、资金流专用数据源。
+Go core 输出新闻前必须执行 HTTP(S) URL scheme 校验和 `content_hash` 去重。新闻缓存写入 `news_items`，按 30-120 分钟缓存策略读取；缓存不足时通过合规 `news.Provider` 拉取。新闻入库成功后只允许增量写入当前 active document batch 的 news 索引，不得在普通资讯读取路径触发完整 `SEARCH_INDEX_REBUILD` 任务。单条新闻的 `sentiment` 由本地金融词典规则在响应阶段计算，取值为 `positive`、`neutral`、`negative`，不调用外部模型且不新增数据库列；`/api/news/stats` 同步返回 `sentiment_positive_count`、`sentiment_neutral_count`、`sentiment_negative_count` 和中文 `sentiment_summary`。菜单范围 `search_news` 结果中的 `ref_id` 是 `news_items.id` 等业务主键，原文外链必须通过单独的 `url` 字段返回，前端不得把 `ref_id` 当 URL 使用。资金流专用数据源不作为新闻源混入资讯中心。
 
 ### 8.8 AI 配置
 

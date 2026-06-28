@@ -788,6 +788,47 @@ test("自选股页回车搜索时只调用 search_watchlist_notes 并展示备�
   expect(calls.map((call) => call.command)).not.toContain("search_global");
 });
 
+test("自选备注搜索结果缺少高亮字段时使用备注标签", async () => {
+  mockIPC((command) => {
+    if (command === "watchlist_list") {
+      return { code: 0, message: "ok", data: { items: [] } };
+    }
+    if (command === "search_watchlist_notes") {
+      return {
+        code: 0,
+        message: "ok",
+        data: [
+          {
+            doc_uid: "watchlist_note:null-highlights",
+            doc_type: "watchlist_note",
+            ref_id: "8",
+            symbol: "CN:SH:600000",
+            title: "浦发银行",
+            summary: "关注息差变化",
+            source: "watchlist_note",
+            source_time: "2026-06-28T09:30:00Z",
+            score: 1,
+            highlights: null,
+          },
+        ],
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  });
+
+  renderPage();
+
+  const searchInput = screen.getByPlaceholderText("搜索自选股");
+  fireEvent.change(searchInput, { target: { value: "息差" } });
+  fireEvent.keyDown(searchInput, { key: "Enter", code: "Enter" });
+
+  await waitFor(() => {
+    expect(screen.getByText("浦发银行")).toBeInTheDocument();
+  });
+  expect(screen.getByText("关注息差变化")).toBeInTheDocument();
+  expect(screen.getByText("备注")).toBeInTheDocument();
+});
+
 test("自选备注搜索无结果时说明仅搜索自选备注和标签", async () => {
   mockIPC((command) => {
     if (command === "watchlist_list") {

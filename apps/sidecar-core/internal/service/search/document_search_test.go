@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +70,69 @@ func TestScopedDocumentSearchServiceFiltersSymbolsAndPaginates(t *testing.T) {
 	}
 }
 
+// TestScopedDocumentSearchServiceFiltersNewsByAllCachedSymbols 验证个股资讯搜索不会漏掉多股票新闻里的非首个 symbol。
+func TestScopedDocumentSearchServiceFiltersNewsByAllCachedSymbols(t *testing.T) {
+	store := &fakeDocumentSearchStore{
+		state: map[string]string{"active_document_batch_id": "doc-ready-multi-symbol"},
+		matches: []dao.SearchDocumentFTSMatch{
+			{BatchID: "doc-ready-multi-symbol", DocUID: "news:8", DocType: SearchDocTypeNews, Symbol: "CN:SH:600519"},
+		},
+		documents: map[string]model.SearchDocument{
+			"news:8": {BatchID: "doc-ready-multi-symbol", DocUID: "news:8", DocType: SearchDocTypeNews, RefID: "8", Symbol: "CN:SH:600519", Title: "CPO 产业链扩产"},
+		},
+		newsByID: map[int64]model.NewsItem{
+			8: {ID: 8, Symbols: `["CN:SH:600519","CN:SZ:300308"]`, Tags: `["光模块"]`, Title: "CPO 产业链扩产"},
+		},
+	}
+	service := NewScopedDocumentSearchService(DocumentSearchConfig{Store: store})
+
+	results, err := service.SearchNews(context.Background(), DocumentSearchRequest{
+		Keyword: "CPO",
+		Symbols: []string{"CN:SZ:300308"},
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("search news: %v", err)
+	}
+	if len(results) != 1 || results[0].DocUID != "news:8" {
+		t.Fatalf("expected second cached symbol to match, got %+v", results)
+	}
+}
+
+// TestScopedDocumentSearchServiceEnrichesNewsTagsAndSentiment 验证资讯搜索结果回源补齐业务标签和情绪标签。
+func TestScopedDocumentSearchServiceEnrichesNewsTagsAndSentiment(t *testing.T) {
+	store := &fakeDocumentSearchStore{
+		state: map[string]string{"active_document_batch_id": "doc-ready-tags"},
+		matches: []dao.SearchDocumentFTSMatch{
+			{BatchID: "doc-ready-tags", DocUID: "news:42", DocType: SearchDocTypeNews},
+		},
+		documents: map[string]model.SearchDocument{
+			"news:42": {BatchID: "doc-ready-tags", DocUID: "news:42", DocType: SearchDocTypeNews, RefID: "42", Title: "订单超预期", Summary: "行业景气度回升"},
+		},
+		newsByID: map[int64]model.NewsItem{
+			42: {ID: 42, URL: "https://example.com/news/42", Tags: `["光模块","CPO"]`, Symbols: `["CN:SZ:300308"]`, Title: "订单超预期", Summary: "行业景气度回升"},
+		},
+	}
+	service := NewScopedDocumentSearchService(DocumentSearchConfig{Store: store})
+
+	results, err := service.SearchNews(context.Background(), DocumentSearchRequest{Keyword: "CPO", Limit: 10})
+	if err != nil {
+		t.Fatalf("search news: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one news result, got %+v", results)
+	}
+	if got := strings.Join(results[0].Tags, ","); got != "CN:SZ:300308,光模块,CPO" {
+		t.Fatalf("expected source tags to be preserved, got %q", got)
+	}
+	if results[0].Sentiment != "positive" {
+		t.Fatalf("expected positive sentiment, got %+v", results[0])
+	}
+	if results[0].URL != "https://example.com/news/42" {
+		t.Fatalf("expected source url to be preserved, got %+v", results[0])
+	}
+}
+
 // TestScopedDocumentSearchServiceSearchesWatchlistNotes 验证自选备注搜索固定使用 watchlist_note 范围。
 func TestScopedDocumentSearchServiceSearchesWatchlistNotes(t *testing.T) {
 	store := &fakeDocumentSearchStore{
@@ -95,6 +159,7 @@ type fakeDocumentSearchStore struct {
 	state       map[string]string
 	matches     []dao.SearchDocumentFTSMatch
 	documents   map[string]model.SearchDocument
+	newsByID    map[int64]model.NewsItem
 	lastBatchID string
 	lastDocType string
 	lastMatch   string
@@ -123,4 +188,15 @@ func (store *fakeDocumentSearchStore) ListSearchDocumentsByUIDs(_ context.Contex
 		}
 	}
 	return documents, nil
+}
+
+// ListNewsItemsByIDs 按搜索文档 ref_id 回源新闻缓存，补齐搜索元数据未保存的业务展示字段。
+func (store *fakeDocumentSearchStore) ListNewsItemsByIDs(_ context.Context, ids []int64) (map[int64]model.NewsItem, error) {
+	result := make(map[int64]model.NewsItem, len(ids))
+	for _, id := range ids {
+		if item, ok := store.newsByID[id]; ok {
+			result[id] = item
+		}
+	}
+	return result, nil
 }

@@ -1,26 +1,33 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App as AntApp } from "antd";
 import { InfoCircleFilled, SafetyCertificateOutlined } from "@ant-design/icons";
+import { useLocation } from "react-router-dom";
 import type { DataSourceStatus, HotIndustry, MentionedStock, NewsFilters, NewsItem, SentimentSummary } from "./types";
-import { NewsFilterCard } from "./components/NewsFilterCard";
+import { NewsFilterCard, type NewsStockOption } from "./components/NewsFilterCard";
 import { NewsListCard } from "./components/NewsListCard";
 import { NewsSidebarPanel } from "./components/NewsSidebarPanel";
 import {
   newsHotTopics,
+  newsList,
   newsMarket,
   newsStats,
   openExternalURL,
   searchNews,
+  stockSearch,
+  watchlistList,
   type DocumentSearchItem,
   type NewsHotTopicsResult,
   type NewsItem as CoreNewsItem,
   type NewsStatsResult,
+  type StockSearchResult,
+  type WatchlistItem,
 } from "../../services/coreClient";
 import { DEFAULT_PAGE_SIZE } from "../../lib/pagination";
 
 const initialNewsFilters: NewsFilters = {
   keyword: "",
   stock: "全部股票",
+  stockSymbol: "",
   source: "全部来源",
   industry: "全部行业",
   timeRange: "近 7 天",
@@ -38,18 +45,26 @@ const newsQueryLimit = 80;
 
 export function NewsCenterPage() {
   const { message } = AntApp.useApp();
-  const [filters, setFilters] = useState<NewsFilters>(initialNewsFilters);
+  const location = useLocation();
+  const initialRouteStock = useMemo(() => routeStockFromLocation(location), [location]);
+  const [filters, setFilters] = useState<NewsFilters>(() => ({
+    ...initialNewsFilters,
+    ...(initialRouteStock ? { stock: initialRouteStock.label, stockSymbol: initialRouteStock.value } : {}),
+  }));
   const [sortMode, setSortMode] = useState("按最新");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [searchItems, setSearchItems] = useState<NewsItem[]>([]);
   const [remoteSearchMode, setRemoteSearchMode] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [watchlistStockOptions, setWatchlistStockOptions] = useState<NewsStockOption[]>([]);
+  const [searchedStockOptions, setSearchedStockOptions] = useState<NewsStockOption[]>([]);
   const [hotIndustries, setHotIndustries] = useState<HotIndustry[]>([]);
   const [mentionedStocks, setMentionedStocks] = useState<MentionedStock[]>([]);
   const [sentimentSummary, setSentimentSummary] = useState<SentimentSummary>(emptySentimentSummary);
   const [hotTopicsUpdatedAt, setHotTopicsUpdatedAt] = useState<string>();
   const [statsUpdatedAt, setStatsUpdatedAt] = useState<string>();
+  const newsRequestSeqRef = useRef(0);
 
   const filteredItems = useMemo(() => {
     if (remoteSearchMode) {
@@ -57,9 +72,6 @@ export function NewsCenterPage() {
     }
     return searchItems.filter((item) => {
       if (filters.source !== "全部来源" && item.source !== filters.source) {
-        return false;
-      }
-      if (filters.stock !== "全部股票" && !item.tags.some((tag) => tag.includes(filters.stock))) {
         return false;
       }
       if (filters.industry !== "全部行业" && !item.tags.some((tag) => tag.includes(filters.industry))) {
@@ -78,6 +90,11 @@ export function NewsCenterPage() {
       setCurrentPage(maxPage);
     }
   }, [currentPage, pageSize, totalCount]);
+
+  const stockOptions = useMemo(
+    () => mergeStockOptions([{ value: "全部股票", label: "全部股票" }, initialRouteStock, ...watchlistStockOptions, ...searchedStockOptions]),
+    [initialRouteStock, searchedStockOptions, watchlistStockOptions],
+  );
 
   const updateFilters = (patch: Partial<NewsFilters>) => {
     setFilters((current) => ({ ...current, ...patch }));
@@ -105,6 +122,7 @@ export function NewsCenterPage() {
   };
 
   const loadMarketNews = useCallback(async (options?: { forceRefresh?: boolean }) => {
+    const requestSeq = nextNewsRequestSeq(newsRequestSeqRef);
     try {
       setIsSearching(true);
       const result = await newsMarket({
@@ -112,13 +130,42 @@ export function NewsCenterPage() {
         limit: newsQueryLimit,
         ...(options?.forceRefresh ? { forceRefresh: true } : {}),
       });
+      if (!isLatestNewsRequest(newsRequestSeqRef, requestSeq)) {
+        return;
+      }
       setSearchItems(result.items.map(mapCoreNewsItem));
       setRemoteSearchMode(false);
       setCurrentPage(1);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "市场资讯加载失败");
+      if (isLatestNewsRequest(newsRequestSeqRef, requestSeq)) {
+        message.error(error instanceof Error ? error.message : "市场资讯加载失败");
+      }
     } finally {
-      setIsSearching(false);
+      if (isLatestNewsRequest(newsRequestSeqRef, requestSeq)) {
+        setIsSearching(false);
+      }
+    }
+  }, [message]);
+
+  const loadStockNews = useCallback(async (symbol: string) => {
+    const requestSeq = nextNewsRequestSeq(newsRequestSeqRef);
+    try {
+      setIsSearching(true);
+      const result = await newsList({ symbol, limit: newsQueryLimit });
+      if (!isLatestNewsRequest(newsRequestSeqRef, requestSeq)) {
+        return;
+      }
+      setSearchItems(result.items.map(mapCoreNewsItem));
+      setRemoteSearchMode(false);
+      setCurrentPage(1);
+    } catch (error) {
+      if (isLatestNewsRequest(newsRequestSeqRef, requestSeq)) {
+        message.error(error instanceof Error ? error.message : "个股资讯加载失败");
+      }
+    } finally {
+      if (isLatestNewsRequest(newsRequestSeqRef, requestSeq)) {
+        setIsSearching(false);
+      }
     }
   }, [message]);
 
@@ -139,34 +186,86 @@ export function NewsCenterPage() {
   }, [message]);
 
   useEffect(() => {
-    void loadMarketNews();
+    if (filters.stockSymbol) {
+      void loadStockNews(filters.stockSymbol);
+    } else {
+      void loadMarketNews();
+    }
     void loadNewsInsights();
-  }, [loadMarketNews, loadNewsInsights]);
+  }, [filters.stockSymbol, loadMarketNews, loadNewsInsights, loadStockNews]);
+
+  useEffect(() => {
+    watchlistList()
+      .then((result) => setWatchlistStockOptions(result.items.map(mapWatchlistStockOption)))
+      .catch(() => {
+        setWatchlistStockOptions([]);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!initialRouteStock) {
+      return;
+    }
+    setFilters((current) => {
+      if (current.stockSymbol === initialRouteStock.value) {
+        return current;
+      }
+      return { ...current, stock: initialRouteStock.label, stockSymbol: initialRouteStock.value };
+    });
+  }, [initialRouteStock]);
 
   const handleRefresh = async () => {
     const keyword = filters.keyword.trim();
+    const stockSymbol = filters.stockSymbol.trim();
+    if (!keyword && stockSymbol) {
+      await loadStockNews(stockSymbol);
+      await loadNewsInsights();
+      return;
+    }
     if (!keyword) {
       await loadMarketNews({ forceRefresh: true });
       await loadNewsInsights();
       return;
     }
+    const requestSeq = nextNewsRequestSeq(newsRequestSeqRef);
     try {
       setIsSearching(true);
       const results = await searchNews({
         keyword,
-        symbols: [],
+        symbols: stockSymbol ? [stockSymbol] : [],
         limit: newsQueryLimit,
         offset: 0,
         sort: "relevance",
       });
+      if (!isLatestNewsRequest(newsRequestSeqRef, requestSeq)) {
+        return;
+      }
       setSearchItems(results.filter((item) => item.doc_type === "news").map(mapSearchNewsItem));
       setRemoteSearchMode(true);
       setCurrentPage(1);
       message.success("资讯搜索已更新");
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "资讯搜索失败");
+      if (isLatestNewsRequest(newsRequestSeqRef, requestSeq)) {
+        message.error(error instanceof Error ? error.message : "资讯搜索失败");
+      }
     } finally {
-      setIsSearching(false);
+      if (isLatestNewsRequest(newsRequestSeqRef, requestSeq)) {
+        setIsSearching(false);
+      }
+    }
+  };
+
+  const handleStockSearch = async (keyword: string) => {
+    const normalizedKeyword = keyword.trim();
+    if (!normalizedKeyword) {
+      setSearchedStockOptions([]);
+      return;
+    }
+    try {
+      const results = await stockSearch(normalizedKeyword);
+      setSearchedStockOptions(results.map(mapSearchStockOption));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "股票搜索失败");
     }
   };
 
@@ -194,7 +293,9 @@ export function NewsCenterPage() {
       <NewsFilterCard
         filters={filters}
         hotKeywords={hotKeywords}
+        stockOptions={stockOptions}
         onChange={updateFilters}
+        onStockSearch={handleStockSearch}
         onHotKeywordClick={handleHotKeywordClick}
         onRefresh={handleRefresh}
         isRefreshing={isSearching}
@@ -228,6 +329,70 @@ export function NewsCenterPage() {
   );
 }
 
+type RouteStockState = {
+  newsStock?: {
+    symbol?: string;
+    name?: string;
+    code?: string;
+  };
+};
+
+function routeStockFromLocation(location: ReturnType<typeof useLocation>): NewsStockOption | null {
+  const routeState = location.state as RouteStockState | null;
+  const stateStock = routeState?.newsStock;
+  if (stateStock?.symbol) {
+    return {
+      value: stateStock.symbol,
+      label: stateStock.name || stateStock.code || stateStock.symbol,
+    };
+  }
+  const query = new URLSearchParams(location.search);
+  const symbol = query.get("symbol")?.trim();
+  if (!symbol) {
+    return null;
+  }
+  return {
+    value: symbol,
+    label: query.get("name")?.trim() || query.get("code")?.trim() || symbol,
+  };
+}
+
+function mergeStockOptions(options: Array<NewsStockOption | null>) {
+  const seen = new Set<string>();
+  const result: NewsStockOption[] = [];
+  for (const option of options) {
+    if (!option || seen.has(option.value)) {
+      continue;
+    }
+    seen.add(option.value);
+    result.push(option);
+  }
+  return result;
+}
+
+function nextNewsRequestSeq(ref: { current: number }) {
+  ref.current += 1;
+  return ref.current;
+}
+
+function isLatestNewsRequest(ref: { current: number }, requestSeq: number) {
+  return ref.current === requestSeq;
+}
+
+function mapWatchlistStockOption(item: WatchlistItem): NewsStockOption {
+  return {
+    value: item.symbol,
+    label: item.name || item.code || item.symbol,
+  };
+}
+
+function mapSearchStockOption(item: StockSearchResult): NewsStockOption {
+  return {
+    value: item.symbol,
+    label: item.name || item.code || item.symbol,
+  };
+}
+
 function mapCoreNewsItem(item: CoreNewsItem): NewsItem {
   const tags = Array.from(new Set([...(item.symbols ?? []), ...(item.tags ?? [])].map((tag) => tag.trim()).filter(Boolean)));
   return {
@@ -237,12 +402,13 @@ function mapCoreNewsItem(item: CoreNewsItem): NewsItem {
     title: item.title,
     summary: item.summary || "",
     tags,
+    sentiment: normalizeSentiment(item.sentiment),
     url: normalizeNewsURL(item.url),
   };
 }
 
 function mapSearchNewsItem(item: DocumentSearchItem): NewsItem {
-  const tags = Array.from(new Set([item.symbol, ...item.highlights].map((tag) => tag.trim()).filter(Boolean)));
+  const tags = Array.from(new Set([item.symbol, ...(item.tags ?? [])].map((tag) => tag.trim()).filter(Boolean)));
   return {
     id: item.doc_uid,
     source: item.source || "资讯",
@@ -250,8 +416,16 @@ function mapSearchNewsItem(item: DocumentSearchItem): NewsItem {
     title: item.title,
     summary: item.summary,
     tags,
-    url: normalizeNewsURL(item.ref_id),
+    sentiment: normalizeSentiment(item.sentiment ?? undefined),
+    url: normalizeNewsURL(item.url ?? undefined),
   };
+}
+
+function normalizeSentiment(value?: string): NewsItem["sentiment"] {
+  if (value === "positive" || value === "neutral" || value === "negative") {
+    return value;
+  }
+  return undefined;
 }
 
 function formatNewsTime(value?: string): string {
@@ -271,10 +445,14 @@ function formatNewsTime(value?: string): string {
 }
 
 function mapNewsStatsToSentiment(stats: NewsStatsResult): SentimentSummary {
+  const positiveCount = stats.sentiment_positive_count ?? 0;
+  const neutralCount = stats.sentiment_neutral_count ?? 0;
+  const negativeCount = stats.sentiment_negative_count ?? 0;
+  const total = Math.max(1, positiveCount + neutralCount + negativeCount);
   return {
-    positive: { count: 0, percent: 0 },
-    neutral: { count: 0, percent: 0 },
-    negative: { count: 0, percent: 0 },
+    positive: { count: positiveCount, percent: Math.round((positiveCount / total) * 100) },
+    neutral: { count: neutralCount, percent: Math.round((neutralCount / total) * 100) },
+    negative: { count: negativeCount, percent: Math.round((negativeCount / total) * 100) },
     summary: stats.sentiment_summary || "暂未接入情绪分类，当前仅展示新闻缓存数量、来源和标签统计。",
   };
 }

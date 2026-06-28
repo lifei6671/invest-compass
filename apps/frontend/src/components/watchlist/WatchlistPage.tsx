@@ -450,6 +450,7 @@ export function WatchlistPage() {
 function mapWatchlistNoteSearchItem(item: DocumentSearchItem, index: number): WatchlistItem {
   const parsedID = Number(item.ref_id);
   const { code, market } = watchlistDisplaySymbol(item.symbol);
+  const highlights = Array.isArray(item.highlights) ? item.highlights : [];
   return {
     id: Number.isFinite(parsedID) && parsedID > 0 ? parsedID : 100000 + index,
     sourceSymbol: item.symbol,
@@ -465,7 +466,7 @@ function mapWatchlistNoteSearchItem(item: DocumentSearchItem, index: number): Wa
     turnoverRate: "--",
     pe: "--",
     industry: "自选备注",
-    tags: Array.from(new Set((item.highlights.length > 0 ? item.highlights : ["备注"]).filter(Boolean))),
+    tags: Array.from(new Set((highlights.length > 0 ? highlights : ["备注"]).filter(Boolean))),
     note: item.summary,
     updatedAt: formatWatchlistSearchTime(item.source_time),
     trend: "up",

@@ -1,11 +1,10 @@
-import { ClockCircleOutlined, CopyOutlined, FileTextOutlined, InfoCircleOutlined, StopOutlined } from "@ant-design/icons";
+import { CopyOutlined, FileTextOutlined, InfoCircleOutlined, StopOutlined } from "@ant-design/icons";
 import { Button } from "antd";
 
 type RunningActionBarProps = {
   generating: boolean;
   reportID?: number | null;
   onStop: () => void;
-  onBackground: () => void;
   onCopy: () => void;
   onViewReport: () => void;
 };
@@ -15,9 +14,6 @@ export function RunningActionBar(props: RunningActionBarProps) {
     <div className="analysis-running-action-bar">
       <Button danger className="analysis-running-danger-button" icon={<StopOutlined />} disabled={!props.generating} onClick={props.onStop}>
         停止生成
-      </Button>
-      <Button className="analysis-running-action-button" icon={<ClockCircleOutlined />} onClick={props.onBackground}>
-        后台运行
       </Button>
       <Button className="analysis-running-action-button analysis-running-copy-button" icon={<CopyOutlined />} onClick={props.onCopy}>
         复制当前内容

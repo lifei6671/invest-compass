@@ -7,12 +7,14 @@ export type NewsItem = {
   title: string;
   summary: string;
   tags: string[];
+  sentiment?: "positive" | "neutral" | "negative" | string;
   url?: string;
 };
 
 export type NewsFilters = {
   keyword: string;
   stock: string;
+  stockSymbol: string;
   source: string;
   industry: string;
   timeRange: string;

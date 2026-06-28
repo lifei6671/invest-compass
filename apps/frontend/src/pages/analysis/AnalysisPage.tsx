@@ -392,7 +392,24 @@ export function AnalysisPage() {
           />
           <OptionalContextCard value={holdingContext} onChange={setHoldingContext} />
         </div>
-        <DataContextPreview value={contextSummary} onViewMoreNews={() => navigate("/news")} />
+        <DataContextPreview
+          value={contextSummary}
+          onViewMoreNews={() => {
+            if (!config.stock.symbol) {
+              navigate("/news");
+              return;
+            }
+            navigate("/news", {
+              state: {
+                newsStock: {
+                  symbol: config.stock.symbol,
+                  name: config.stock.name,
+                  code: config.stock.code,
+                },
+              },
+            });
+          }}
+        />
         <OutputPreviewCard
           markdown={previewMarkdown}
           plainText={previewPlainText}
@@ -476,9 +493,18 @@ function buildContextSummary(
     news: {
       count: newsItems.length,
       period: newsItems.length ? "最近资讯" : "暂无新闻",
-      items: newsItems.slice(0, 3).map((item) => item.title),
+      items: newsItems.slice(0, 3).map(formatNewsSummaryItem),
     },
   };
+}
+
+function formatNewsSummaryItem(item: NewsItem) {
+  const title = item.title.trim();
+  const summary = item.summary?.trim();
+  if (!summary || summary === title) {
+    return title;
+  }
+  return `${title}：${summary}`;
 }
 
 function promptTypeForAnalysisType(analysisType: AnalysisType): Extract<PromptTemplateType, "stock_full" | "technical" | "fundamental" | "news"> {

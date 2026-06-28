@@ -182,6 +182,7 @@ export type NewsItem = {
   published_at?: string;
   symbols?: string[];
   tags?: string[];
+  sentiment?: "positive" | "neutral" | "negative" | string;
 };
 
 export type NewsListPayload = {
@@ -203,6 +204,9 @@ export type NewsStatsResult = {
   total_count: number;
   source_count: number;
   latest_published_at?: string;
+  sentiment_positive_count?: number;
+  sentiment_neutral_count?: number;
+  sentiment_negative_count?: number;
   sentiment_summary: string;
 };
 
@@ -842,13 +846,16 @@ export type DocumentSearchItem = {
   doc_uid: string;
   doc_type: "report" | "news" | "watchlist_note";
   ref_id: string;
+  url?: string | null;
   symbol: string;
   title: string;
   summary: string;
   source: string;
   source_time: string;
   score: number;
-  highlights: string[];
+  tags?: string[] | null;
+  sentiment?: string | null;
+  highlights?: string[] | null;
 };
 
 export type ProviderStatusItem = {

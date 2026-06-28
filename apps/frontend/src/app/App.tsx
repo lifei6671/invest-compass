@@ -785,7 +785,7 @@ async function loadStockDetailState(normalizedSymbol: string, period: string, ad
       limit: 120,
       indicators: stockDetailIndicatorKeys,
     }),
-    newsList({ symbol: normalizedSymbol, limit: 20 }).catch((): NewsListResult => ({ items: [] })),
+    newsList({ symbol: normalizedSymbol, limit: 10 }).catch((): NewsListResult => ({ items: [] })),
     watchlistList().catch((): WatchlistList => ({ items: [] })),
   ]);
   return {
@@ -936,6 +936,16 @@ export function StockDetailRoute() {
       });
   };
 
+  const openNewsOriginal = (item: StockNewsItem) => {
+    if (!item.url) {
+      return;
+    }
+    void openExternalURL(item.url).catch((cause) => {
+      const reason = cause instanceof Error ? cause.message : "打开新闻原文失败";
+      message.error(reason);
+    });
+  };
+
   return (
     <StockDetailPage
       stock={state ? toStockDetail(normalizedSymbol, state.quote, state.profile) : emptyStockDetailForSymbol(normalizedSymbol)}
@@ -951,6 +961,7 @@ export function StockDetailRoute() {
       onPeriodChange={setPeriod}
       onAdjustChange={setAdjust}
       onRefresh={refreshQuoteFromProvider}
+      onOpenNewsOriginal={openNewsOriginal}
       onSaveWatchlistNote={state?.watchlistItem ? saveWatchlistNote : undefined}
       savingWatchlistNote={savingWatchlistNote}
     />
@@ -1080,11 +1091,12 @@ function toTechnicalIndicators(indicators: Record<string, unknown>, period: Stoc
 }
 
 function toStockNewsItems(items: NewsItem[]): StockNewsItem[] {
-  return items.map((item) => ({
+  return items.slice(0, 10).map((item) => ({
     id: String(item.id),
     title: item.title,
     source: item.source || "未知来源",
     publishedAt: item.published_at || "后端未提供",
+    url: item.url,
   }));
 }
 

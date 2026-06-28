@@ -416,6 +416,35 @@ func TestNewsRepositoryUpsertsByContentHashAndSorts(t *testing.T) {
 	requireCount(t, store, &model.NewsItem{}, 2)
 }
 
+// TestNewsRepositoryListsByIDs 验证搜索回源能按新闻 ID 读取标签和 symbol 展示字段。
+func TestNewsRepositoryListsByIDs(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)
+
+	if err := store.SaveNewsItems(ctx, []model.NewsItem{
+		{Title: "光模块订单增长", URL: "https://example.com/1", ContentHash: "hash-1", Symbols: `["CN:SZ:300308"]`, Tags: `["光模块","CPO"]`, PublishedAt: now, Source: "provider-a"},
+	}); err != nil {
+		t.Fatalf("save news items: %v", err)
+	}
+	items, err := store.ListMarketNews(ctx, "", 10, 0)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("list market news: len=%d err=%v", len(items), err)
+	}
+
+	byID, err := store.ListNewsItemsByIDs(ctx, []int64{items[0].ID, 999})
+	if err != nil {
+		t.Fatalf("list news by ids: %v", err)
+	}
+	got, ok := byID[items[0].ID]
+	if !ok || got.Tags != `["光模块","CPO"]` || got.Symbols != `["CN:SZ:300308"]` {
+		t.Fatalf("unexpected news by id result: %+v", byID)
+	}
+	if _, ok := byID[999]; ok {
+		t.Fatalf("expected missing id to be ignored, got %+v", byID[999])
+	}
+}
+
 // TestNewsRepositoryMatchesSymbolExactly 验证新闻缓存按完整 symbol 匹配，避免 US:A 命中 US:AAPL。
 func TestNewsRepositoryMatchesSymbolExactly(t *testing.T) {
 	store := newTestStore(t)

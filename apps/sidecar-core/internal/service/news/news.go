@@ -50,6 +50,7 @@ type Item struct {
 	PublishedAt time.Time
 	Symbols     []stock.Symbol
 	Tags        []string
+	Sentiment   string
 }
 
 // ProviderStatus 描述新闻数据源的安全展示状态。

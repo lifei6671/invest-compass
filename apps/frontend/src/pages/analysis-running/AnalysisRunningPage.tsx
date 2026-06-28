@@ -316,7 +316,6 @@ export function AnalysisRunningPage() {
           generating={generating}
           markdown={streamingMarkdown}
           onAutoScrollChange={setAutoScroll}
-          onClear={() => setStreamingMarkdown("")}
         />
         <TaskLogPanel logs={logs} onClear={() => setLogs([])} />
       </div>
@@ -324,7 +323,6 @@ export function AnalysisRunningPage() {
         generating={generating}
         reportID={reportID}
         onStop={handleStop}
-        onBackground={() => navigate("/tasks")}
         onCopy={copyCurrentContent}
         onViewReport={() => {
           if (reportID) {

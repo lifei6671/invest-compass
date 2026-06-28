@@ -3,10 +3,12 @@ import type { StockNewsItem } from "../types";
 
 type StockNewsTabsCardProps = {
   items: StockNewsItem[];
+  onOpenOriginal?: (item: StockNewsItem) => void;
   onViewMore?: () => void;
 };
 
 export function StockNewsTabsCard(props: StockNewsTabsCardProps) {
+  const visibleItems = props.items.slice(0, 10);
   return (
     <section className="stock-detail-card min-h-[210px] px-5 py-3">
       <div className="mb-2 flex items-center gap-8 border-b border-[#edf1f7]">
@@ -20,11 +22,21 @@ export function StockNewsTabsCard(props: StockNewsTabsCardProps) {
         <span>来源</span>
         <span>发布日期</span>
       </div>
-      {props.items.length > 0 ? (
+      {visibleItems.length > 0 ? (
         <div className="space-y-1">
-          {props.items.map((item) => (
+          {visibleItems.map((item) => (
             <article key={item.id} className="grid grid-cols-[1fr_120px_150px] items-center px-1 py-1.5 text-[13px]">
-              <span className="truncate font-medium text-[#374151]">{item.title}</span>
+              {item.url ? (
+                <button
+                  type="button"
+                  className="truncate border-0 bg-transparent p-0 text-left font-medium text-[#374151] hover:text-[#1677ff]"
+                  onClick={() => props.onOpenOriginal?.(item)}
+                >
+                  {item.title}
+                </button>
+              ) : (
+                <span className="truncate font-medium text-[#374151]">{item.title}</span>
+              )}
               <span className="text-[#475569]">{item.source}</span>
               <span className="app-number text-[#64748b]">{item.publishedAt}</span>
             </article>

@@ -675,6 +675,12 @@ body {
   color: #16a34a;
 }
 
+.app-market-status-tag-closed {
+  border-color: #d8dee8;
+  background: #f3f5f8;
+  color: #64748b;
+}
+
 .app-market-status-tag-error {
   border-color: #ffd6d6;
   background: #fff1f0;
@@ -6788,6 +6794,12 @@ body {
   color: #1677ff;
   font-size: 12px;
   line-height: 20px;
+}
+
+.news-item-tags .news-sentiment-tag.ant-tag {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 9%, #ffffff);
+  font-weight: 600;
 }
 
 .news-item-actions {

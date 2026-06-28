@@ -35,6 +35,7 @@ export type StockNewsItem = {
   title: string;
   source: string;
   publishedAt: string;
+  url?: string;
 };
 
 export type KlineItem = {

@@ -38,12 +38,15 @@ type documentSearchResult struct {
 	DocUID     string   `json:"doc_uid"`
 	DocType    string   `json:"doc_type"`
 	RefID      string   `json:"ref_id"`
+	URL        string   `json:"url"`
 	Symbol     string   `json:"symbol"`
 	Title      string   `json:"title"`
 	Summary    string   `json:"summary"`
 	Source     string   `json:"source"`
 	SourceTime string   `json:"source_time"`
 	Score      float64  `json:"score"`
+	Tags       []string `json:"tags"`
+	Sentiment  string   `json:"sentiment"`
 	Highlights []string `json:"highlights"`
 }
 
@@ -197,17 +200,28 @@ func isAllowedRebuildScope(scope string) bool {
 func buildDocumentSearchResponse(results []searchservice.DocumentSearchResult) []documentSearchResult {
 	items := make([]documentSearchResult, 0, len(results))
 	for _, result := range results {
+		highlights := result.Highlights
+		if highlights == nil {
+			highlights = []string{}
+		}
+		tags := result.Tags
+		if tags == nil {
+			tags = []string{}
+		}
 		items = append(items, documentSearchResult{
 			DocUID:     result.DocUID,
 			DocType:    result.DocType,
 			RefID:      result.RefID,
+			URL:        result.URL,
 			Symbol:     result.Symbol,
 			Title:      result.Title,
 			Summary:    result.Summary,
 			Source:     result.Source,
 			SourceTime: formatSearchSourceTime(result.SourceTime),
 			Score:      result.Score,
-			Highlights: result.Highlights,
+			Tags:       tags,
+			Sentiment:  result.Sentiment,
+			Highlights: highlights,
 		})
 	}
 	return items

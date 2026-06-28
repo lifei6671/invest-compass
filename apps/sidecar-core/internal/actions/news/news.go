@@ -1,12 +1,13 @@
 package news
 
 import (
-	"context"
+	stdcontext "context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,19 +20,26 @@ import (
 )
 
 const newsCacheMaxAge = 60 * time.Minute
+const newsSearchIndexTimeout = 30 * time.Second
 
 // Store 是 news action 依赖的数据访问边界。
 type Store interface {
-	SaveNewsItems(ctx context.Context, items []model.NewsItem) error
-	ListNewsBySymbol(ctx context.Context, symbol string, limit int, maxAge time.Duration) ([]model.NewsItem, error)
-	ListMarketNews(ctx context.Context, market string, limit int, maxAge time.Duration) ([]model.NewsItem, error)
+	SaveNewsItems(ctx stdcontext.Context, items []model.NewsItem) error
+	ListNewsBySymbol(ctx stdcontext.Context, symbol string, limit int, maxAge time.Duration) ([]model.NewsItem, error)
+	ListMarketNews(ctx stdcontext.Context, market string, limit int, maxAge time.Duration) ([]model.NewsItem, error)
+}
+
+// SearchIndexer 是新闻入库后写入 active 文档搜索索引的最小依赖边界。
+type SearchIndexer interface {
+	IndexNews(ctx stdcontext.Context, item model.NewsItem) error
 }
 
 // Config 是新闻 action 的运行期依赖。
 type Config struct {
-	Security     httpx.SecurityConfig
-	NewsProvider newsservice.Provider
-	Store        Store
+	Security      httpx.SecurityConfig
+	NewsProvider  newsservice.Provider
+	Store         Store
+	SearchIndexer SearchIndexer
 }
 
 type listRequest struct {
@@ -55,10 +63,13 @@ type listData struct {
 }
 
 type statsData struct {
-	TotalCount       int    `json:"total_count"`
-	SourceCount      int    `json:"source_count"`
-	LatestPublished  string `json:"latest_published_at"`
-	SentimentSummary string `json:"sentiment_summary"`
+	TotalCount             int    `json:"total_count"`
+	SourceCount            int    `json:"source_count"`
+	LatestPublished        string `json:"latest_published_at"`
+	SentimentPositiveCount int    `json:"sentiment_positive_count"`
+	SentimentNeutralCount  int    `json:"sentiment_neutral_count"`
+	SentimentNegativeCount int    `json:"sentiment_negative_count"`
+	SentimentSummary       string `json:"sentiment_summary"`
 }
 
 type hotTopicsData struct {
@@ -87,6 +98,7 @@ type itemData struct {
 	PublishedAt time.Time `json:"published_at"`
 	Symbols     []string  `json:"symbols"`
 	Tags        []string  `json:"tags"`
+	Sentiment   string    `json:"sentiment"`
 }
 
 // Routes 返回新闻相关路由定义，不直接注册到 Gin。
@@ -153,6 +165,9 @@ func handleList(config Config) http.HandlerFunc {
 				writeCacheError(response, context, "个股新闻缓存写入失败", err)
 				return
 			}
+			triggerNewsSearchIndex(config, request.Context(), context, func(ctx stdcontext.Context) ([]model.NewsItem, error) {
+				return config.Store.ListNewsBySymbol(ctx, symbol.String(), payload.Limit, 0)
+			})
 		}
 
 		httpx.WriteOK(response, listData{Items: itemDataFromService(normalized, payload.Limit)}, context)
@@ -233,11 +248,50 @@ func handleMarket(config Config) http.HandlerFunc {
 					logger.FieldTraceID, context.TraceID,
 					"error", logger.RedactError(err),
 				)
+			} else {
+				triggerNewsSearchIndex(config, request.Context(), context, func(ctx stdcontext.Context) ([]model.NewsItem, error) {
+					return config.Store.ListMarketNews(ctx, market, payload.Limit, 0)
+				})
 			}
 		}
 
 		httpx.WriteOK(response, listData{Items: itemDataFromService(normalized, payload.Limit)}, context)
 	}
+}
+
+// triggerNewsSearchIndex 在新闻入库成功后后台增量写入 active news FTS 索引，不创建完整重建任务。
+func triggerNewsSearchIndex(config Config, parent stdcontext.Context, requestContext httpx.RequestContext, load func(stdcontext.Context) ([]model.NewsItem, error)) {
+	if config.SearchIndexer == nil || load == nil {
+		return
+	}
+	go func() {
+		indexContext, cancel := stdcontext.WithTimeout(stdcontext.WithoutCancel(parent), newsSearchIndexTimeout)
+		defer cancel()
+		items, err := load(indexContext)
+		if err != nil {
+			slog.Warn(
+				"资讯入库后搜索索引回源失败",
+				logger.FieldRequestID, requestContext.RequestID,
+				logger.FieldTraceID, requestContext.TraceID,
+				"error", logger.RedactError(err),
+			)
+			return
+		}
+		for _, item := range items {
+			if item.ID == 0 {
+				continue
+			}
+			if err := config.SearchIndexer.IndexNews(indexContext, item); err != nil {
+				slog.Warn(
+					"资讯入库后搜索索引增量写入失败",
+					logger.FieldRequestID, requestContext.RequestID,
+					logger.FieldTraceID, requestContext.TraceID,
+					"error", logger.RedactError(err),
+				)
+				return
+			}
+		}
+	}()
 }
 
 // handleStats 返回资讯中心侧栏统计，统计口径仅来自本地新闻缓存。
@@ -387,6 +441,7 @@ func itemDataFromService(items []newsservice.Item, limit int) []itemData {
 			PublishedAt: item.PublishedAt,
 			Symbols:     symbolStrings(item.Symbols),
 			Tags:        append([]string(nil), item.Tags...),
+			Sentiment:   newsSentimentLabel(item.Sentiment, item.Title, item.Summary),
 		})
 	}
 	return result
@@ -406,15 +461,19 @@ func itemDataFromModels(items []model.NewsItem) []itemData {
 			PublishedAt: item.PublishedAt,
 			Symbols:     decodeStringList(item.Symbols),
 			Tags:        decodeStringList(item.Tags),
+			Sentiment:   newsservice.AnalyzeSentiment(newsSentimentText(item.Title, item.Summary)).Label,
 		})
 	}
 	return result
 }
 
-// buildStatsData 从缓存新闻构造统计摘要；当前没有情绪模型，不输出假利好/利空判断。
+// buildStatsData 从缓存新闻构造来源、时间和情绪统计摘要。
 func buildStatsData(items []model.NewsItem) statsData {
 	sources := make(map[string]struct{})
 	var latest time.Time
+	var positiveCount int
+	var neutralCount int
+	var negativeCount int
 	for _, item := range items {
 		if source := strings.TrimSpace(item.Source); source != "" {
 			sources[source] = struct{}{}
@@ -422,17 +481,49 @@ func buildStatsData(items []model.NewsItem) statsData {
 		if item.PublishedAt.After(latest) {
 			latest = item.PublishedAt
 		}
+		switch newsservice.AnalyzeSentiment(newsSentimentText(item.Title, item.Summary)).Label {
+		case "positive":
+			positiveCount++
+		case "negative":
+			negativeCount++
+		default:
+			neutralCount++
+		}
 	}
 	latestText := ""
 	if !latest.IsZero() {
 		latestText = latest.Format(time.RFC3339Nano)
 	}
 	return statsData{
-		TotalCount:       len(items),
-		SourceCount:      len(sources),
-		LatestPublished:  latestText,
-		SentimentSummary: "暂未接入情绪分类，当前仅展示新闻缓存数量、来源和标签统计。",
+		TotalCount:             len(items),
+		SourceCount:            len(sources),
+		LatestPublished:        latestText,
+		SentimentPositiveCount: positiveCount,
+		SentimentNeutralCount:  neutralCount,
+		SentimentNegativeCount: negativeCount,
+		SentimentSummary:       formatSentimentSummary(positiveCount, neutralCount, negativeCount),
 	}
+}
+
+// newsSentimentText 合并标题和摘要，作为本地规则情绪分析输入。
+func newsSentimentText(title string, summary string) string {
+	return strings.TrimSpace(strings.Join([]string{title, summary}, "\n"))
+}
+
+// newsSentimentLabel 返回 Provider 显式情绪标签，缺失时按标题和摘要本地计算。
+func newsSentimentLabel(label string, title string, summary string) string {
+	label = strings.TrimSpace(label)
+	switch label {
+	case "positive", "neutral", "negative":
+		return label
+	default:
+		return newsservice.AnalyzeSentiment(newsSentimentText(title, summary)).Label
+	}
+}
+
+// formatSentimentSummary 生成资讯中心侧栏情绪统计文案。
+func formatSentimentSummary(positiveCount int, neutralCount int, negativeCount int) string {
+	return "利好 " + strconv.Itoa(positiveCount) + " 条，中性 " + strconv.Itoa(neutralCount) + " 条，利空 " + strconv.Itoa(negativeCount) + " 条。"
 }
 
 // buildHotTopicsData 从新闻 tags 和 symbols 统计热点，排序稳定且不依赖前端硬编码。

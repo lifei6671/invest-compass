@@ -1,16 +1,29 @@
 import { LoadingOutlined } from "@ant-design/icons";
-import { Button, Empty, Switch } from "antd";
+import { Empty, Switch } from "antd";
+import { useEffect, useRef } from "react";
 
 type StreamingOutputPanelProps = {
   autoScroll: boolean;
   generating: boolean;
   markdown: string;
   onAutoScrollChange: (checked: boolean) => void;
-  onClear: () => void;
 };
 
 export function StreamingOutputPanel(props: StreamingOutputPanelProps) {
   const hasContent = props.markdown.trim().length > 0;
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !props.autoScroll || !hasContent) {
+      return;
+    }
+    if (typeof body.scrollTo === "function") {
+      body.scrollTo({ top: body.scrollHeight, behavior: "smooth" });
+      return;
+    }
+    body.scrollTop = body.scrollHeight;
+  }, [props.autoScroll, props.markdown, hasContent]);
 
   return (
     <section className="analysis-running-card analysis-running-stream-card">
@@ -21,13 +34,9 @@ export function StreamingOutputPanel(props: StreamingOutputPanelProps) {
         <div className="analysis-running-stream-tools">
           <span>自动滚动</span>
           <Switch size="small" checked={props.autoScroll} onChange={props.onAutoScrollChange} />
-          <span className="analysis-running-tool-separator" />
-          <Button size="small" className="analysis-running-small-button" onClick={props.onClear}>
-            清空
-          </Button>
         </div>
       </div>
-      <div className="analysis-running-stream-body">
+      <div ref={bodyRef} className="analysis-running-stream-body">
         {hasContent ? <MarkdownPreview markdown={props.markdown} /> : <Empty description="暂无流式输出" />}
       </div>
       {hasContent && props.generating ? (

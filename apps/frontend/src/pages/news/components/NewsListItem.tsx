@@ -26,7 +26,15 @@ const sourceInitialMap: Record<string, string> = {
   证券日报: "日",
 };
 
+const sentimentTagMap: Record<string, { label: string; color: string }> = {
+  positive: { label: "看涨", color: "red" },
+  neutral: { label: "中性", color: "blue" },
+  negative: { label: "看跌", color: "green" },
+};
+
 export function NewsListItem({ item, onOpenOriginal, onCopySummary }: NewsListItemProps) {
+  const sentiment = item.sentiment ? sentimentTagMap[item.sentiment] : undefined;
+
   return (
     <article className="news-list-item">
       <div className="news-source-cell">
@@ -43,6 +51,11 @@ export function NewsListItem({ item, onOpenOriginal, onCopySummary }: NewsListIt
           {item.tags.map((tag) => (
             <Tag key={tag}>{tag}</Tag>
           ))}
+          {sentiment ? (
+            <Tag className="news-sentiment-tag" color={sentiment.color}>
+              {sentiment.label}
+            </Tag>
+          ) : null}
         </div>
       </div>
       <div className="news-item-actions">

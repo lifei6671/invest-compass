@@ -201,7 +201,7 @@ function TopBar(props: { locked?: boolean }) {
   const locked = Boolean(props.locked);
   const load = useDashboardStore((store) => store.load);
   const state = useDashboardStore((store) => store.state);
-  const quoteStatus = locked ? { badge: "success" as const, marketLabel: "A股 已收盘", timeLabel: "2025-05-22 15:29:45" } : dashboardQuoteStatus(state);
+  const quoteStatus = locked ? { badge: "closed" as const, marketLabel: "A股 已收盘", timeLabel: "2025-05-22 15:29:45" } : dashboardQuoteStatus(state);
   const [keyword, setKeyword] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -558,7 +558,7 @@ function formatNotificationTime(value: string): string {
   });
 }
 
-function dashboardQuoteStatus(state: DashboardViewState | null): { badge: "default" | "error" | "success"; marketLabel: string; timeLabel: string } {
+function dashboardQuoteStatus(state: DashboardViewState | null): { badge: "closed" | "default" | "error" | "success"; marketLabel: string; timeLabel: string } {
   if (!state) {
     return { badge: "default", marketLabel: "A股 等待数据", timeLabel: "--:--:--" };
   }
@@ -566,7 +566,7 @@ function dashboardQuoteStatus(state: DashboardViewState | null): { badge: "defau
   if (latestQuoteTime) {
     const marketSession = chinaMarketSessionStatus(latestQuoteTime);
     return {
-      badge: marketSession === "trading" ? "success" : "default",
+      badge: marketSession === "trading" ? "success" : marketSession === "closed" ? "closed" : "default",
       marketLabel: `A股 ${chinaMarketSessionLabel(marketSession)}`,
       timeLabel: formatDateTime(latestQuoteTime) || formatClock(latestQuoteTime) || "--:--:--",
     };

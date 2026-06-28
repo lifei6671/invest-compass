@@ -54,6 +54,58 @@ func TestSearchReportsReturnsFixedScopeResults(t *testing.T) {
 	}
 }
 
+// TestSearchNewsSerializesNilHighlightsAsEmptyArray 验证搜索响应不会把空高亮序列编码成 null，避免前端展开标签时崩溃。
+func TestSearchNewsSerializesNilHighlightsAsEmptyArray(t *testing.T) {
+	service := &fakeDocumentSearchActionService{
+		results: []searchservice.DocumentSearchResult{{
+			DocUID:     "news:1",
+			DocType:    searchservice.SearchDocTypeNews,
+			RefID:      "1",
+			URL:        "https://example.com/news/1",
+			Symbol:     "CN:SH:600000",
+			Title:      "伊朗相关资讯",
+			Summary:    "搜索结果摘要",
+			Source:     "财联社",
+			SourceTime: time.Date(2026, 6, 28, 9, 19, 0, 0, time.UTC),
+			Score:      1,
+			Tags:       []string{"中东冲突", "国际"},
+			Sentiment:  "neutral",
+			Highlights: nil,
+		}},
+	}
+	recorder := performDocumentSearch(t, "/api/search/news", Config{
+		Security: httpx.SecurityConfig{Token: "test-token", Ready: true},
+		Service:  service,
+	}, `{"keyword":"伊朗","limit":10,"offset":0}`)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	data := decodeActionResponseData(t, recorder.Body.Bytes())
+	items, ok := data.([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one news result item, got %#v", data)
+	}
+	first, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected news result: %#v", items[0])
+	}
+	highlights, ok := first["highlights"].([]any)
+	if !ok || highlights == nil || len(highlights) != 0 {
+		t.Fatalf("expected highlights to be empty array, got %#v", first["highlights"])
+	}
+	tags, ok := first["tags"].([]any)
+	if !ok || len(tags) != 2 || tags[0] != "中东冲突" || tags[1] != "国际" {
+		t.Fatalf("expected tags to be serialized, got %#v", first["tags"])
+	}
+	if first["sentiment"] != "neutral" {
+		t.Fatalf("expected sentiment to be serialized, got %#v", first["sentiment"])
+	}
+	if first["url"] != "https://example.com/news/1" {
+		t.Fatalf("expected url to be serialized, got %#v", first["url"])
+	}
+}
+
 // TestSearchRejectsDocTypesField 验证前端不能通过 doc_types 传入任意范围组合。
 func TestSearchRejectsDocTypesField(t *testing.T) {
 	recorder := performDocumentSearch(t, "/api/search/news", Config{

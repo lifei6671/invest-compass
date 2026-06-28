@@ -429,6 +429,7 @@ describe("coreClient", () => {
                 summary: "市场动态",
                 published_at: "2026-06-19T10:05:00Z",
                 tags: ["市场"],
+                sentiment: "positive",
               },
             ],
           },
@@ -442,7 +443,10 @@ describe("coreClient", () => {
             total_count: 2,
             source_count: 2,
             latest_published_at: "2026-06-24T13:30:00Z",
-            sentiment_summary: "暂未接入情绪分类，当前仅展示新闻缓存数量、来源和标签统计。",
+            sentiment_positive_count: 1,
+            sentiment_neutral_count: 1,
+            sentiment_negative_count: 0,
+            sentiment_summary: "利好 1 条，中性 1 条，利空 0 条。",
           },
         };
       }
@@ -471,6 +475,7 @@ describe("coreClient", () => {
               published_at: "2026-06-19T10:00:00Z",
               symbols: ["600000.SH"],
               tags: ["银行"],
+              sentiment: "neutral",
             },
           ],
         },
@@ -495,18 +500,21 @@ describe("coreClient", () => {
       indicators: { ma: { ma5: [7.12] } },
     });
     await expect(newsList({ symbol: "600000.SH", limit: 20 })).resolves.toMatchObject({
-      items: [{ title: "浦发银行新闻", url: "https://example.com/news/1" }],
+      items: [{ title: "浦发银行新闻", url: "https://example.com/news/1", sentiment: "neutral" }],
     });
     await expect(newsMarket({ market: "CN", limit: 20 })).resolves.toMatchObject({
-      items: [{ title: "市场新闻", url: "https://example.com/news/2" }],
+      items: [{ title: "市场新闻", url: "https://example.com/news/2", sentiment: "positive" }],
     });
     await expect(newsMarket({ market: "CN", limit: 20, forceRefresh: true })).resolves.toMatchObject({
-      items: [{ title: "市场新闻", url: "https://example.com/news/2" }],
+      items: [{ title: "市场新闻", url: "https://example.com/news/2", sentiment: "positive" }],
     });
     await expect(newsStats({ market: "CN", limit: 20 })).resolves.toMatchObject({
       total_count: 2,
       source_count: 2,
-      sentiment_summary: "暂未接入情绪分类，当前仅展示新闻缓存数量、来源和标签统计。",
+      sentiment_positive_count: 1,
+      sentiment_neutral_count: 1,
+      sentiment_negative_count: 0,
+      sentiment_summary: "利好 1 条，中性 1 条，利空 0 条。",
     });
     await expect(newsHotTopics({ market: "CN", limit: 20 })).resolves.toMatchObject({
       industries: [{ name: "光模块", count: 2 }],

@@ -2,10 +2,17 @@ import { Button, Input, Select, Tag } from "antd";
 import { CalendarOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import type { NewsFilters } from "../types";
 
+export type NewsStockOption = {
+  value: string;
+  label: string;
+};
+
 type NewsFilterCardProps = {
   filters: NewsFilters;
   hotKeywords: string[];
+  stockOptions: NewsStockOption[];
   onChange: (patch: Partial<NewsFilters>) => void;
+  onStockSearch: (keyword: string) => void;
   onHotKeywordClick: (keyword: string) => void;
   onRefresh: () => void;
   isRefreshing?: boolean;
@@ -28,12 +35,18 @@ export function NewsFilterCard(props: NewsFilterCardProps) {
         <label className="news-filter-field">
           <span>关联股票</span>
           <Select
-            value={props.filters.stock}
-            options={["全部股票", "生益科技", "沪电股份", "新易盛", "中际旭创", "贵州茅台"].map((value) => ({
-              value,
-              label: value,
-            }))}
-            onChange={(stock) => props.onChange({ stock })}
+            showSearch
+            value={props.filters.stockSymbol || "全部股票"}
+            filterOption={false}
+            options={props.stockOptions}
+            onSearch={props.onStockSearch}
+            onChange={(stockSymbol, option) => {
+              const selected = Array.isArray(option) ? option[0] : option;
+              props.onChange({
+                stock: typeof selected?.label === "string" ? selected.label : "全部股票",
+                stockSymbol: stockSymbol === "全部股票" ? "" : stockSymbol,
+              });
+            }}
           />
         </label>
         <label className="news-filter-field">

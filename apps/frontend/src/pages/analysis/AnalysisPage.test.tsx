@@ -324,7 +324,19 @@ test("选择股票后右侧输出预览展示已渲染的 Prompt 内容", async 
       return { code: 0, message: "ok", data: { symbol: "CN:SZ:301217", period: "day", adjust: "qfq", indicators: {} } };
     }
     if (command === "news_list") {
-      return { code: 0, message: "ok", data: { items: [{ id: 1, title: "铜冠铜箔扩产项目进展顺利" }] } };
+      return {
+        code: 0,
+        message: "ok",
+        data: {
+          items: [
+            {
+              id: 1,
+              title: "铜冠铜箔扩产项目进展顺利",
+              summary: "项目已完成关键设备调试，产能释放进度符合预期。",
+            },
+          ],
+        },
+      };
     }
     throw new Error(`unexpected command ${command}`);
   });
@@ -337,9 +349,72 @@ test("选择股票后右侧输出预览展示已渲染的 Prompt 内容", async 
   expect(screen.getByText("行业：元器件")).toBeInTheDocument();
   expect(screen.getByText(/date=2026-06-24 open=180.10 high=185.20 low=178.60 close=183.27 volume=120000 amount=21992400/)).toBeInTheDocument();
   expect(screen.queryByText(/变量缺失: daily_klines/)).not.toBeInTheDocument();
-  expect(screen.getByText("相关新闻：铜冠铜箔扩产项目进展顺利")).toBeInTheDocument();
+  expect(screen.getByText("相关新闻：铜冠铜箔扩产项目进展顺利：项目已完成关键设备调试，产能释放进度符合预期。")).toBeInTheDocument();
   expect(screen.getByText("风险偏好：中等")).toBeInTheDocument();
   expect(screen.queryByText("暂无输出内容")).not.toBeInTheDocument();
+});
+
+test("从相关新闻摘要进入资讯中心时带上当前分析股票", async () => {
+  let currentRoute = "";
+  let currentState: unknown = null;
+  function RouteProbe() {
+    const location = useLocation();
+    currentRoute = `${location.pathname}${location.search}`;
+    currentState = location.state;
+    return null;
+  }
+  mockIPC((command) => {
+    if (command === "ai_config_list") {
+      return { code: 0, message: "ok", data: { items: [] } };
+    }
+    if (command === "prompt_templates_list") {
+      return { code: 0, message: "ok", data: { items: promptTemplates() } };
+    }
+    if (command === "stock_search") {
+      return { code: 0, message: "ok", data: [{ symbol: "CN:SZ:301217", name: "铜冠铜箔", code: "301217" }] };
+    }
+    if (command === "stock_profile") {
+      return { code: 0, message: "ok", data: { symbol: "CN:SZ:301217", name: "铜冠铜箔", full_name: "安徽铜冠铜箔集团股份有限公司", industry: "元器件" } };
+    }
+    if (command === "market_quote") {
+      return { code: 0, message: "ok", data: { symbol: "CN:SZ:301217", price: 183.27 } };
+    }
+    if (command === "market_kline") {
+      return { code: 0, message: "ok", data: { items: [] } };
+    }
+    if (command === "market_indicators") {
+      return { code: 0, message: "ok", data: { symbol: "CN:SZ:301217", period: "day", adjust: "qfq", indicators: {} } };
+    }
+    if (command === "news_list") {
+      return { code: 0, message: "ok", data: { items: [{ id: 1, title: "铜冠铜箔扩产项目进展顺利" }] } };
+    }
+    throw new Error(`unexpected command ${command}`);
+  });
+
+  render(
+    <MemoryRouter initialEntries={["/analysis?symbol=CN:SZ:301217"]}>
+      <ConfigProvider theme={{ token: { fontFamily: APP_FONT, colorPrimary: "#1677ff" } }}>
+        <AntApp>
+          <AnalysisPage />
+          <RouteProbe />
+        </AntApp>
+      </ConfigProvider>
+    </MemoryRouter>,
+  );
+
+  await screen.findByText("安徽铜冠铜箔集团股份有限公司");
+  fireEvent.click(screen.getByRole("button", { name: /查看更多新闻/ }));
+
+  await waitFor(() => {
+    expect(currentRoute).toBe("/news");
+  });
+  expect(currentState).toEqual({
+    newsStock: {
+      symbol: "CN:SZ:301217",
+      name: "铜冠铜箔",
+      code: "301217",
+    },
+  });
 });
 
 test("分析页可复制并导出当前 Prompt 预览 Markdown", async () => {

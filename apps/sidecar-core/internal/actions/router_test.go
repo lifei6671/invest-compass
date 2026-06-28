@@ -1087,7 +1087,7 @@ func TestNewsMarketReturnsFreshItemsWhenCacheSaveFails(t *testing.T) {
 	}
 }
 
-// TestNewsStatsAndHotTopicsUseCachedNews 验证资讯统计和热点只从本地新闻缓存派生，不伪造情绪判断。
+// TestNewsStatsAndHotTopicsUseCachedNews 验证资讯统计和热点只从本地新闻缓存派生。
 func TestNewsStatsAndHotTopicsUseCachedNews(t *testing.T) {
 	store := newMemoryNewsStore()
 	if err := store.SaveNewsItems(context.Background(), []model.NewsItem{
@@ -1135,7 +1135,12 @@ func TestNewsStatsAndHotTopicsUseCachedNews(t *testing.T) {
 	if stats["total_count"] != float64(2) || stats["source_count"] != float64(2) {
 		t.Fatalf("unexpected stats: %#v", stats)
 	}
-	if stats["sentiment_summary"] != "暂未接入情绪分类，当前仅展示新闻缓存数量、来源和标签统计。" {
+	if stats["sentiment_positive_count"] != float64(1) ||
+		stats["sentiment_neutral_count"] != float64(1) ||
+		stats["sentiment_negative_count"] != float64(0) {
+		t.Fatalf("unexpected sentiment counts: %#v", stats)
+	}
+	if stats["sentiment_summary"] != "利好 1 条，中性 1 条，利空 0 条。" {
 		t.Fatalf("unexpected sentiment summary: %#v", stats["sentiment_summary"])
 	}
 
@@ -1162,6 +1167,30 @@ func TestNewsStatsAndHotTopicsUseCachedNews(t *testing.T) {
 	firstStock := stocks[0].(map[string]any)
 	if firstStock["symbol"] != "CN:SZ:300308" || firstStock["count"] != float64(2) {
 		t.Fatalf("unexpected first stock: %#v", firstStock)
+	}
+}
+
+// TestDocumentIndexerUsesConfiguredTokenizer 验证普通资讯读取后的增量索引复用生产搜索分词器。
+func TestDocumentIndexerUsesConfiguredTokenizer(t *testing.T) {
+	store := &memoryDocumentIndexStore{state: map[string]string{"active_document_batch_id": "doc-ready-tokenizer"}}
+	indexer := documentIndexer(Config{
+		DocumentSearchStore: store,
+		SearchTokenizer:     fixedTokenTokenizer{tokens: []string{"茅台"}},
+	})
+	if indexer == nil {
+		t.Fatal("expected document indexer")
+	}
+
+	err := indexer.IndexNews(context.Background(), model.NewsItem{
+		ID:      17,
+		Title:   "贵州茅台发布经营动态",
+		Summary: "经营保持稳定",
+	})
+	if err != nil {
+		t.Fatalf("index news: %v", err)
+	}
+	if !strings.Contains(store.ftsRow.TitleIndex, "茅台") {
+		t.Fatalf("expected configured tokenizer output in title index, got %+v", store.ftsRow)
 	}
 }
 
@@ -3437,6 +3466,16 @@ type memoryNewsStore struct {
 	saveErr error
 }
 
+type memoryDocumentIndexStore struct {
+	state    map[string]string
+	document model.SearchDocument
+	ftsRow   dao.SearchDocumentFTSRow
+}
+
+type fixedTokenTokenizer struct {
+	tokens []string
+}
+
 type memoryWatchlistStore struct {
 	nextID int64
 	items  map[int64]model.Watchlist
@@ -3725,6 +3764,44 @@ func sortNewsModels(items []model.NewsItem) {
 	sort.SliceStable(items, func(left int, right int) bool {
 		return items[left].PublishedAt.After(items[right].PublishedAt)
 	})
+}
+
+// GetSearchIndexState 返回测试 active document batch。
+func (store *memoryDocumentIndexStore) GetSearchIndexState(_ context.Context, key string) (string, bool, error) {
+	value, ok := store.state[key]
+	return value, ok, nil
+}
+
+// SearchDocumentsFTS 仅满足 DocumentSearchStore 接口，本测试不触发搜索。
+func (store *memoryDocumentIndexStore) SearchDocumentsFTS(context.Context, string, string, string, int) ([]dao.SearchDocumentFTSMatch, error) {
+	return nil, nil
+}
+
+// ListSearchDocumentsByUIDs 仅满足 DocumentSearchStore 接口，本测试不触发回表。
+func (store *memoryDocumentIndexStore) ListSearchDocumentsByUIDs(context.Context, string, []string) ([]model.SearchDocument, error) {
+	return nil, nil
+}
+
+// UpsertSearchDocument 记录增量索引写入的文档元数据。
+func (store *memoryDocumentIndexStore) UpsertSearchDocument(_ context.Context, document *model.SearchDocument) error {
+	store.document = *document
+	return nil
+}
+
+// ReplaceSearchDocumentFTS 记录增量索引写入的 FTS 行。
+func (store *memoryDocumentIndexStore) ReplaceSearchDocumentFTS(_ context.Context, row dao.SearchDocumentFTSRow) error {
+	store.ftsRow = row
+	return nil
+}
+
+// SoftDeleteSearchDocument 仅满足 DocumentIndexStore 接口，本测试不触发删除。
+func (store *memoryDocumentIndexStore) SoftDeleteSearchDocument(context.Context, string, string) error {
+	return nil
+}
+
+// Tokenize 返回固定 token，便于验证增量索引确实使用配置分词器。
+func (tokenizer fixedTokenTokenizer) Tokenize(string) []string {
+	return tokenizer.tokens
 }
 
 // newMemoryWatchlistStore 创建 actions 测试使用的内存自选股 store。

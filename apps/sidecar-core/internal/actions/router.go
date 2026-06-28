@@ -50,6 +50,7 @@ type Config struct {
 	StockStore            searchservice.StockSearchStore
 	StockProfileStore     stocks.ProfileStore
 	StockSearchService    stocks.Service
+	SearchTokenizer       searchservice.Tokenizer
 	DocumentSearchStore   searchservice.DocumentSearchStore
 	DocumentSearchService searchaction.Service
 	MarketStore           marketaction.Store
@@ -101,6 +102,7 @@ func NewHandler(config Config) http.Handler {
 // Routes 汇总所有 action 子包拥有的 HTTP 路由定义。
 func Routes(config Config) []httpx.Route {
 	security := httpx.SecurityConfig{Token: config.Token, Ready: config.Ready}
+	documentSearch := documentSearchService(config)
 	routes := make([]httpx.Route, 0, 11)
 	routes = append(routes, health.Routes(health.Config{
 		Version:    config.Version,
@@ -115,7 +117,7 @@ func Routes(config Config) []httpx.Route {
 	})...)
 	routes = append(routes, searchaction.Routes(searchaction.Config{
 		Security: security,
-		Service:  documentSearchService(config),
+		Service:  documentSearch,
 	})...)
 	routes = append(routes, marketaction.Routes(marketaction.Config{
 		Security:       security,
@@ -123,9 +125,10 @@ func Routes(config Config) []httpx.Route {
 		Store:          config.MarketStore,
 	})...)
 	routes = append(routes, newsaction.Routes(newsaction.Config{
-		Security:     security,
-		NewsProvider: config.NewsProvider,
-		Store:        config.NewsStore,
+		Security:      security,
+		NewsProvider:  config.NewsProvider,
+		Store:         config.NewsStore,
+		SearchIndexer: documentIndexer(config),
 	})...)
 	routes = append(routes, watchlistaction.Routes(watchlistaction.Config{
 		Security:       security,
@@ -246,7 +249,20 @@ func documentSearchService(config Config) searchaction.Service {
 		return nil
 	}
 	return searchservice.NewScopedDocumentSearchService(searchservice.DocumentSearchConfig{
-		Store: config.DocumentSearchStore,
+		Store:     config.DocumentSearchStore,
+		Tokenizer: config.SearchTokenizer,
+	})
+}
+
+// documentIndexer 返回 active document batch 的增量索引器，供新闻等写路径避免触发完整重建任务。
+func documentIndexer(config Config) newsaction.SearchIndexer {
+	store, ok := config.DocumentSearchStore.(searchservice.DocumentIndexStore)
+	if !ok {
+		return nil
+	}
+	return searchservice.NewDocumentIndexer(searchservice.DocumentIndexerConfig{
+		Store:     store,
+		Tokenizer: config.SearchTokenizer,
 	})
 }
 

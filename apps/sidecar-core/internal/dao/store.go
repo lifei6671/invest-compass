@@ -302,6 +302,25 @@ func (store *Store) ListMarketNews(ctx context.Context, market string, limit int
 	return items, nil
 }
 
+// ListNewsItemsByIDs 按主键批量读取新闻缓存，供搜索结果回源补齐标签等展示字段。
+func (store *Store) ListNewsItemsByIDs(ctx context.Context, ids []int64) (map[int64]model.NewsItem, error) {
+	if len(ids) == 0 {
+		return map[int64]model.NewsItem{}, nil
+	}
+	var items []model.NewsItem
+	if err := store.db.WithContext(ctx).
+		Where("deleted_at IS NULL").
+		Where("id IN ?", ids).
+		Find(&items).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[int64]model.NewsItem, len(items))
+	for _, item := range items {
+		result[item.ID] = item
+	}
+	return result, nil
+}
+
 // SaveWatchlist 创建或更新自选股记录。
 func (store *Store) SaveWatchlist(ctx context.Context, item *model.Watchlist) error {
 	return store.db.WithContext(ctx).Save(item).Error

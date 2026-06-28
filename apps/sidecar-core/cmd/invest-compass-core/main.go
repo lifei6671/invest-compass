@@ -491,6 +491,7 @@ func buildActionsConfig(token string, workspace string, store *dao.Store, schedu
 		CacheStatsProvider:    store,
 		CacheCleaner:          store,
 		StockStore:            store,
+		SearchTokenizer:       searchTokenizer,
 		DocumentSearchStore:   store,
 		DocumentSearchService: documentSearchService,
 		MarketStore:           store,
